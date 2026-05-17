@@ -5,3 +5,6 @@ CLAUDE.md
 
 # Local source archives
 src/*.tar.xz
+
+# Environment variables (contains sensitive data)
+.env

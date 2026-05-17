@@ -152,11 +152,36 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 主 VPN 服务的核心配置：
 
+### 环境变量管理
+
+项目使用 `.env` 文件集中管理环境变量，通过 `${VAR:-default}` 语法实现：
+
+- **配置文件**：`.env`（不提交）+ `.env.example`（模板，提交到 Git）
+- **语法说明**：
+  - `${VAR}` — 直接引用变量
+  - `${VAR:-default}` — 变量未设置时使用默认值
+- **加载方式**：Docker Compose 自动加载同级目录下的 `.env` 文件
+
+**主要环境变量**：
+
+| 变量 | 默认值 | 说明 |
+|:--|:--|:--|
+| `OCSERV_IMAGE` | `kingsonho/ocserv:latest` | VPN 服务镜像 |
+| `OCSERV_PORT` | `443` | VPN 服务宿主机端口 |
+| `TZ` | `Asia/Shanghai` | 时区设置 |
+| `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
+| `LOG_MAX_FILE` | `3` | 日志文件保留数量 |
+| `NETWORK_NAME` | `monitor-net` | Docker 网络名称 |
+
+> **安全提示**：`.env` 文件已添加到 `.gitignore`，避免敏感信息（如密码）泄露到版本控制。
+
 ### 网络与端口
 
 | 配置项 | 值 | 作用 |
 |:--|:--|:--|
-| `ports` | `443:443/tcp+udp` | 映射 VPN 监听端口到宿主机（标准 HTTPS 端口） |
+| `ports` | `${OCSERV_PORT:-443}:443/tcp+udp` | 映射 VPN 监听端口到宿主机（容器内部固定监听 443） |
+
+> **端口映射格式**：`宿主机端口:容器端口`。容器内 ocserv 服务固定监听 443 端口（由 `ocserv.conf` 配置），仅可通过 `OCSERV_PORT` 环境变量修改宿主机映射端口。
 
 ### 权限与设备
 
@@ -260,13 +285,36 @@ healthcheck:
 | 项目 | 说明 |
 |:--|:--|
 | 镜像 | `nginx:alpine` |
-| 端口 | `8443`（HTTPS） |
-| TLS | Let's Encrypt 证书，挂载 `/etc/letsencrypt` |
+| 端口 | `${MONITORING_PORT:-8443}`（HTTPS） |
+| TLS | Let's Encrypt 证书，挂载 `${SSL_CERT_DIR}` |
 | 子路径路由 | `/grafana/` → Grafana，`/prometheus/` → Prometheus |
+| 配置生成 | 通过 `envsubst` 动态生成，支持环境变量 |
 
-> 80 端口未映射，保留给 certbot HTTP-01 验证使用。VPN 服务独立使用 443 端口。
+> 80 端口未映射，保留给 certbot HTTP-01 验证使用。VPN 服务独立使用 `${OCSERV_PORT:-443}` 端口。
 
-**关键配置**（`nginx/conf.d/monitoring-subpath.conf`）：
+**模板化配置机制**：
+
+Nginx 配置采用模板文件 + 启动脚本动态生成的方式，支持环境变量替换：
+
+```
+nginx/templates/monitoring-subpath.conf.template
+                    ↓ envsubst ${DOMAIN}
+nginx/conf.d/monitoring-subpath.conf（运行时生成）
+```
+
+**启动脚本**（`nginx/docker-entrypoint.sh`）：
+
+```sh
+# 使用 envsubst 替换模板中的环境变量
+envsubst '${DOMAIN}' < /etc/nginx/templates/*.conf.template > /etc/nginx/conf.d/*.conf
+```
+
+**优势**：
+- 域名配置集中在 `.env` 文件，无需手动修改多个配置文件
+- 配置文件与代码分离，便于部署到不同环境
+- 避免硬编码域名，减少配置错误
+
+**关键配置**（生成后的 `nginx/conf.d/monitoring-subpath.conf`）：
 
 - **Grafana 代理**：支持 WebSocket（Grafana Live 实时推送必需）
 - **Prometheus 代理**：htpasswd 基础认证保护
@@ -397,13 +445,14 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ## 八、项目文件索引
 
 ```
-├── Dockerfile                          # 多阶段构建 + s6 服务定义（内联 s6-init.sh）
-├── entrypoint.sh                       # 遗留文件（已不再使用，逻辑已内嵌至 Dockerfile）
+├── Dockerfile                          # 多阶段构建 + s6 服务定义（内嵌 s6-init.sh）
 ├── sample.conf                         # ocserv 完整配置参考（946 行）
-├── docker-compose.yml                  # 主 VPN 服务编排
+├── docker-compose.yml                  # 主 VPN 服务编排（支持环境变量）
 ├── docker-compose.monitoring.yml       # 监控栈编排（exporter + Prometheus + Grafana + Nginx）
 ├── install-docker.sh                   # Docker 一键安装脚本
 ├── setup-fail2ban.sh                   # Fail2Ban 部署脚本
+├── .env.example                        # 环境变量模板（提交到 Git）
+├── .env                                # 实际环境变量（不提交，包含敏感配置）
 │
 ├── src/                                # 本地构建素材（不提交到 Git）
 │   ├── ocserv-1.4.2.tar.xz             # ocserv 源码
@@ -426,8 +475,12 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── dashboards/ocserv.json          # Grafana 面板自动注入
 │
 ├── nginx/
-│   ├── conf.d/monitoring-subpath.conf  # HTTPS 反向代理 + 子路径路由
-│   └── snippets/ssl-params.conf        # TLS 安全参数
+│   ├── templates/                      # Nginx 配置模板（支持环境变量替换）
+│   │   └── monitoring-subpath.conf.template
+│   ├── conf.d/                         # 生成的实际配置文件（运行时生成）
+│   ├── snippets/ssl-params.conf        # TLS 安全参数
+│   ├── docker-entrypoint.sh            # 启动脚本（envsubst 变量替换）
+│   └── .htpasswd                       # Prometheus 基础认证密码文件（用户创建）
 │
 ├── fail2ban/
 │   ├── filter.d/nginx-auth.conf        # 暴力破解匹配规则

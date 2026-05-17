@@ -1,25 +1,27 @@
 services:
   ocserv:
-    image: kingsonho/ocserv:latest
+    image: ${OCSERV_IMAGE:-kingsonho/ocserv:latest}
     container_name: ocserv
     restart: unless-stopped
-    
+
     # 网络与端口
+    # 格式: "宿主机端口:容器端口"
+    # 容器内部 ocserv 固定监听 443，仅可通过 OCSERV_PORT 修改宿主机端口
     ports:
-      - "443:443/tcp"
-      - "443:443/udp"
-    
+      - "${OCSERV_PORT:-443}:443/tcp"
+      - "${OCSERV_PORT:-443}:443/udp"
+
     # VPN 必需内核能力与设备
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    
+
     # 启用 IPv4 转发（VPN 路由/NAT 必需）
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv6.conf.all.forwarding=1
-    
+
     # 挂载配置与证书（只读保护）
     volumes:
       - ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro
@@ -28,24 +30,25 @@ services:
       - ./config/ocpasswd:/etc/ocserv/ocpasswd
       - ./logs:/var/log/ocserv  # 持久化日志目录
       - ocserv-socket:/var/run  # occtl socket 共享（监控栈使用）
-    
+
     # 容器日志轮转（防止 stdout/stderr 撑爆磁盘）
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
-    
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+
     # 健康检查（基于进程状态验证）
+    # 检查容器内部 443 端口（ocserv 固定监听端口）
     healthcheck:
       test: ["CMD-SHELL", "ss -tln | grep -q ':443' || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    
+      interval: ${HEALTH_INTERVAL:-30s}
+      timeout: ${HEALTH_TIMEOUT:-5s}
+      retries: ${HEALTH_RETRIES:-3}
+      start_period: ${HEALTH_START_PERIOD:-15s}
+
     environment:
-      - TZ=Asia/Shanghai
+      - TZ=${TZ:-Asia/Shanghai}
 
     # 加入监控网络（与 exporter/prometheus/grafana 同网络）
     networks:
@@ -56,4 +59,4 @@ volumes:
 
 networks:
   monitor-net:
-    name: monitor-net
+    name: ${NETWORK_NAME:-monitor-net}

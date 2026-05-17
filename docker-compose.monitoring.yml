@@ -1,6 +1,6 @@
 services:
   ocserv-exporter:
-    image: kingsonho/ocserv-exporter:latest
+    image: ${EXPORTER_IMAGE:-kingsonho/ocserv-exporter:latest}
     container_name: ocserv-exporter
     restart: unless-stopped
     network_mode: "service:ocserv"
@@ -8,13 +8,13 @@ services:
       - ocserv-socket:/var/run:ro
     environment:
       - OCSERV_SOCKET=/var/run/occtl.socket
-      - METRICS_PORT=9100
+      - METRICS_PORT=${METRICS_PORT:-9100}
     depends_on:
       ocserv:
         condition: service_healthy
 
   prometheus:
-    image: prom/prometheus:latest
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:latest}
     container_name: prometheus
     restart: unless-stopped
     # ⬇️ 关键：注入子路径路由参数
@@ -25,7 +25,7 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
       - '--web.route-prefix=/prometheus'
-      - '--web.external-url=https://your.domain.com:8443/prometheus'
+      - '--web.external-url=https://${DOMAIN:-your.domain.com}:${MONITORING_PORT:-8443}/prometheus'
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -33,16 +33,16 @@ services:
       - monitor-net
 
   grafana:
-    image: grafana/grafana:latest
+    image: ${GRAFANA_IMAGE:-grafana/grafana:latest}
     container_name: grafana
     restart: unless-stopped
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=${GF_ALLOW_SIGN_UP:-false}
       # ⬇️ 关键：子路径服务配置（末尾斜杠不可省略）
-      - GF_SERVER_ROOT_URL=https://your.domain.com:8443/grafana/
+      - GF_SERVER_ROOT_URL=https://${DOMAIN:-your.domain.com}:${MONITORING_PORT:-8443}/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
-      - GF_SERVER_DOMAIN=your.domain.com:8443
+      - GF_SERVER_DOMAIN=${DOMAIN:-your.domain.com}:${MONITORING_PORT:-8443}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/dashboards:/etc/grafana/provisioning/dashboards:ro
@@ -54,17 +54,23 @@ services:
         condition: service_started
 
   nginx:
-    image: nginx:alpine
+    image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: nginx-proxy
     restart: unless-stopped
     ports:
-      - "8443:443"
+      - "${MONITORING_PORT:-8443}:443"
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:rw
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ${SSL_CERT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
       - ./nginx/logs:/var/log/nginx
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+    # 使用自定义 entrypoint 处理环境变量替换
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    environment:
+      - DOMAIN=${DOMAIN:-your.domain.com}
     networks:
       - monitor-net
     depends_on:
@@ -78,4 +84,4 @@ volumes:
 
 networks:
   monitor-net:
-    name: monitor-net
+    name: ${NETWORK_NAME:-monitor-net}

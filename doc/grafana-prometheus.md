@@ -26,7 +26,27 @@ sudo certbot certonly --standalone -d your.domain.com \
 
 证书默认保存在 `/etc/letsencrypt/live/your.domain.com/`，已自动挂载到 Nginx 容器。
 
-### 2. 生成 Prometheus 访问密码
+### 2. 配置环境变量
+
+```bash
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 文件，修改以下关键配置：
+vim .env
+```
+
+**必须修改的变量**：
+
+| 变量 | 说明 | 示例 |
+|:--|:--|:--|
+| `DOMAIN` | 你的域名 | `vpn.example.com` |
+| `GF_ADMIN_PASSWORD` | Grafana 管理员密码（建议修改默认值） | `your_secure_password` |
+| `SSL_CERT_DIR` | SSL 证书目录（如果非默认路径） | `/etc/letsencrypt` |
+
+> **注意**：域名配置现在集中在 `.env` 文件中，无需手动修改 `docker-compose.monitoring.yml` 或 `nginx/conf.d/` 中的硬编码域名。Nginx 配置会在容器启动时通过 `envsubst` 自动生成。
+
+### 3. 生成 Prometheus 访问密码
 
 ```bash
 sudo apt install apache2-utils -y
@@ -34,17 +54,6 @@ htpasswd -c nginx/.htpasswd admin
 ```
 
 按提示设置密码，此密码用于访问 `/prometheus/` 路径。
-
-### 3. 修改域名引用
-
-将以下文件中的 `your.domain.com` 替换为你的实际域名：
-
-| 文件 | 需要修改的位置 |
-|:--|:--|
-| `nginx/conf.d/monitoring-subpath.conf` | `server_name`、SSL 证书路径 |
-| `docker-compose.monitoring.yml` | Prometheus `--web.external-url`、Grafana `GF_SERVER_ROOT_URL` 和 `GF_SERVER_DOMAIN`（均需包含 `:8443` 端口） |
-
-> **端口说明**：监控服务使用 8443 端口（HTTPS），VPN 服务使用 443 端口。80 端口未映射，保留给 certbot 的 HTTP-01 验证使用。
 
 ## 启动监控栈
 
@@ -69,17 +78,17 @@ docker logs grafana
 
 | 服务 | 地址 | 认证方式 |
 |:--|:--|:--|
-| Grafana | `https://your.domain.com:8443/grafana/` | admin / admin123 |
-| Prometheus | `https://your.domain.com:8443/prometheus/` | htpasswd（步骤 2 设置） |
+| Grafana | `https://${DOMAIN}:${MONITORING_PORT}/grafana/` | admin / `${GF_ADMIN_PASSWORD}` |
+| Prometheus | `https://${DOMAIN}:${MONITORING_PORT}/prometheus/` | htpasswd（步骤 3 设置） |
 
-> 监控服务通过 8443 端口访问。VPN 服务使用标准 443 端口，客户端无需指定端口。
+> 实际访问地址由 `.env` 文件中的 `DOMAIN` 和 `MONITORING_PORT` 变量决定。默认 `MONITORING_PORT=8443`，VPN 服务使用 `${OCSERV_PORT:-443}` 端口。
 
 ## Grafana 使用指南
 
 ### 首次登录
 
-1. 打开 `https://your.domain.com:8443/grafana/`
-2. 用户名 `admin`，密码 `admin123`
+1. 打开 `https://${DOMAIN}:${MONITORING_PORT}/grafana/`（替换为你的实际域名）
+2. 用户名 `admin`，密码为 `.env` 文件中 `GF_ADMIN_PASSWORD` 的值（默认 `admin123`）
 3. 登录后建议修改默认密码（Settings → Password）
 
 ### 查看仪表盘
@@ -115,7 +124,7 @@ docker exec grafana wget -qO- http://prometheus:9090/prometheus/api/v1/status/co
 
 ### 查看已采集的指标
 
-访问 `https://your.domain.com:8443/prometheus/graph`，在查询框输入指标名称查看实时数据：
+访问 `https://${DOMAIN}:${MONITORING_PORT}/prometheus/graph`（替换为你的实际域名），在查询框输入指标名称查看实时数据：
 
 | 指标名 | 类型 | 说明 |
 |:--|:--|:--|
