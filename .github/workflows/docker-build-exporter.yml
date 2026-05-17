@@ -4,8 +4,14 @@ on:
   push:
     branches: [ "main", "master" ]
     tags: [ "v*" ]
+    paths:
+      - 'exporter/Dockerfile'
+      - '.github/workflows/docker-build-exporter.yml'
   pull_request:
     branches: [ "main", "master" ]
+    paths:
+      - 'exporter/Dockerfile'
+      - '.github/workflows/docker-build-exporter.yml'
 
 env:
   REGISTRY: docker.io
