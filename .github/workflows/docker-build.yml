@@ -22,6 +22,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download source files
+        run: |
+          mkdir -p src
+          # Download ocserv source
+          curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
+            https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
+          # Download s6-overlay (multi-architecture)
+          curl -L -o src/s6-overlay-noarch.tar.xz \
+            https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-noarch.tar.xz
+          curl -L -o src/s6-overlay-x86_64.tar.xz \
+            https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-x86_64.tar.xz
+          curl -L -o src/s6-overlay-aarch64.tar.xz \
+            https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-aarch64.tar.xz
+
       - name: Set up QEMU (多架构模拟)
         uses: docker/setup-qemu-action@v3
 
