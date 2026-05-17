@@ -1,0 +1,11 @@
+# Version control
+.git/
+
+# Local data
+logs/
+config/
+
+# IDE / editor
+.DS_Store
+*.swp
+*~

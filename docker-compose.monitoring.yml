@@ -1,0 +1,81 @@
+services:
+  ocserv-exporter:
+    image: kingsonho/ocserv-exporter:latest
+    container_name: ocserv-exporter
+    restart: unless-stopped
+    network_mode: "service:ocserv"
+    volumes:
+      - ocserv-socket:/var/run:ro
+    environment:
+      - OCSERV_SOCKET=/var/run/occtl.socket
+      - METRICS_PORT=9100
+    depends_on:
+      ocserv:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    # ⬇️ 关键：注入子路径路由参数
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.route-prefix=/prometheus'
+      - '--web.external-url=https://your.domain.com:8443/prometheus'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - monitor-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # ⬇️ 关键：子路径服务配置（末尾斜杠不可省略）
+      - GF_SERVER_ROOT_URL=https://your.domain.com:8443/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_DOMAIN=your.domain.com:8443
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - monitor-net
+    depends_on:
+      prometheus:
+        condition: service_started
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "8443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/logs:/var/log/nginx
+    networks:
+      - monitor-net
+    depends_on:
+      - grafana
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  ocserv-socket:  # 与 docker-compose.yml 共享
+
+networks:
+  monitor-net:
+    name: monitor-net
