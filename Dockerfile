@@ -241,13 +241,13 @@ printf '#!/bin/sh\nexec ocserv -c /etc/ocserv/ocserv.conf -f\n' \
 chmod +x /etc/s6-overlay/s6-rc.d/ocserv/run
 ENDSCRIPT
 
-EXPOSE 30443/tcp 30443/udp
+EXPOSE 443/tcp 443/udp
 
 # 健康检查：通过 ss 检查 TCP 端口监听状态（比 pgrep 更可靠）
 # ocserv 启用 isolate-workers + run-as-user 后，进程名可能不再精确匹配 "ocserv"，
 # 导致 pgrep -x 误判；而端口监听直接验证服务可用性
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ss -tln | grep -q ':30443' || exit 1
+    CMD ss -tln | grep -q ':443' || exit 1
 
 # s6 接管 PID 1，自动处理信号转发、僵尸回收、服务依赖
 ENTRYPOINT ["/init"]

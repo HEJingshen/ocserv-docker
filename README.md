@@ -190,6 +190,10 @@ docker exec -it ocserv ocpasswd -d -c /etc/ocserv/ocpasswd username
 
 若无法解析配置中的子网，默认使用 `10.10.10.0/24`。
 
+### 网络配置
+
+`docker-compose.yml` 默认将 VPN 服务加入 `monitor-net` 网络，便于后续部署监控栈时 exporter 通过共享的 Docker volume (`ocserv-socket`) 访问 occtl 控制套接字。若不使用监控栈，此网络配置不影响 VPN 正常运行。
+
 ---
 
 ## 可选功能
@@ -215,6 +219,13 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 - Nginx 域名 DNS 解析
 - htpasswd 密码文件
 
+**创建 htpasswd 密码文件**：
+
+```bash
+# 创建密码文件（替换 admin 为你的用户名，yourpassword 为你的密码）
+echo "admin:$(openssl passwd -apr1 'yourpassword')" > nginx/.htpasswd
+```
+
 **Exporter 配置**（通过环境变量）：
 
 | 变量 | 默认值 | 说明 |
@@ -235,6 +246,10 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 | `ocserv_user_bytes_rx{username,ip}` | Gauge | 用户接收字节（带标签） |
 | `ocserv_user_bytes_tx{username,ip}` | Gauge | 用户发送字节（带标签） |
 | `ocserv_user_connected_seconds{username,ip}` | Gauge | 用户连接时长（带标签） |
+| `ocserv_build_info` | Info | ocserv 版本信息（含 version 标签） |
+| `ocserv_scrape_success_total` | Counter | 成功采集次数 |
+| `ocserv_scrape_errors_total` | Counter | 失败采集次数 |
+| `ocserv_scrape_duration_seconds` | Gauge | 上次采集耗时 |
 
 详细指南：[grafana-prometheus.md](doc/grafana-prometheus.md)
 
@@ -266,7 +281,13 @@ sudo fail2ban-client status nginx-auth
 | `s6-overlay-x86_64.tar.xz` | 同上（amd64） |
 | `s6-overlay-aarch64.tar.xz` | 同上（arm64） |
 
-所有构建均基于本地文件，无需在构建过程中联网。
+构建需要网络连接：
+- 基础镜像（`debian:trixie-slim`）从 Docker Hub 拉取
+- 编译和运行时依赖通过 apt 从 Debian 镜像源下载（已配置清华源加速）
+
+仅需提前下载并放入 `src/` 目录的本地文件：
+- `ocserv-*.tar.xz`（ocserv 源码）
+- `s6-overlay-*.tar.xz`（s6-overlay 各架构版本）
 
 ### 构建命令
 
