@@ -71,7 +71,28 @@ cd ocserv-docker
 
 ## 二、单独部署 ocserv
 
-### 2.1 准备配置
+### 2.1 配置环境变量
+
+即使是单独部署 ocserv（不启用监控），也需要配置 `.env` 文件：
+
+```bash
+cp .env.example .env
+vim .env
+```
+
+`.env.example` 中的变量已按部署方式分为两部分，单独部署只需关注 **「基础部署配置」**：
+
+| 变量 | 说明 | 默认值 |
+|:--|:--|:--|
+| `DOMAIN` | 服务器域名 | `your.domain.com` |
+| `OCSERV_PORT` | VPN 服务对外端口（宿主机） | `443` |
+| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
+| `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
+| `HEALTH_*` | 健康检查参数 | 30s / 5s / 3 / 15s |
+
+**至少需修改**：将 `DOMAIN` 替换为实际域名，如需更改端口则修改 `OCSERV_PORT`。
+
+### 2.2 准备配置
 
 ```bash
 mkdir -p config logs
@@ -93,7 +114,7 @@ sudo chmod 644 config/fullchain.pem && sudo chmod 600 config/privkey.pem
 > - /etc/letsencrypt/live/your.domain.com/privkey.pem:/etc/ocserv/privkey.pem:ro
 > ```
 
-### 2.2 启动服务
+### 2.3 启动服务
 
 ```bash
 docker compose up -d
@@ -101,13 +122,13 @@ docker compose up -d
 
 容器启动时 s6-overlay 自动完成：配置验证 → iptables NAT/转发规则 → 启动 ocserv。
 
-### 2.3 创建用户
+### 2.4 创建用户
 
 ```bash
 docker exec -it ocserv ocpasswd -c /etc/ocserv/ocpasswd username
 ```
 
-### 2.4 验证服务
+### 2.5 验证服务
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' ocserv   # 预期: healthy
@@ -115,7 +136,7 @@ docker compose logs -f ocserv
 docker exec ocserv occtl show users
 ```
 
-### 2.5 客户端连接
+### 2.6 客户端连接
 
 连接地址：`https://your.domain.com`
 
@@ -128,7 +149,7 @@ docker exec ocserv occtl show users
 
 **Linux 命令行**：`sudo openconnect -b https://your.domain.com --user=username`
 
-### 2.6 常用命令
+### 2.7 常用命令
 
 | 操作 | 命令 |
 |:--|:--|
@@ -166,12 +187,23 @@ cp .env.example .env
 vim .env
 ```
 
-**必须修改**：
+`.env.example` 已按部署方式分为两部分：
+
+- **「基础部署配置」** — 单独部署 VPN 时的变量（与 Section 二共享）
+- **「附加监控配置」** — 仅在启用监控栈时需关注的变量
+
+**基础部署中必须修改**：
 
 | 变量 | 说明 | 示例 |
 |:--|:--|:--|
 | `DOMAIN` | 服务器域名 | `vpn.example.com` |
+
+**附加监控中必须修改**：
+
+| 变量 | 说明 | 示例 |
+|:--|:--|:--|
 | `GF_ADMIN_PASSWORD` | Grafana 密码 | `YourStrongPassword123!` |
+| `SSL_CERT_DIR` | SSL 证书目录（Nginx 使用） | `/etc/letsencrypt` |
 
 ### 3.3 生成认证文件
 
@@ -337,16 +369,37 @@ docker buildx build --build-arg BASE_IMAGE=ubuntu:24.04 -t ocserv:ubuntu .
 
 ### 5.4 环境变量
 
-完整列表见 `.env.example`，按分类：
+完整列表见 `.env.example`。变量已按部署方式分为两组：
 
-| 分类 | 变量 |
-|:--|:--|
-| 基础 | `TZ` |
-| 域名与端口 | `DOMAIN`、`OCSERV_PORT`、`MONITORING_PORT` |
-| 镜像 | `OCSERV_IMAGE`、`EXPORTER_IMAGE`、`PROMETHEUS_IMAGE`、`GRAFANA_IMAGE`、`NGINX_IMAGE` |
-| Grafana | `GF_ADMIN_PASSWORD`、`GF_ALLOW_SIGN_UP` |
-| 日志 | `LOG_MAX_SIZE`、`LOG_MAX_FILE` |
-| 健康检查 | `HEALTH_INTERVAL`、`HEALTH_TIMEOUT`、`HEALTH_RETRIES`、`HEALTH_START_PERIOD` |
+**基础部署配置（docker-compose.yml）**
+
+| 变量 | 说明 | 默认值 |
+|:--|:--|:--|
+| `TZ` | 时区设置 | `Asia/Shanghai` |
+| `DOMAIN` | 服务器域名 | `your.domain.com` |
+| `OCSERV_PORT` | VPN 服务对外端口（宿主机） | `443` |
+| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
+| `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
+| `LOG_MAX_FILE` | 日志文件保留数量 | `3` |
+| `HEALTH_INTERVAL` | 健康检查间隔 | `30s` |
+| `HEALTH_TIMEOUT` | 健康检查超时 | `5s` |
+| `HEALTH_RETRIES` | 健康检查重试次数 | `3` |
+| `HEALTH_START_PERIOD` | 健康检查启动宽限期 | `15s` |
+
+**附加监控配置（docker-compose.monitoring.yml，可选）**
+
+| 变量 | 说明 | 默认值 |
+|:--|:--|:--|
+| `MONITORING_PORT` | 监控面板对外端口（HTTPS） | `8443` |
+| `NETWORK_NAME` | Docker 网络名称 | `monitor-net` |
+| `EXPORTER_IMAGE` | ocserv-exporter 镜像 | `kingsonho/ocserv-exporter:latest` |
+| `PROMETHEUS_IMAGE` | Prometheus 镜像 | `prom/prometheus:latest` |
+| `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:latest` |
+| `NGINX_IMAGE` | Nginx 镜像 | `nginx:alpine` |
+| `GF_ADMIN_PASSWORD` | Grafana 管理员密码 | `admin123` |
+| `GF_ALLOW_SIGN_UP` | 允许用户注册 | `false` |
+| `METRICS_PORT` | 指标导出端口 | `9100` |
+| `SSL_CERT_DIR` | SSL 证书目录 | `/etc/letsencrypt` |
 
 ### 5.5 最小可用配置
 
