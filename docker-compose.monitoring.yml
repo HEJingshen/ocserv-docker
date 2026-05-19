@@ -58,7 +58,7 @@ services:
     container_name: nginx-proxy
     restart: unless-stopped
     ports:
-      - "${MONITORING_PORT:-8443}:443"
+      - "${MONITORING_PORT:-8443}:${MONITORING_PORT:-8443}"
     volumes:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:rw
@@ -71,6 +71,7 @@ services:
     entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
     environment:
       - DOMAIN=${DOMAIN:-your.domain.com}
+      - MONITORING_PORT=${MONITORING_PORT:-8443}
     networks:
       - monitor-net
     depends_on:

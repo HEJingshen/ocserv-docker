@@ -25,9 +25,9 @@ services:
     # 挂载配置与证书（只读保护）
     volumes:
       - ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro
-      - ./config/fullchain.pem:/etc/ocserv/fullchain.pem:ro
-      - ./config/privkey.pem:/etc/ocserv/privkey.pem:ro
       - ./config/ocpasswd:/etc/ocserv/ocpasswd
+      - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro
+      - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro
       - ./logs:/var/log/ocserv  # 持久化日志目录
       - ocserv-socket:/var/run  # occtl socket 共享（监控栈使用）
 
@@ -52,7 +52,7 @@ services:
 
     # 加入监控网络（与 exporter/prometheus/grafana 同网络）
     networks:
-      - monitor-net
+      - ${NETWORK_NAME:-monitor-net}
 
 volumes:
   ocserv-socket:

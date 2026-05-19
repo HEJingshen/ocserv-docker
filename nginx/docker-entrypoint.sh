@@ -22,8 +22,8 @@ if [ -d "$TEMPLATE_DIR" ]; then
             
             echo "Processing: $template -> $CONF_DIR/$filename"
             
-            # 使用 envsubst 替换环境变量
-            envsubst '${DOMAIN}' < "$template" > "$CONF_DIR/$filename"
+            # 使用 envsubst 替换环境变量（必须在同一次调用中传入所有变量，避免互相覆盖）
+            envsubst '${DOMAIN} ${MONITORING_PORT}' < "$template" > "$CONF_DIR/$filename"
         fi
     done
     

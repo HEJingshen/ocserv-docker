@@ -60,6 +60,8 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -subj "/CN=your.domain.com"
 ```
 
+自签名证书需要自行修改 `docker-compose.yml` 文件中证书有关路径配置
+
 ### 1.4 克隆项目
 
 ```bash
@@ -99,20 +101,6 @@ mkdir -p config logs
 cp sample.conf config/ocserv.conf
 touch config/ocpasswd
 ```
-
-**放置证书**（以 Let's Encrypt 为例）：
-
-```bash
-sudo cp /etc/letsencrypt/live/your.domain.com/fullchain.pem config/
-sudo cp /etc/letsencrypt/live/your.domain.com/privkey.pem config/
-sudo chmod 644 config/fullchain.pem && sudo chmod 600 config/privkey.pem
-```
-
-> **技巧**：直接挂载原始路径可在续期后自动生效，编辑 `docker-compose.yml` 将证书挂载改为：
-> ```yaml
-> - /etc/letsencrypt/live/your.domain.com/fullchain.pem:/etc/ocserv/fullchain.pem:ro
-> - /etc/letsencrypt/live/your.domain.com/privkey.pem:/etc/ocserv/privkey.pem:ro
-> ```
 
 ### 2.3 启动服务
 
