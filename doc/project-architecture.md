@@ -46,7 +46,7 @@
 | 项目 | 说明 |
 |:--|:--|
 | 基础镜像 | `debian:trixie-slim`（可通过 `BASE_IMAGE` ARG 自定义） |
-| 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和 ocserv 全部依赖 |
+| 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需依赖 |
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
 | s6-overlay | 在 builder 阶段解压 s6-overlay tarball（此阶段有 `xz-utils`），输出到 `/tmp/s6-out` |
@@ -57,7 +57,7 @@
 | 项目 | 说明 |
 |:--|:--|
 | 基础镜像 | `debian:trixie-slim`（全新环境） |
-| 运行依赖 | 仅安装 ocserv 运行时所需的共享库 + `iproute2` + `iptables` + `procps`：<br>`libgnutls30t64`, `libev4`, `libreadline8t64`, `libtasn1-6`, `libpam0g`, `liblz4-1`, `libseccomp2`, `libnl-route-3-200`, `libkrb5-3`, `libradcli4`, `libcurl3t64-gnutls`, `libcjose0`, `libjansson4`, `liboath0t64`, `libprotobuf-c1`, `libtalloc2`, `libllhttp9.2` |
+| 运行依赖 | 仅安装 ocserv 运行时所需的共享库 + `iproute2` + `iptables`：<br>`libgnutls30t64`, `libev4`, `libreadline8t64`, `libtasn1-6`, `libpam0g`, `liblz4-1`, `libseccomp2`, `libnl-route-3-200`, `libkrb5-3`, `libradcli4`, `liboath0t64`, `libprotobuf-c1`, `libtalloc2` |
 | 产物复制 | `COPY --from=builder /out /`（编译产物） + `COPY --from=builder /tmp/s6-out/ /`（s6-overlay） |
 | 清华源 | 配置 `mirrors.tuna.tsinghua.edu.cn` 加速 apt 下载 |
 | PATH | `/command` 加入 PATH，使 `docker exec` 可用 s6-overlay v3 工具 |
@@ -183,6 +183,16 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 > **端口映射格式**：`宿主机端口:容器端口`。容器内 ocserv 服务固定监听 443 端口（由 `ocserv.conf` 配置），仅可通过 `OCSERV_PORT` 环境变量修改宿主机映射端口。
 
+### 配置渲染
+
+`ocserv` 不会自动展开配置文件中的环境变量，因此项目使用 `scripts/render-ocserv-conf.sh` 在部署前渲染配置：
+
+```
+.env DOMAIN ──▶ config/ocserv.conf.template ──▶ config/ocserv.conf
+```
+
+脚本会读取 `.env`，校验 `DOMAIN`，将模板中的 `${DOMAIN}` 替换为实际域名，并生成被容器只读挂载的 `config/ocserv.conf`。这让 `DOMAIN` 同时控制证书挂载路径和 ocserv 的 `default-domain`。
+
 ### 权限与设备
 
 | 配置项 | 值 | 作用 |
@@ -195,10 +205,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 宿主机路径 | 容器路径 | 模式 | 作用 |
 |:--|:--|:--|:--|
-| `./config/ocserv.conf` | `/etc/ocserv/ocserv.conf` | `ro`（只读） | 主配置文件 |
-| `./config/fullchain.pem` | `/etc/ocserv/fullchain.pem` | `ro`（只读） | TLS 证书（公钥） |
-| `./config/privkey.pem` | `/etc/ocserv/privkey.pem` | `ro`（只读） | TLS 私钥 |
-| `./config/ocpasswd` | `/etc/ocserv/ocpasswd` | `ro`（只读） | 用户密码文件 |
+| `./config/ocserv.conf` | `/etc/ocserv/ocserv.conf` | `ro`（只读） | 渲染后的主配置文件 |
+| `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` | `/etc/ocserv/fullchain.pem` | `ro`（只读） | TLS 证书（公钥） |
+| `/etc/letsencrypt/live/${DOMAIN}/privkey.pem` | `/etc/ocserv/privkey.pem` | `ro`（只读） | TLS 私钥 |
+| `./config/ocpasswd` | `/etc/ocserv/ocpasswd` | 读写 | 用户密码文件 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
 ### 日志轮转
@@ -234,8 +244,9 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 基础镜像 | `python:3.11-slim` |
-| 运行方式 | 启动时安装 `prometheus-client` 库，然后运行 `ocserv_exporter.py` |
+| 基础镜像 | `debian:trixie-slim`（可通过 `BASE_IMAGE` ARG 自定义） |
+| 构建方式 | 多阶段构建，builder 从 ocserv 源码只编译 `occtl`，runtime 复制该二进制 |
+| 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`，直接执行 `ocserv-exporter.py` |
 | 数据采集 | 通过 `occtl -j show status` 和 `occtl -j show users`（JSON 格式）调用 ocserv 的 Unix socket 接口 |
 | 暴露端口 | `9100` |
 
@@ -246,9 +257,11 @@ healthcheck:
 | `ocserv_up` | Gauge | 能否成功调用 occtl | 1=在线，0=异常 |
 | `ocserv_active_users` | Gauge | `show users` 返回列表长度 | 当前活跃用户数 |
 | `ocserv_uptime_seconds` | Gauge | `show status.uptime` | 主进程运行时长 |
-| `ocserv_bytes_rx_total` | Counter | 遍历用户列表累加 `bytes_rx` | 累计接收字节 |
-| `ocserv_bytes_tx_total` | Counter | 遍历用户列表累加 `bytes_tx` | 累计发送字节 |
-| `ocserv_build_info` | Info | `show status.version` | ocserv 版本 |
+| `ocserv_bytes_rx_total` | Gauge | 遍历用户列表累加 `RX` | 累计接收字节 |
+| `ocserv_bytes_tx_total` | Gauge | 遍历用户列表累加 `TX` | 累计发送字节 |
+| `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 根据相邻两次采集的 `RX` 差值计算 | 当前接收速率 |
+| `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次采集的 `TX` 差值计算 | 当前发送速率 |
+| `ocserv_build_info` | Info | `occtl --version` | ocserv 版本 |
 
 采集周期：每 15 秒执行一次 `collect_metrics()`。
 
@@ -259,7 +272,7 @@ healthcheck:
 | 镜像 | `prom/prometheus:latest` |
 | 子路径 | `--web.route-prefix=/prometheus` 和 `--web.external-url` 使其在 `/prometheus/` 路径下运行 |
 | 数据存储 | `prometheus_data` Docker 卷，容器重建不丢失 |
-| 采集目标 | `ocserv-exporter:9100`，路径 `/prometheus/metrics` |
+| 采集目标 | `ocserv:9100`，路径 `/metrics` |
 | 采集间隔 | 全局 15 秒 |
 
 ### 4.3 Grafana
@@ -271,12 +284,13 @@ healthcheck:
 | 数据存储 | `grafana_data` Docker 卷 |
 | 自动配置 | 通过 `monitoring/datasources/` 和 `monitoring/dashboards/` 自动注入数据源和面板 |
 
-**内置面板**（`monitoring/dashboards/ocserv.json`）：
+**内置面板**（`monitoring/dashboards/definitions/ocserv.json`）：
 
 | 面板 | 类型 | 查询 | 说明 |
 |:--|:--|:--|:--|
 | Active Users | Stat | `ocserv_active_users` | >50 显示红色告警 |
-| Traffic Rate (RX/TX) | Timeseries | `rate(ocserv_bytes_rx_total[5m]) * 8` | 5 分钟速率，单位 bps |
+| Traffic Total (RX/TX) | Timeseries | `ocserv_bytes_rx_total` / `ocserv_bytes_tx_total` | 累计收发流量 |
+| Traffic Rate (bps) | Timeseries | `ocserv_bytes_rx_rate_bytes_per_second` / `ocserv_bytes_tx_rate_bytes_per_second` | 实时收发速率 |
 | Service Uptime | Stat | `ocserv_uptime_seconds` | 运行时长 |
 | Service Status | Gauge | `ocserv_up` | 1=绿，0=红 |
 
@@ -288,13 +302,13 @@ healthcheck:
 | 端口 | `${MONITORING_PORT:-8443}`（HTTPS） |
 | TLS | Let's Encrypt 证书，挂载 `${SSL_CERT_DIR}` |
 | 子路径路由 | `/grafana/` → Grafana，`/prometheus/` → Prometheus |
-| 配置生成 | 通过 `envsubst` 动态生成，支持环境变量 |
+| 配置生成 | 启动时严格校验变量/证书/认证文件，通过 `envsubst` 原子渲染配置，并在 `nginx -t` 通过后启动 |
 
 > 80 端口未映射，保留给 certbot HTTP-01 验证使用。VPN 服务独立使用 `${OCSERV_PORT:-443}` 端口。
 
 **模板化配置机制**：
 
-Nginx 配置采用模板文件 + 启动脚本动态生成的方式，支持环境变量替换：
+Nginx 配置采用模板文件 + 启动脚本动态生成的方式，支持环境变量替换。启动脚本采用严格失败策略：`DOMAIN`、`MONITORING_PORT`、TLS 证书、`.htpasswd`、模板目录或渲染结果任一异常都会阻止 Nginx 启动。
 
 ```
 nginx/templates/monitoring-subpath.conf.template
@@ -305,14 +319,19 @@ nginx/conf.d/monitoring-subpath.conf（运行时生成）
 **启动脚本**（`nginx/docker-entrypoint.sh`）：
 
 ```sh
-# 使用 envsubst 替换模板中的环境变量
-envsubst '${DOMAIN}' < /etc/nginx/templates/*.conf.template > /etc/nginx/conf.d/*.conf
+for template in /etc/nginx/templates/*.conf.template; do
+    filename=$(basename "$template" .template)
+    tmp=$(mktemp "/etc/nginx/conf.d/.${filename}.XXXXXX")
+    envsubst '${DOMAIN} ${MONITORING_PORT}' < "$template" > "$tmp"
+    mv "$tmp" "/etc/nginx/conf.d/$filename"
+done
+nginx -t
 ```
 
 **优势**：
 - 域名配置集中在 `.env` 文件，无需手动修改多个配置文件
 - 配置文件与代码分离，便于部署到不同环境
-- 避免硬编码域名，减少配置错误
+- 启动前完成配置校验，部署错误会以容器启动失败的形式尽早暴露
 
 **关键配置**（生成后的 `nginx/conf.d/monitoring-subpath.conf`）：
 
@@ -404,7 +423,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 | 事件 | 行为 |
 |:--|:--|
 | push 到 `main`/`master` | 构建 + 推送 |
-| push `v*` 标签 | 构建 + 推送（生成 semver 标签） |
+| push `v*` 标签 | 构建 + 推送固定版本标签 |
 | pull request | 仅构建（不推送） |
 
 ### 构建流程
@@ -419,10 +438,8 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 4. 登录 Docker Hub（非 PR 时）
        │
 5. 生成标签元数据
-       ├─ 分支名: main, master
-       ├─ PR 编号
-       ├─ Semver: v1.0.0, v1.0
-       └─ SHA 短哈希
+       ├─ ocserv 版本标签: 1.4.2
+       └─ main/master 分支额外生成 latest
        │
 6. 构建 + 推送
        ├─ 平台: linux/amd64, linux/arm64
@@ -435,10 +452,9 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| push main | `kingsonho/ocserv:main` |
-| push v1.4.2 | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:1.4`, `kingsonho/ocserv:latest` |
-| PR #42 | `kingsonho/ocserv:pr-42` |
-| 任意 commit | `kingsonho/ocserv:sha-abc1234` |
+| push main/master | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest` |
+| push v* 标签 | `kingsonho/ocserv:1.4.2` |
+| PR | 仅构建测试，不推送镜像 |
 
 ---
 
@@ -446,11 +462,12 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 ```
 ├── Dockerfile                          # 多阶段构建 + s6 服务定义（内嵌 s6-init.sh）
-├── sample.conf                         # ocserv 完整配置参考（946 行）
 ├── docker-compose.yml                  # 主 VPN 服务编排（支持环境变量）
 ├── docker-compose.monitoring.yml       # 监控栈编排（exporter + Prometheus + Grafana + Nginx）
 ├── install-docker.sh                   # Docker 一键安装脚本
 ├── setup-fail2ban.sh                   # Fail2Ban 部署脚本
+├── scripts/
+│   └── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
 ├── .env.example                        # 环境变量模板（提交到 Git）
 ├── .env                                # 实际环境变量（不提交，包含敏感配置）
 │
@@ -460,10 +477,11 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   ├── s6-overlay-x86_64.tar.xz        # s6-overlay amd64 二进制
 │   └── s6-overlay-aarch64.tar.xz       # s6-overlay arm64 二进制
 │
-├── config/                             # 用户创建：配置文件目录
-│   ├── ocserv.conf                     # ocserv 主配置
-│   ├── fullchain.pem                   # TLS 证书（公钥）
-│   ├── privkey.pem                     # TLS 私钥
+├── config/                             # 配置文件目录
+│   ├── ocserv.conf.template            # ocserv 完整配置模板
+│   ├── ocserv.conf                     # 渲染后的 ocserv 主配置
+│   ├── fullchain.pem                   # 自签名部署时可选的 TLS 证书
+│   ├── privkey.pem                     # 自签名部署时可选的 TLS 私钥
 │   └── ocpasswd                        # 用户密码文件
 │
 ├── exporter/
@@ -472,7 +490,9 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ├── monitoring/
 │   ├── prometheus.yml                  # 采集配置（15s 间隔）
 │   ├── datasources/prometheus.yml      # Grafana 数据源自动注入
-│   └── dashboards/ocserv.json          # Grafana 面板自动注入
+│   └── dashboards/
+│       ├── dashboards.yml              # Grafana dashboard provider
+│       └── definitions/ocserv.json     # Grafana 面板自动注入
 │
 ├── nginx/
 │   ├── templates/                      # Nginx 配置模板（支持环境变量替换）

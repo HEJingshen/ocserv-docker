@@ -25,7 +25,7 @@ services:
     # 挂载配置与证书（只读保护）
     volumes:
       - ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro
-      - ./config/ocpasswd:/etc/ocserv/ocpasswd
+      - ./config/auth:/etc/ocserv/auth:rw
       - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro
       - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro
       - ./logs:/var/log/ocserv  # 持久化日志目录

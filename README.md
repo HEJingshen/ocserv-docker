@@ -86,7 +86,7 @@ vim .env
 
 | 变量 | 说明 | 默认值 |
 |:--|:--|:--|
-| `DOMAIN` | 服务器域名 | `your.domain.com` |
+| `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | VPN 服务对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
@@ -97,10 +97,17 @@ vim .env
 ### 2.2 准备配置
 
 ```bash
-mkdir -p config logs
-cp sample.conf config/ocserv.conf
-touch config/ocpasswd
+mkdir -p logs
+vim .env
+vim config/ocserv.conf.template
+./scripts/render-ocserv-conf.sh
+mkdir -p config/auth
+touch config/auth/ocpasswd
+chmod 700 config/auth
+chmod 600 config/auth/ocpasswd
 ```
+
+仓库已提供 `config/ocserv.conf.template` 作为完整配置模板。`DOMAIN` 从 `.env` 渲染到 `default-domain` 后生成 `config/ocserv.conf`，容器只读挂载生成后的配置。
 
 ### 2.3 启动服务
 
@@ -113,8 +120,10 @@ docker compose up -d
 ### 2.4 创建用户
 
 ```bash
-docker exec -it ocserv ocpasswd -c /etc/ocserv/ocpasswd username
+docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 ```
+
+`config/auth` 目录以读写方式挂载到容器内 `/etc/ocserv/auth`。`ocpasswd` 会通过临时文件和原子替换更新密码文件，因此需要挂载整个可写目录，而不是只挂载单个 `ocpasswd` 文件。建议显式使用 `-u 0` 以 root 身份执行，避免容器默认用户或 user namespace 配置导致无法写入。
 
 ### 2.5 验证服务
 
@@ -148,7 +157,7 @@ docker exec ocserv occtl show users
 | 在线用户 | `docker exec ocserv occtl show users` |
 | 服务状态 | `docker exec ocserv occtl show status` |
 | 重载配置 | `docker exec ocserv occtl reload` |
-| 删除用户 | `docker exec ocserv ocpasswd -d /etc/ocserv/ocpasswd username` |
+| 删除用户 | `docker exec -it -u 0 ocserv ocpasswd -d /etc/ocserv/auth/ocpasswd username` |
 
 ---
 
@@ -193,15 +202,20 @@ vim .env
 | `GF_ADMIN_PASSWORD` | Grafana 密码 | `YourStrongPassword123!` |
 | `SSL_CERT_DIR` | SSL 证书目录（Nginx 使用） | `/etc/letsencrypt` |
 
+Nginx 启动时会严格校验 `DOMAIN`、`MONITORING_PORT`、TLS 证书、`.htpasswd` 和生成后的配置；任一项不合法都会阻止容器启动。
+
 ### 3.3 生成认证文件
 
 ```bash
 echo "admin:$(openssl passwd -apr1 'YourPrometheusPassword')" > nginx/.htpasswd
 ```
 
+`nginx/.htpasswd` 必须存在且非空；同时请确认 `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` 和 `privkey.pem` 与 `.env` 中的 `DOMAIN` 匹配。
+
 ### 3.4 启动完整栈
 
 ```bash
+./scripts/render-ocserv-conf.sh
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 ```
 
@@ -225,7 +239,7 @@ docker exec nginx-proxy nginx -t
 
 ```
 ocserv_active_users                        # 当前用户数
-rate(ocserv_bytes_rx_total[1m])            # 每分钟接收流量
+ocserv_bytes_rx_rate_bytes_per_second      # 当前接收速率（字节/秒）
 ocserv_up                                  # 服务是否在线
 ```
 
@@ -278,6 +292,8 @@ docker buildx build \
   -t ocserv:1.4.2 .
 ```
 
+构建后在 `.env` 中设置 `OCSERV_IMAGE=ocserv:local`。
+
 **构建参数**：
 
 | ARG | 默认值 | 说明 |
@@ -293,7 +309,7 @@ docker buildx build --platform linux/amd64,linux/arm64 --push \
   -t registry.example.com/ocserv:1.4.2 .
 ```
 
-**验证**：`docker run --rm ocserv:local ocserv --version`
+**验证**：`docker run --rm --entrypoint ocserv ocserv:local --version`
 
 ### 4.3 构建 Exporter 镜像
 
@@ -302,6 +318,8 @@ docker buildx build -f exporter/Dockerfile -t ocserv-exporter:local .
 ```
 
 构建后在 `.env` 中设置 `EXPORTER_IMAGE=ocserv-exporter:local`。
+
+**验证**：`docker run --rm --entrypoint occtl ocserv-exporter:local --version`
 
 ### 4.4 自定义基础镜像
 
@@ -321,7 +339,7 @@ docker buildx build --build-arg BASE_IMAGE=ubuntu:24.04 -t ocserv:ubuntu .
 |:--|:--|:--|
 | `tcp-port` | TCP 端口 | `443` |
 | `udp-port` | UDP 端口（DTLS） | `443` |
-| `auth` | 认证方式 | `plain[passwd=/etc/ocserv/ocpasswd]` |
+| `auth` | 认证方式 | `plain[passwd=/etc/ocserv/auth/ocpasswd]` |
 | `server-cert` | TLS 证书 | `/etc/ocserv/fullchain.pem` |
 | `server-key` | TLS 私钥 | `/etc/ocserv/privkey.pem` |
 | `ipv4-network` | VPN IP 段 | `10.10.10.0` |
@@ -335,16 +353,16 @@ docker buildx build --build-arg BASE_IMAGE=ubuntu:24.04 -t ocserv:ubuntu .
 | `isolate-workers` | 隔离工作进程 | `true` |
 | `run-as-user` | 运行用户 | `nobody` |
 
-完整配置见 `sample.conf`（946 行）。
+完整配置模板见 `config/ocserv.conf.template`，运行时配置由 `scripts/render-ocserv-conf.sh` 生成到 `config/ocserv.conf`。
 
 ### 5.2 卷挂载
 
 | 宿主机路径 | 容器路径 | 模式 | 说明 |
 |:--|:--|:--|:--|
-| `./config/ocserv.conf` | `/etc/ocserv/ocserv.conf` | ro | 主配置 |
-| `./config/fullchain.pem` | `/etc/ocserv/fullchain.pem` | ro | 证书 |
-| `./config/privkey.pem` | `/etc/ocserv/privkey.pem` | ro | 私钥 |
-| `./config/ocpasswd` | `/etc/ocserv/ocpasswd` | rw | 用户密码 |
+| `./config/ocserv.conf` | `/etc/ocserv/ocserv.conf` | ro | 渲染后的主配置 |
+| `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` | `/etc/ocserv/fullchain.pem` | ro | 证书 |
+| `/etc/letsencrypt/live/${DOMAIN}/privkey.pem` | `/etc/ocserv/privkey.pem` | ro | 私钥 |
+| `./config/auth` | `/etc/ocserv/auth` | rw | 用户密码目录 |
 | `./logs` | `/var/log/ocserv` | rw | 日志 |
 
 ### 5.3 容器权限
@@ -364,7 +382,7 @@ docker buildx build --build-arg BASE_IMAGE=ubuntu:24.04 -t ocserv:ubuntu .
 | 变量 | 说明 | 默认值 |
 |:--|:--|:--|
 | `TZ` | 时区设置 | `Asia/Shanghai` |
-| `DOMAIN` | 服务器域名 | `your.domain.com` |
+| `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | VPN 服务对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
 | `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
@@ -394,7 +412,7 @@ docker buildx build --build-arg BASE_IMAGE=ubuntu:24.04 -t ocserv:ubuntu .
 修改以下 3 项即可启动：
 
 ```ini
-auth = "plain[passwd=/etc/ocserv/ocpasswd]"
+auth = "plain[passwd=/etc/ocserv/auth/ocpasswd]"
 server-cert = /etc/ocserv/fullchain.pem
 server-key = /etc/ocserv/privkey.pem
 ```
@@ -407,14 +425,14 @@ server-key = /etc/ocserv/privkey.pem
 
 ```bash
 docker compose logs ocserv
-ls -la config/fullchain.pem config/privkey.pem
+sudo ls -la /etc/letsencrypt/live/your.domain.com/fullchain.pem /etc/letsencrypt/live/your.domain.com/privkey.pem
 sudo ss -tlnp | grep 443
 ```
 
 | 原因 | 解决 |
 |:--|:--|
 | 证书缺失 | 确认证书文件存在且路径正确 |
-| 配置语法错误 | 参考 `sample.conf` 修正 |
+| 配置语法错误 | 先修正 `config/ocserv.conf.template`，再运行 `./scripts/render-ocserv-conf.sh` |
 | TUN 设备不存在 | `sudo modprobe tun` |
 | 端口被占用 | 修改 `.env` 中 `OCSERV_PORT` |
 
@@ -432,7 +450,88 @@ sudo ufw allow 443/tcp && sudo ufw allow 443/udp
 | 用户不存在 | 使用 `ocpasswd` 添加 |
 | 证书不匹配 | 证书 CN/SAN 需包含连接时的域名或 IP |
 
-### 6.3 连接后无法上网
+### 6.3 `ocpasswd` 提示无法写入
+
+如果执行以下命令时返回 `Cannot write to '/etc/ocserv/ocpasswd'.`，通常说明旧版本使用了单文件 bind mount。`test -w /etc/ocserv/ocpasswd` 可能仍然成功，因为文件本身可写；但 `ocpasswd` 更新时会创建临时文件并原子替换目标文件，单文件挂载点无法被这种方式覆盖。
+
+```bash
+docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
+```
+
+先确认运行中的容器实际挂载的是密码目录，并且为可写：
+
+```bash
+docker inspect ocserv \
+  --format '{{range .Mounts}}{{if eq .Destination "/etc/ocserv/auth"}}Source={{.Source}} Destination={{.Destination}} RW={{.RW}}{{end}}{{end}}'
+```
+
+预期输出包含 `Destination=/etc/ocserv/auth RW=true`。如果仍显示 `/etc/ocserv/ocpasswd`，请切换到目录挂载：
+
+```yaml
+- ./config/auth:/etc/ocserv/auth:rw
+```
+
+并确认 `config/ocserv.conf.template` 和 `config/ocserv.conf` 使用同一路径：
+
+```ini
+auth = "plain[passwd=/etc/ocserv/auth/ocpasswd]"
+```
+
+检查容器内目录和密码文件是否存在且可写：
+
+```bash
+docker exec -u 0 ocserv ls -ld /etc/ocserv/auth
+docker exec -u 0 ocserv ls -l /etc/ocserv/auth/ocpasswd
+docker exec -u 0 ocserv test -d /etc/ocserv/auth
+docker exec -u 0 ocserv test -w /etc/ocserv/auth
+docker exec -u 0 ocserv test -w /etc/ocserv/auth/ocpasswd
+```
+
+检查宿主机目录和文件权限：
+
+```bash
+ls -ld config/auth
+ls -l config/auth/ocpasswd
+test -d config/auth
+test -f config/auth/ocpasswd
+chmod 700 config/auth
+chmod 600 config/auth/ocpasswd
+```
+
+从旧版 `config/ocpasswd` 迁移到目录挂载的最小恢复流程：
+
+```bash
+mkdir -p config/auth
+if [ -f config/ocpasswd ] && [ ! -f config/auth/ocpasswd ]; then cp config/ocpasswd config/auth/ocpasswd; fi
+touch config/auth/ocpasswd
+chmod 700 config/auth
+chmod 600 config/auth/ocpasswd
+./scripts/render-ocserv-conf.sh
+docker compose up -d --force-recreate ocserv
+docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
+```
+
+如果暂时不方便重建容器，可先用以下临时方式在旧单文件挂载上创建用户：先在容器内可写目录生成新密码文件，再把内容写回挂载文件。
+
+```bash
+docker exec -it -u 0 ocserv sh -c '
+  cp /etc/ocserv/ocpasswd /tmp/ocpasswd &&
+  ocpasswd -c /tmp/ocpasswd username &&
+  cat /tmp/ocpasswd > /etc/ocserv/ocpasswd
+'
+```
+
+常见原因：
+
+| 原因 | 解决 |
+|:--|:--|
+| 旧版单文件挂载 `/etc/ocserv/ocpasswd` | 改为挂载 `./config/auth:/etc/ocserv/auth:rw` 并重建容器 |
+| `config/auth/ocpasswd` 不存在或 `config/auth` 被创建成文件 | 修正为目录加文件：`mkdir -p config/auth && touch config/auth/ocpasswd` |
+| 宿主机权限过窄 | 执行 `chmod 700 config/auth && chmod 600 config/auth/ocpasswd` 后使用 `-u 0` 创建用户 |
+| rootless Docker 或 user namespace 映射限制 | 调整宿主机目录所有者映射，确保容器 root 对 `config/auth` 目录可写 |
+| SELinux 拦截绑定挂载写入 | 在启用 SELinux 的系统上为挂载添加合适标签，或按发行版策略放行该路径 |
+
+### 6.4 连接后无法上网
 
 ```bash
 sysctl net.ipv4.ip_forward
@@ -445,7 +544,7 @@ docker compose restart ocserv
 | 内核转发未启用 | `sudo sysctl -w net.ipv4.ip_forward=1` |
 | NAT 规则异常 | 重启容器重新初始化 iptables |
 
-### 6.4 监控面板无法访问
+### 6.5 监控面板无法访问
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml ps
@@ -455,10 +554,12 @@ docker logs nginx-proxy
 | 原因 | 解决 |
 |:--|:--|
 | `DOMAIN` 未配置 | 在 `.env` 中设置 |
-| htpasswd 缺失 | 运行步骤 3.3 生成 |
+| `MONITORING_PORT` 非法 | 设置为 `1-65535` 范围内的数字 |
+| htpasswd 缺失或为空 | 运行步骤 3.3 生成非空 `nginx/.htpasswd` |
 | 证书路径错误 | 确认 `SSL_CERT_DIR` 目录存在 |
+| Nginx 配置生成失败 | 检查 `docker logs nginx-proxy` 中的 entrypoint 错误，并修正 `.env`、证书或模板 |
 
-### 6.5 Exporter 采集异常
+### 6.6 Exporter 采集异常
 
 ```bash
 docker logs ocserv-exporter
@@ -471,7 +572,7 @@ docker exec ocserv occtl -j show status
 | socket 不存在 | 重启 ocserv 容器 |
 | 版本不匹配 | 确保 exporter 与 ocserv 版本一致 |
 
-### 6.6 证书续期后处理
+### 6.7 证书续期后处理
 
 | 挂载方式 | 续期后操作 |
 |:--|:--|
@@ -509,7 +610,9 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 | `ocserv_active_users` | Gauge | 活跃用户数 |
 | `ocserv_uptime_seconds` | Gauge | 运行时长 |
 | `ocserv_bytes_rx/tx_total` | Gauge | 累计收发流量 |
+| `ocserv_bytes_rx/tx_rate_bytes_per_second` | Gauge | 实时收发速率（字节/秒） |
 | `ocserv_user_bytes_rx/tx` | Gauge | 每用户流量（带 username, ip 标签） |
+| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | Gauge | 每用户实时速率（带 username, ip 标签） |
 
 自动清理已断开用户的标签，防止指标泄漏。服务不可用时重置所有指标。
 
@@ -531,9 +634,9 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 
 | 触发事件 | 生成标签 |
 |:--|:--|
-| push main | `kingsonho/ocserv:main` |
-| push `v1.4.2` 标签 | `1.4.2`、`1.4`、`latest` |
-| PR #42 | `pr-42` |
+| push main/master | `1.4.2`、`latest` |
+| push `v*` 标签 | `1.4.2` |
+| PR | 仅构建测试，不推送标签 |
 
 流程：下载源码 → QEMU + Buildx → 多架构构建 → 推送 → Trivy 安全扫描。
 

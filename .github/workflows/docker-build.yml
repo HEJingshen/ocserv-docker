@@ -91,7 +91,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           docker build -t test-image .
-          docker run --rm test-image ocserv --version || echo "ocserv binary check failed"
+          docker run --rm --entrypoint ocserv test-image --version || echo "ocserv binary check failed"
 
       - name: Run Trivy vulnerability scanner
         if: github.event_name != 'pull_request'

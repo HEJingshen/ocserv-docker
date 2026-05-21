@@ -131,8 +131,10 @@ docker exec grafana wget -qO- http://prometheus:9090/prometheus/api/v1/status/co
 | `ocserv_up` | Gauge | 服务状态（1=正常，0=异常） |
 | `ocserv_active_users` | Gauge | 当前活跃用户数 |
 | `ocserv_uptime_seconds` | Gauge | 运行时长（秒） |
-| `ocserv_bytes_rx_total` | Counter | 累计接收字节数 |
-| `ocserv_bytes_tx_total` | Counter | 累计发送字节数 |
+| `ocserv_bytes_rx_total` | Gauge | 累计接收字节数 |
+| `ocserv_bytes_tx_total` | Gauge | 累计发送字节数 |
+| `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 当前接收速率（字节/秒） |
+| `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 当前发送速率（字节/秒） |
 | `ocserv_build_info` | Info | ocserv 版本信息 |
 
 ### 常用查询语句
@@ -141,7 +143,10 @@ docker exec grafana wget -qO- http://prometheus:9090/prometheus/api/v1/status/co
 # 当前活跃用户数
 ocserv_active_users
 
-# 每分钟接收流量（字节）
+# 当前接收速率（字节/秒）
+ocserv_bytes_rx_rate_bytes_per_second
+
+# 历史兼容：基于累计值计算近 1 分钟平均接收速率
 rate(ocserv_bytes_rx_total[1m])
 
 # 服务是否在线

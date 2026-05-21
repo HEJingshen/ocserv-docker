@@ -156,7 +156,7 @@
     },
     {
       "id": 5,
-      "title": "Traffic Rate (RX/TX)",
+      "title": "Traffic Total (RX/TX)",
       "type": "timeseries",
       "gridPos": {"h": 6, "w": 24, "x": 0, "y": 4},
       "targets": [
@@ -189,13 +189,13 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "expr": "ocserv_bytes_rx_total / 15",
+          "expr": "ocserv_bytes_rx_rate_bytes_per_second",
           "legendFormat": "RX Rate (B/s)",
           "refId": "A"
         },
         {
           "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "expr": "ocserv_bytes_tx_total / 15",
+          "expr": "ocserv_bytes_tx_rate_bytes_per_second",
           "legendFormat": "TX Rate (B/s)",
           "refId": "B"
         }

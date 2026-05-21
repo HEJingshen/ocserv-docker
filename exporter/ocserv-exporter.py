@@ -27,13 +27,33 @@ ocserv_info = Info("ocserv_build", "Ocserv version info")
 # ==========================================
 ocserv_rx_bytes = Gauge("ocserv_bytes_rx_total", "Total bytes received from clients")
 ocserv_tx_bytes = Gauge("ocserv_bytes_tx_total", "Total bytes sent to clients")
+ocserv_rx_rate = Gauge(
+    "ocserv_bytes_rx_rate_bytes_per_second",
+    "Current receive traffic rate from clients in bytes per second",
+)
+ocserv_tx_rate = Gauge(
+    "ocserv_bytes_tx_rate_bytes_per_second",
+    "Current transmit traffic rate to clients in bytes per second",
+)
 
 # ==========================================
 # 用户详情指标 (带标签)
 # ==========================================
 ocserv_user_rx = Gauge("ocserv_user_bytes_rx", "Bytes received per user", ["username", "ip"])
 ocserv_user_tx = Gauge("ocserv_user_bytes_tx", "Bytes sent per user", ["username", "ip"])
+ocserv_user_rx_rate = Gauge(
+    "ocserv_user_bytes_rx_rate_bytes_per_second",
+    "Current receive traffic rate per user in bytes per second",
+    ["username", "ip"],
+)
+ocserv_user_tx_rate = Gauge(
+    "ocserv_user_bytes_tx_rate_bytes_per_second",
+    "Current transmit traffic rate per user in bytes per second",
+    ["username", "ip"],
+)
 ocserv_user_connected = Gauge("ocserv_user_connected_seconds", "User connection duration in seconds", ["username", "ip"])
+
+previous_user_traffic = {}
 
 # ==========================================
 # 调试指标
@@ -87,14 +107,56 @@ def get_version():
     return "unknown"
 
 
+def parse_bytes(value):
+    """Parse occtl byte counters defensively."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def calculate_rate(current_value, previous_value, elapsed_seconds):
+    """Calculate a non-negative byte rate, treating counter drops as resets."""
+    if previous_value is None or elapsed_seconds <= 0 or current_value < previous_value:
+        return 0
+    return (current_value - previous_value) / elapsed_seconds
+
+
+def clear_user_metrics(clear_history=False):
+    """Remove all per-user metric labels and optionally reset stored samples."""
+    global previous_user_traffic
+
+    for metric in (
+        ocserv_user_rx,
+        ocserv_user_tx,
+        ocserv_user_rx_rate,
+        ocserv_user_tx_rate,
+        ocserv_user_connected,
+    ):
+        for label in list(metric._metrics.keys()):
+            metric.remove(*label)
+
+    if clear_history:
+        previous_user_traffic = {}
+
+
 def collect_metrics():
     """Collect all metrics from ocserv."""
-    start_time = time.time()
+    global previous_user_traffic
+
+    scrape_time = time.time()
+    start_time = scrape_time
 
     # Check if socket exists
     if not os.path.exists(SOCKET_PATH):
         print(f"❌ Socket file not found: {SOCKET_PATH}")
         ocserv_up.set(0)
+        ocserv_active_users.set(0)
+        ocserv_rx_bytes.set(0)
+        ocserv_tx_bytes.set(0)
+        ocserv_rx_rate.set(0)
+        ocserv_tx_rate.set(0)
+        clear_user_metrics(clear_history=True)
         ocserv_scrape_errors.inc()
         return
 
@@ -108,6 +170,9 @@ def collect_metrics():
         ocserv_active_users.set(0)
         ocserv_rx_bytes.set(0)
         ocserv_tx_bytes.set(0)
+        ocserv_rx_rate.set(0)
+        ocserv_tx_rate.set(0)
+        clear_user_metrics(clear_history=True)
         return
 
     # 服务状态
@@ -119,34 +184,56 @@ def collect_metrics():
     if users and isinstance(users, list):
         ocserv_active_users.set(len(users))
 
-        # 总流量
+        # 总流量和实时速率
         rx_total, tx_total = 0, 0
+        rx_rate_total, tx_rate_total = 0, 0
 
         # 收集旧的 label 组合，用于清理已断开用户
         old_rx_labels = set(ocserv_user_rx._metrics.keys())
         old_tx_labels = set(ocserv_user_tx._metrics.keys())
+        old_rx_rate_labels = set(ocserv_user_rx_rate._metrics.keys())
+        old_tx_rate_labels = set(ocserv_user_tx_rate._metrics.keys())
         old_conn_labels = set(ocserv_user_connected._metrics.keys())
         current_labels = set()
 
         for u in users:
             username = u.get("Username", "unknown")
             ip = u.get("Remote IP", "unknown")
-            user_rx = int(u.get("RX", "0"))
-            user_tx = int(u.get("TX", "0"))
+            user_rx = parse_bytes(u.get("RX", "0"))
+            user_tx = parse_bytes(u.get("TX", "0"))
             label = (username, ip)
             current_labels.add(label)
 
             rx_total += user_rx
             tx_total += user_tx
 
+            previous = previous_user_traffic.get(label)
+            if previous:
+                elapsed = scrape_time - previous["timestamp"]
+                user_rx_rate = calculate_rate(user_rx, previous["rx"], elapsed)
+                user_tx_rate = calculate_rate(user_tx, previous["tx"], elapsed)
+            else:
+                user_rx_rate = 0
+                user_tx_rate = 0
+
+            rx_rate_total += user_rx_rate
+            tx_rate_total += user_tx_rate
+            previous_user_traffic[label] = {
+                "rx": user_rx,
+                "tx": user_tx,
+                "timestamp": scrape_time,
+            }
+
             # 用户详情指标
             ocserv_user_rx.labels(username=username, ip=ip).set(user_rx)
             ocserv_user_tx.labels(username=username, ip=ip).set(user_tx)
+            ocserv_user_rx_rate.labels(username=username, ip=ip).set(user_rx_rate)
+            ocserv_user_tx_rate.labels(username=username, ip=ip).set(user_tx_rate)
 
             # 连接时长
             connected_at = u.get("raw_connected_at", 0)
             if connected_at:
-                connected_seconds = time.time() - connected_at
+                connected_seconds = scrape_time - connected_at
                 ocserv_user_connected.labels(username=username, ip=ip).set(connected_seconds)
 
         # 清理已断开用户的旧 label 组合
@@ -154,23 +241,27 @@ def collect_metrics():
             ocserv_user_rx.remove(*label)
         for label in old_tx_labels - current_labels:
             ocserv_user_tx.remove(*label)
+        for label in old_rx_rate_labels - current_labels:
+            ocserv_user_rx_rate.remove(*label)
+        for label in old_tx_rate_labels - current_labels:
+            ocserv_user_tx_rate.remove(*label)
         for label in old_conn_labels - current_labels:
             ocserv_user_connected.remove(*label)
+        for label in set(previous_user_traffic.keys()) - current_labels:
+            previous_user_traffic.pop(label, None)
 
-        # 更新总流量
+        # 更新总流量和实时速率
         ocserv_rx_bytes.set(rx_total)
         ocserv_tx_bytes.set(tx_total)
+        ocserv_rx_rate.set(rx_rate_total)
+        ocserv_tx_rate.set(tx_rate_total)
     else:
         ocserv_active_users.set(0)
         ocserv_rx_bytes.set(0)
         ocserv_tx_bytes.set(0)
-        # 清理所有残留的旧 label 组合
-        for label in list(ocserv_user_rx._metrics.keys()):
-            ocserv_user_rx.remove(*label)
-        for label in list(ocserv_user_tx._metrics.keys()):
-            ocserv_user_tx.remove(*label)
-        for label in list(ocserv_user_connected._metrics.keys()):
-            ocserv_user_connected.remove(*label)
+        ocserv_rx_rate.set(0)
+        ocserv_tx_rate.set(0)
+        clear_user_metrics(clear_history=True)
 
     # 记录采集成功
     ocserv_scrape_success.inc()

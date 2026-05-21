@@ -19,7 +19,7 @@
 #  This enabled PAM authentication of the user. The gid-min option is used
 # by auto-select-group option, in order to select the minimum valid group ID.
 #
-# plain[passwd=/etc/ocserv/ocpasswd,otp=/etc/ocserv/users.otp]
+# plain[passwd=/etc/ocserv/auth/ocpasswd,otp=/etc/ocserv/users.otp]
 #  The plain option requires specifying a password file which contains
 # entries of the following format.
 # "username:groupname1,groupname2:encoded-password"
@@ -51,7 +51,7 @@
 #auth = "pam"
 #auth = "pam[gid-min=1000]"
 #auth = "plain[passwd=./sample.passwd,otp=./sample.otp]"
-auth = "plain[passwd=/etc/ocserv/ocpasswd]"
+auth = "plain[passwd=/etc/ocserv/auth/ocpasswd]"
 #auth = "certificate"
 #auth = "radius[config=/etc/radiusclient/radiusclient.conf,groupconfig=true]"
 
@@ -575,7 +575,7 @@ predictable-ips = true
 # The default domain to be advertised. Multiple domains (functional on
 # openconnect clients) can be provided in a space separated list.
 # [scope: vhost]
-default-domain = example.com
+default-domain = ${DOMAIN}
 #default-domain = "example.com one.example.com"
 
 # The pool of addresses that leases will be given from. If the leases
