@@ -32,7 +32,16 @@
 | 内存 | 仅 VPN ≥ 64MB；VPN + 监控 ≥ 512MB |
 | 端口 | TCP 443 + UDP 443（VPN）；8443（监控，可选） |
 
-### 1.2 安装 Docker
+### 1.2 克隆项目
+
+```bash
+git clone https://github.com/HEJingshen/ocserv-docker.git
+cd ocserv-docker
+```
+
+后续命令默认都在项目根目录执行。
+
+### 1.3 安装 Docker
 
 ```bash
 sudo bash install-docker.sh -y
@@ -40,9 +49,20 @@ sudo bash install-docker.sh -y
 
 脚本自动检测发行版、选择最快镜像源、安装 Docker CE + Compose。
 
-### 1.3 准备 SSL 证书
+如果还没有克隆项目，也可以先远程下载安装脚本后执行：
 
-**方式 A：Let's Encrypt（推荐）**
+```bash
+curl -fsSL https://raw.githubusercontent.com/HEJingshen/ocserv-docker/main/install-docker.sh -o install-docker.sh
+sudo bash install-docker.sh -y
+```
+
+### 1.4 准备 SSL 证书
+
+生产环境推荐使用 Let's Encrypt。申请前请确认：
+
+- 域名 `your.domain.com` 的 A/AAAA 记录已指向当前服务器
+- 服务器 TCP 80 端口已放通
+- 申请证书时没有其他服务占用 80 端口；`certbot --standalone` 会临时监听 80 端口
 
 ```bash
 sudo apt install certbot
@@ -51,23 +71,36 @@ sudo certbot certonly --standalone -d your.domain.com
 
 证书路径：`/etc/letsencrypt/live/your.domain.com/fullchain.pem` 和 `privkey.pem`
 
-**方式 B：自签名（测试）**
+CentOS / Rocky / Alma 等发行版请使用对应包管理器安装 `certbot`。
+
+**自签名证书（仅测试）**
+
+默认生产部署会从 `/etc/letsencrypt/live/${DOMAIN}` 挂载证书。如果只做本地或内网测试，可以在仓库内生成自签证书，并用 `docker-compose.override.yml` 覆盖 ocserv 的证书挂载：
 
 ```bash
-mkdir -p config
+DOMAIN=your.domain.com
+mkdir -p "config/certs/${DOMAIN}"
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout config/privkey.pem -out config/fullchain.pem \
-  -subj "/CN=your.domain.com"
+  -keyout "config/certs/${DOMAIN}/privkey.pem" \
+  -out "config/certs/${DOMAIN}/fullchain.pem" \
+  -subj "/CN=${DOMAIN}"
 ```
 
-自签名证书需要自行修改 `docker-compose.yml` 文件中证书有关路径配置
+创建 `docker-compose.override.yml`：
 
-### 1.4 克隆项目
-
-```bash
-git clone https://github.com/HEJingshen/ocserv-docker.git
-cd ocserv-docker
+```yaml
+services:
+  ocserv:
+    volumes:
+      - ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro
+      - ./config/auth:/etc/ocserv/auth:rw
+      - ./config/certs/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro
+      - ./config/certs/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro
+      - ./logs:/var/log/ocserv
+      - ocserv-socket:/var/run
 ```
+
+自签名证书通常会触发客户端证书警告，需要在客户端手动信任。监控栈的 Nginx 默认仍使用 `/etc/letsencrypt/live/${DOMAIN}`；如果监控也要使用自签证书，请将自签证书按 `live/${DOMAIN}/fullchain.pem` 和 `live/${DOMAIN}/privkey.pem` 的结构放到某个目录，并在 `.env` 中将 `SSL_CERT_DIR` 指向该目录。
 
 ---
 
@@ -98,16 +131,22 @@ vim .env
 
 ```bash
 mkdir -p logs
-vim .env
-vim config/ocserv.conf.template
-./scripts/render-ocserv-conf.sh
 mkdir -p config/auth
 touch config/auth/ocpasswd
 chmod 700 config/auth
 chmod 600 config/auth/ocpasswd
+./scripts/render-ocserv-conf.sh
 ```
 
-仓库已提供 `config/ocserv.conf.template` 作为完整配置模板。`DOMAIN` 从 `.env` 渲染到 `default-domain` 后生成 `config/ocserv.conf`，容器只读挂载生成后的配置。
+仓库已提供 `config/ocserv.conf.template` 作为完整配置模板。`DOMAIN` 从 `.env` 渲染到 `default-domain` 后生成 `config/ocserv.conf`，容器只读挂载生成后的配置。如需调整 ocserv 参数，先修改 `config/ocserv.conf.template`，再重新运行 `./scripts/render-ocserv-conf.sh`。
+
+启动前可先检查 Compose 配置和证书挂载路径：
+
+```bash
+docker compose config
+DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
+sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+```
 
 ### 2.3 启动服务
 
@@ -115,7 +154,7 @@ chmod 600 config/auth/ocpasswd
 docker compose up -d
 ```
 
-容器启动时 s6-overlay 自动完成：配置验证 → iptables NAT/转发规则 → 启动 ocserv。
+容器启动时 s6-overlay 自动完成：基础文件检查 → iptables NAT/转发规则 → 启动 ocserv。配置语法错误会通过容器日志暴露。
 
 ### 2.4 创建用户
 
@@ -135,7 +174,10 @@ docker exec ocserv occtl show users
 
 ### 2.6 客户端连接
 
-连接地址：`https://your.domain.com`
+连接地址：
+
+- 默认 443 端口：`https://your.domain.com`
+- 如果 `.env` 中 `OCSERV_PORT` 不是 `443`：`https://your.domain.com:${OCSERV_PORT}`
 
 | 平台 | 客户端 |
 |:--|:--|
@@ -144,7 +186,13 @@ docker exec ocserv occtl show users
 | Linux | `apt install openconnect` |
 | iOS / Android | App Store / Google Play 搜索 "AnyConnect" |
 
-**Linux 命令行**：`sudo openconnect -b https://your.domain.com --user=username`
+**Linux 命令行**：
+
+```bash
+sudo openconnect -b https://your.domain.com --user=username
+# 非 443 端口:
+sudo openconnect -b "https://your.domain.com:${OCSERV_PORT}" --user=username
+```
 
 ### 2.7 常用命令
 
@@ -212,10 +260,33 @@ echo "admin:$(openssl passwd -apr1 'YourPrometheusPassword')" > nginx/.htpasswd
 
 `nginx/.htpasswd` 必须存在且非空；同时请确认 `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` 和 `privkey.pem` 与 `.env` 中的 `DOMAIN` 匹配。
 
-### 3.4 启动完整栈
+### 3.4 准备基础配置
+
+即使直接部署完整监控栈，也需要先准备 ocserv 的日志目录、密码目录和渲染后的主配置：
 
 ```bash
+mkdir -p logs
+mkdir -p config/auth
+touch config/auth/ocpasswd
+chmod 700 config/auth
+chmod 600 config/auth/ocpasswd
 ./scripts/render-ocserv-conf.sh
+```
+
+启动前检查 Compose 配置、监控认证文件和证书目录：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config
+test -s nginx/.htpasswd
+test -w nginx/conf.d
+DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
+SSL_CERT_DIR=$(awk -F= '/^SSL_CERT_DIR=/{print $2}' .env)
+sudo ls -l "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}/fullchain.pem" "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}/privkey.pem"
+```
+
+### 3.5 启动完整栈
+
+```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 ```
 
@@ -226,12 +297,14 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml ps
 docker exec nginx-proxy nginx -t
 ```
 
-### 3.5 访问监控
+### 3.6 访问监控
 
 | 服务 | 地址 | 认证 |
 |:--|:--|:--|
 | Grafana | `https://your.domain.com:8443/grafana/` | admin / `${GF_ADMIN_PASSWORD}` |
 | Prometheus | `https://your.domain.com:8443/prometheus/` | htpasswd |
+
+如果 `.env` 中 `MONITORING_PORT` 不是 `8443`，请将地址中的端口替换为实际值。
 
 **内置仪表盘面板**：活跃会话数、活跃账号数、服务状态、运行时长、版本信息、流量速率（RX/TX）、每会话流量、用户排行、连接时长。
 
@@ -244,7 +317,7 @@ ocserv_bytes_rx_rate_bytes_per_second      # 当前接收速率（字节/秒）
 ocserv_up                                  # 服务是否在线
 ```
 
-### 3.6 部署 Fail2Ban
+### 3.7 部署 Fail2Ban
 
 保护监控端点免受暴力破解（10 分钟内 5 次失败 → 封禁 1 小时）：
 
@@ -254,7 +327,7 @@ sudo fail2ban-client status nginx-auth      # 查看状态
 sudo fail2ban-client set nginx-auth unbanip <IP>   # 手动解封
 ```
 
-### 3.7 数据持久化
+### 3.8 数据持久化
 
 Prometheus 和 Grafana 数据通过 Docker 卷持久化，容器重建不丢失。彻底清理：
 
@@ -275,9 +348,11 @@ mkdir -p src && cd src
 wget https://www.infradead.org/ocserv/ocserv-1.4.2.tar.xz
 wget https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-noarch.tar.xz
 wget https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-x86_64.tar.xz
+wget https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-aarch64.tar.xz
+cd ..
 ```
 
-如需构建 arm64，还需下载 `s6-overlay-aarch64.tar.xz`。
+当前 `Dockerfile` 会无条件复制 `s6-overlay-noarch.tar.xz`、`s6-overlay-x86_64.tar.xz` 和 `s6-overlay-aarch64.tar.xz`。即使只构建 amd64，也需要三个 s6-overlay 文件都存在，否则 Docker 构建上下文校验会失败。
 
 ### 4.2 构建 ocserv 镜像
 
@@ -306,6 +381,12 @@ docker buildx build \
 **多架构构建**：
 
 ```bash
+mkdir -p src
+wget -O src/ocserv-1.4.2.tar.xz https://www.infradead.org/ocserv/ocserv-1.4.2.tar.xz
+wget -O src/s6-overlay-noarch.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-noarch.tar.xz
+wget -O src/s6-overlay-x86_64.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-x86_64.tar.xz
+wget -O src/s6-overlay-aarch64.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-aarch64.tar.xz
+
 docker buildx build --platform linux/amd64,linux/arm64 --push \
   -t registry.example.com/ocserv:1.4.2 .
 ```
@@ -437,8 +518,10 @@ server-key = /etc/ocserv/privkey.pem
 
 ```bash
 docker compose logs ocserv
-sudo ls -la /etc/letsencrypt/live/your.domain.com/fullchain.pem /etc/letsencrypt/live/your.domain.com/privkey.pem
-sudo ss -tlnp | grep 443
+DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
+sudo ls -la "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
+sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
 ```
 
 | 原因 | 解决 |
@@ -448,17 +531,28 @@ sudo ss -tlnp | grep 443
 | TUN 设备不存在 | `sudo modprobe tun` |
 | 端口被占用 | 修改 `.env` 中 `OCSERV_PORT` |
 
+也可以先检查 Compose 最终渲染结果，确认 `.env`、证书挂载和端口映射符合预期：
+
+```bash
+docker compose config
+DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
+sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+```
+
 ### 6.2 客户端无法连接
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' ocserv
-sudo ss -tlnp | grep 443 && sudo ss -ulnp | grep 443
-sudo ufw allow 443/tcp && sudo ufw allow 443/udp
+OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
+sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
+sudo ss -ulnp | grep ":${OCSERV_PORT:-443}"
+sudo ufw allow "${OCSERV_PORT:-443}/tcp"
+sudo ufw allow "${OCSERV_PORT:-443}/udp"
 ```
 
 | 原因 | 解决 |
 |:--|:--|
-| 防火墙阻止 | 开放 TCP/UDP 443 |
+| 防火墙阻止 | 开放 TCP/UDP `${OCSERV_PORT:-443}` |
 | 用户不存在 | 使用 `ocpasswd` 添加 |
 | 证书不匹配 | 证书 CN/SAN 需包含连接时的域名或 IP |
 
@@ -560,7 +654,13 @@ docker compose restart ocserv
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml ps
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config
 docker logs nginx-proxy
+test -s nginx/.htpasswd
+test -w nginx/conf.d
+DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
+SSL_CERT_DIR=$(awk -F= '/^SSL_CERT_DIR=/{print $2}' .env)
+sudo ls -ld "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}"
 ```
 
 | 原因 | 解决 |
@@ -568,7 +668,8 @@ docker logs nginx-proxy
 | `DOMAIN` 未配置 | 在 `.env` 中设置 |
 | `MONITORING_PORT` 非法 | 设置为 `1-65535` 范围内的数字 |
 | htpasswd 缺失或为空 | 运行步骤 3.3 生成非空 `nginx/.htpasswd` |
-| 证书路径错误 | 确认 `SSL_CERT_DIR` 目录存在 |
+| `nginx/conf.d` 不可写 | 确认 `nginx/conf.d` 是目录且当前用户或 Docker 可写 |
+| 证书路径错误 | 确认 `SSL_CERT_DIR/live/${DOMAIN}` 目录存在，且包含 `fullchain.pem` 和 `privkey.pem` |
 | Nginx 配置生成失败 | 检查 `docker logs nginx-proxy` 中的 entrypoint 错误，并修正 `.env`、证书或模板 |
 
 ### 6.6 Exporter 采集异常
@@ -577,12 +678,14 @@ docker logs nginx-proxy
 docker logs ocserv-exporter
 docker exec ocserv ls -la /var/run/occtl.socket
 docker exec ocserv occtl -j show status
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prometheus wget -qO- http://ocserv:9100/metrics
 ```
 
 | 原因 | 解决 |
 |:--|:--|
 | socket 不存在 | 重启 ocserv 容器 |
 | 版本不匹配 | 确保 exporter 与 ocserv 版本一致 |
+| Prometheus 无法访问指标 | exporter 使用 `network_mode: service:ocserv` 与 ocserv 共用网络命名空间，因此 Prometheus 目标是 `ocserv:9100`，不需要也不应额外映射 exporter 端口 |
 
 ### 6.7 证书续期后处理
 
@@ -591,7 +694,13 @@ docker exec ocserv occtl -j show status
 | 复制到 `config/` | 重新复制 + `docker compose restart ocserv` |
 | 直接挂载 `/etc/letsencrypt/live/` | `docker compose restart ocserv` |
 
-验证：`echo | openssl s_client -connect your.domain.com:443 2>/dev/null | openssl x509 -noout -dates`
+验证：
+
+```bash
+OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
+DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
+echo | openssl s_client -connect "${DOMAIN}:${OCSERV_PORT:-443}" 2>/dev/null | openssl x509 -noout -dates
+```
 
 ---
 
@@ -602,10 +711,10 @@ docker exec ocserv occtl -j show status
 **启动流程**：
 
 ```
-容器启动 → s6-overlay → ocserv-init (oneshot: 配置验证 + iptables) → ocserv (longrun)
+容器启动 → s6-overlay → ocserv-init (oneshot: 基础文件检查 + iptables) → ocserv (longrun)
 ```
 
-**优势**：配置错误在启动阶段拦截，而非等 ocserv 崩溃后发现；自动配置 iptables，容器启动即可让客户端上网；进程异常自动重启。
+**优势**：启动阶段先检查主配置文件是否存在、可读，并自动配置 iptables；容器启动后即可让客户端上网；进程异常由 s6-overlay 管理。ocserv 配置语法错误会在 `docker compose logs ocserv` 中暴露。
 
 ```bash
 docker exec ocserv s6-rc list          # 查看服务列表
