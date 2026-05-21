@@ -13,6 +13,38 @@ SOCKET_PATH = os.getenv("OCSERV_SOCKET", "/var/run/occtl.socket")
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9100"))
 METRICS_HOST = os.getenv("METRICS_HOST", "0.0.0.0")
 OCSERV_VERSION = "unknown"
+MIN_COLLECTION_INTERVAL_SECONDS = 5.0
+
+
+def read_float_env(name, default, min_value=None):
+    """Read a numeric environment variable with optional minimum clamping."""
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+
+    try:
+        value = float(raw_value)
+    except ValueError:
+        print(f"❌ Invalid {name}: {raw_value!r}. Expected a number.")
+        sys.exit(1)
+
+    if value <= 0:
+        print(f"❌ Invalid {name}: {raw_value!r}. Expected a positive number.")
+        sys.exit(1)
+
+    if min_value is not None and value < min_value:
+        print(f"⚠️ {name}={value:g}s is below the supported minimum; using {min_value:g}s")
+        return min_value
+
+    return value
+
+
+COLLECTION_INTERVAL_SECONDS = read_float_env(
+    "EXPORTER_INTERVAL_SECONDS",
+    15.0,
+    min_value=MIN_COLLECTION_INTERVAL_SECONDS,
+)
+OCCTL_TIMEOUT_SECONDS = read_float_env("OCCTL_TIMEOUT_SECONDS", 5.0)
 
 # ==========================================
 # 服务级别指标
@@ -78,7 +110,7 @@ def run_occtl(args):
     """Execute occtl command and return JSON output."""
     try:
         cmd = ["occtl", "-s", SOCKET_PATH, "-j"] + args
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=OCCTL_TIMEOUT_SECONDS)
         if result.returncode == 0:
             return json.loads(result.stdout)
         else:
@@ -97,7 +129,7 @@ def run_occtl(args):
 def get_version():
     """Get ocserv version from occtl --version."""
     try:
-        result = subprocess.run(["occtl", "--version"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(["occtl", "--version"], capture_output=True, text=True, timeout=OCCTL_TIMEOUT_SECONDS)
         output = result.stdout + result.stderr
         match = re.search(r"(\d+\.\d+[\.\d]*)", output)
         if match:
@@ -276,6 +308,8 @@ def main():
     print(f"🚀 Starting ocserv exporter on {METRICS_HOST}:{METRICS_PORT}")
     print(f"   Ocserv version: {OCSERV_VERSION}")
     print(f"   Socket path: {SOCKET_PATH}")
+    print(f"   Collection interval: {COLLECTION_INTERVAL_SECONDS:g}s")
+    print(f"   occtl timeout: {OCCTL_TIMEOUT_SECONDS:g}s")
     print(f"   Python version: {sys.version}")
 
     # Check if socket exists before starting
@@ -304,13 +338,13 @@ def main():
         sys.exit(1)
 
     # Main collection loop
-    print(f"🔄 Starting metrics collection loop (interval: 15s)")
+    print(f"🔄 Starting metrics collection loop (interval: {COLLECTION_INTERVAL_SECONDS:g}s)")
     while True:
         try:
             collect_metrics()
         except Exception as e:
             print(f"❌ Collection error: {e}")
-        time.sleep(15)
+        time.sleep(COLLECTION_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":

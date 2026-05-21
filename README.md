@@ -173,8 +173,8 @@ ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
 ```
 
 - **exporter**：通过 `occtl` 采集用户数、流量、运行时长
-- **Prometheus**：每 15 秒拉取指标
-- **Grafana**：预置 12 个监控面板
+- **Prometheus**：监控编排默认每 5 秒拉取指标
+- **Grafana**：预置生产概览与低频详情两个看板，降低长期打开页面时的查询压力
 - **Nginx**：HTTPS 反向代理，子路径分发
 
 ### 3.2 配置环境变量
@@ -404,7 +404,18 @@ docker buildx build --build-arg BASE_IMAGE=ubuntu:24.04 -t ocserv:ubuntu .
 | `NGINX_IMAGE` | Nginx 镜像 | `nginx:alpine` |
 | `GF_ADMIN_PASSWORD` | Grafana 管理员密码 | `admin123` |
 | `GF_ALLOW_SIGN_UP` | 允许用户注册 | `false` |
+| `GF_DASHBOARDS_MIN_REFRESH_INTERVAL` | Grafana 看板最小刷新间隔，生产默认防止低于 15s | `15s` |
+| `GF_ANALYTICS_REPORTING_ENABLED` | Grafana 匿名统计上报 | `false` |
+| `GF_ANALYTICS_CHECK_FOR_UPDATES` | Grafana 版本更新检查 | `false` |
+| `GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES` | Grafana 插件更新检查 | `false` |
+| `GF_UNIFIED_ALERTING_EXECUTE_ALERTS` | Grafana 内置告警执行；不使用 Grafana 告警时建议关闭 | `false` |
+| `GF_DATAPROXY_RESPONSE_LIMIT` | Grafana data proxy 单次响应大小限制（字节） | `10485760` |
+| `GRAFANA_MEM_LIMIT` | Grafana 容器内存上限；低于 512m 时偶发 502/OOM 风险更高 | `512m` |
+| `GRAFANA_MEMSWAP_LIMIT` | Grafana 容器内存+swap 上限 | `512m` |
+| `GRAFANA_CPUS` | Grafana 容器 CPU 上限 | `1.00` |
 | `METRICS_PORT` | 指标导出端口 | `9100` |
+| `EXPORTER_INTERVAL_SECONDS` | exporter 采集间隔；少于 10 个在线用户建议 5s，10-100 人建议 10s，超过 100 人建议 15s | `5` |
+| `OCCTL_TIMEOUT_SECONDS` | 单次 `occtl` 调用超时；建议小于 Prometheus `scrape_timeout` | `2` |
 | `SSL_CERT_DIR` | SSL 证书目录 | `/etc/letsencrypt` |
 
 ### 5.5 最小可用配置
@@ -602,7 +613,7 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 
 ### 7.2 Prometheus Exporter
 
-通过 `occtl -j` JSON 输出采集指标，每 15 秒一次。
+通过 `occtl -j` JSON 输出采集指标。exporter 镜像默认每 15 秒采集一次；监控编排在生产环境默认设置为 5 秒，适合少于 10 个同时在线用户的小规模部署。
 
 | 指标 | 类型 | 说明 |
 |:--|:--|:--|
@@ -616,7 +627,7 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 
 自动清理已断开用户的标签，防止指标泄漏。服务不可用时重置所有指标。
 
-**环境变量**：`OCSERV_SOCKET`（默认 `/var/run/occtl.socket`）、`METRICS_PORT`（默认 `9100`）。
+**环境变量**：`OCSERV_SOCKET`（默认 `/var/run/occtl.socket`）、`METRICS_PORT`（默认 `9100`）、`EXPORTER_INTERVAL_SECONDS`（镜像默认 `15`，监控编排默认 `5`，最小 `5`）、`OCCTL_TIMEOUT_SECONDS`（镜像默认 `5`，监控编排默认 `2`）。
 
 ### 7.3 Nginx 反向代理
 

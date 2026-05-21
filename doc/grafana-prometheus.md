@@ -93,12 +93,12 @@ docker logs grafana
 
 ### 查看仪表盘
 
-项目已内置 ocserv 监控面板，登录后在 **Dashboards** 中即可看到：
+项目已内置两个 ocserv 监控面板，登录后在 **Dashboards** 中即可看到：
 
-- **活跃用户数** — 当前连接的 VPN 客户端数量
-- **上下行流量** — 累计收发字节数
-- **服务运行时长** — ocserv 进程持续运行时间
-- **版本信息** — ocserv 构建版本
+- **Ocserv VPN Overview** — 生产默认概览看板，15 秒刷新，保留服务状态、活跃用户、实时速率、采集错误、采集耗时和当前用户明细。
+- **Ocserv VPN Details** — 低频详情看板，30 秒刷新，保留版本、运行时长、累计流量、用户趋势、排行和连接时长，适合排障和分析时打开。
+
+默认长期打开 `Ocserv VPN Overview`。`Ocserv VPN Details` 查询更多用户级和历史趋势数据，不建议作为常驻大屏。
 
 ### 添加自定义告警
 
@@ -118,6 +118,31 @@ docker exec nginx-proxy nginx -T | grep -A5 "location /grafana"
 
 # 验证 Prometheus 数据源连通性
 docker exec grafana wget -qO- http://prometheus:9090/prometheus/api/v1/status/config
+```
+
+### Grafana 偶发 502 排查
+
+`/grafana/` 偶发 502 通常表示 Nginx 当时无法正常连接 Grafana 上游。优先确认 Grafana 是否因内存限制被 OOM kill：
+
+```bash
+docker inspect grafana \
+  --format 'OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} RestartCount={{.RestartCount}} FinishedAt={{.State.FinishedAt}}'
+
+docker logs --since 2h grafana | grep -Ei 'oom|out of memory|killed|panic|fatal|failed'
+docker logs --since 2h nginx-proxy | grep -E ' 502 |connect\(\) failed|upstream prematurely closed|upstream timed out'
+docker stats --no-stream grafana prometheus ocserv-exporter
+```
+
+判断方式：
+
+- `OOMKilled=true` 或 `ExitCode=137`：Grafana 大概率被 OOM kill。保持默认 `GRAFANA_MEM_LIMIT=512m`，如果仍发生可提升到 `768m` 或 `1g`。
+- Nginx 出现 `connect() failed (111: Connection refused)`：Grafana 当时不可用，常见于重启或 OOM。
+- Nginx 出现 `upstream timed out`：更像查询慢或 Prometheus 响应慢，优先检查详情看板是否长期打开、Prometheus 负载和查询时间范围。
+
+修改 `.env` 中的 Grafana 资源限制后需要重建 Grafana 容器：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --force-recreate grafana
 ```
 
 ## Prometheus 使用指南
@@ -155,18 +180,37 @@ ocserv_up
 
 ### 修改采集间隔
 
-编辑 `monitoring/prometheus.yml`，调整 `scrape_interval`：
+采集实时性由三层共同决定：exporter 内部采集间隔、Prometheus 拉取间隔、Grafana 面板刷新间隔。少于 10 个同时在线用户的生产环境建议 exporter 和 Prometheus 保持 5 秒采集，Grafana 生产概览看板使用 15 秒刷新；10-100 人建议采集和看板都使用 10-15 秒；超过 100 人建议使用 15 秒或更长。
+
+在 `.env` 中调整 exporter：
+
+```env
+EXPORTER_INTERVAL_SECONDS=5
+OCCTL_TIMEOUT_SECONDS=2
+```
+
+编辑 `monitoring/prometheus.yml`，同步调整 `scrape_interval` 和 `scrape_timeout`：
 
 ```yaml
 global:
-  scrape_interval: 15s    # 采集频率
+  scrape_interval: 5s       # Prometheus 拉取频率
   evaluation_interval: 15s  # 告警规则评估频率
+
+scrape_configs:
+  - job_name: "ocserv"
+    scrape_timeout: 3s
 ```
 
-修改后重载 Prometheus（无需重启容器）：
+修改 Prometheus 配置后重载 Prometheus（无需重启容器）：
 
 ```bash
 docker exec prometheus wget -qO- --post-data='' http://localhost:9090/-/reload
+```
+
+修改 `.env` 中的 exporter 间隔后需要重建或重启 exporter 容器：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --force-recreate ocserv-exporter
 ```
 
 ## 数据持久化

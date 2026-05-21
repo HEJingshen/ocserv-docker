@@ -249,6 +249,8 @@ healthcheck:
 | 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`，直接执行 `ocserv-exporter.py` |
 | 数据采集 | 通过 `occtl -j show status` 和 `occtl -j show users`（JSON 格式）调用 ocserv 的 Unix socket 接口 |
 | 暴露端口 | `9100` |
+| 采集周期 | 镜像默认 15 秒；监控编排默认 5 秒，适合少于 10 个同时在线用户 |
+| occtl 超时 | 镜像默认 5 秒；监控编排默认 2 秒，避免采集阻塞超过 Prometheus timeout |
 
 **采集指标**：
 
@@ -263,7 +265,7 @@ healthcheck:
 | `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次采集的 `TX` 差值计算 | 当前发送速率 |
 | `ocserv_build_info` | Info | `occtl --version` | ocserv 版本 |
 
-采集周期：每 15 秒执行一次 `collect_metrics()`。
+采集周期：按 `EXPORTER_INTERVAL_SECONDS` 执行 `collect_metrics()`，最小 5 秒。生产建议少于 10 个在线用户用 5 秒，10-100 人用 10 秒，超过 100 人用 15 秒。
 
 ### 4.2 Prometheus
 
@@ -273,7 +275,7 @@ healthcheck:
 | 子路径 | `--web.route-prefix=/prometheus` 和 `--web.external-url` 使其在 `/prometheus/` 路径下运行 |
 | 数据存储 | `prometheus_data` Docker 卷，容器重建不丢失 |
 | 采集目标 | `ocserv:9100`，路径 `/metrics` |
-| 采集间隔 | 全局 15 秒 |
+| 采集间隔 | 全局 5 秒 |
 
 ### 4.3 Grafana
 
@@ -282,17 +284,15 @@ healthcheck:
 | 镜像 | `grafana/grafana:latest` |
 | 子路径 | `GF_SERVER_SERVE_FROM_SUB_PATH=true` + `GF_SERVER_ROOT_URL=https://your.domain.com:8443/grafana/` |
 | 数据存储 | `grafana_data` Docker 卷 |
-| 自动配置 | 通过 `monitoring/datasources/` 和 `monitoring/dashboards/` 自动注入数据源和面板 |
+| 自动配置 | 通过 `monitoring/datasources/` 和 `monitoring/dashboards/` 自动注入数据源和看板 |
+| 生产资源限制 | 默认限制 Grafana 为 `512m` 内存和 `1.00` CPU，可通过 `.env` 调整 |
 
-**内置面板**（`monitoring/dashboards/definitions/ocserv.json`）：
+**内置看板**：
 
-| 面板 | 类型 | 查询 | 说明 |
+| 看板 | 默认刷新 | 查询重点 | 说明 |
 |:--|:--|:--|:--|
-| Active Users | Stat | `ocserv_active_users` | >50 显示红色告警 |
-| Traffic Total (RX/TX) | Timeseries | `ocserv_bytes_rx_total` / `ocserv_bytes_tx_total` | 累计收发流量 |
-| Traffic Rate (bps) | Timeseries | `ocserv_bytes_rx_rate_bytes_per_second` / `ocserv_bytes_tx_rate_bytes_per_second` | 实时收发速率 |
-| Service Uptime | Stat | `ocserv_uptime_seconds` | 运行时长 |
-| Service Status | Gauge | `ocserv_up` | 1=绿，0=红 |
+| Ocserv VPN Overview | 15 秒 | 服务状态、活跃用户、实时速率、采集错误、采集耗时、当前用户明细 | 生产默认长期打开 |
+| Ocserv VPN Details | 30 秒 | 版本、运行时长、累计流量、采集成功率、用户趋势、排行、连接时长 | 排障和分析时打开 |
 
 ### 4.4 Nginx 反向代理
 
@@ -488,11 +488,13 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── ocserv-exporter.py              # Prometheus 指标采集器
 │
 ├── monitoring/
-│   ├── prometheus.yml                  # 采集配置（15s 间隔）
+│   ├── prometheus.yml                  # 采集配置（5s 间隔）
 │   ├── datasources/prometheus.yml      # Grafana 数据源自动注入
 │   └── dashboards/
 │       ├── dashboards.yml              # Grafana dashboard provider
-│       └── definitions/ocserv.json     # Grafana 面板自动注入
+│       └── definitions/
+│           ├── ocserv.json             # 生产概览看板
+│           └── ocserv-details.json     # 低频详情看板
 │
 ├── nginx/
 │   ├── templates/                      # Nginx 配置模板（支持环境变量替换）
