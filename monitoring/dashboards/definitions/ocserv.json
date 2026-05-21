@@ -1,11 +1,14 @@
 {
   "id": null,
-  "uid": "ocserv-vpn-overview",
-  "title": "Ocserv VPN Overview",
-  "tags": ["ocserv", "vpn", "overview"],
+  "uid": "ocserv-vpn",
+  "title": "Ocserv VPN",
+  "tags": [
+    "ocserv",
+    "vpn"
+  ],
   "timezone": "browser",
   "schemaVersion": 38,
-  "version": 4,
+  "version": 5,
   "refresh": "15s",
   "editable": true,
   "panels": [
@@ -13,10 +16,18 @@
       "id": 1,
       "title": "Service Status",
       "type": "gauge",
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ocserv_up",
           "instant": true,
           "refId": "A"
@@ -26,63 +37,190 @@
         "defaults": {
           "min": 0,
           "max": 1,
-          "thresholds": {"steps": [{"color": "red", "value": 0}, {"color": "green", "value": 1}]},
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
           "mappings": [
-            {"type": "value", "options": {"0": {"text": "Down"}, "1": {"text": "Up"}}}
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Down"
+                },
+                "1": {
+                  "text": "Up"
+                }
+              }
+            }
           ]
         }
       },
-      "options": {"showThresholdLabels": false, "showThresholdMarkers": true}
+      "options": {
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      }
     },
     {
       "id": 2,
-      "title": "Active Users",
+      "title": "Active Sessions",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "expr": "ocserv_active_users",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ocserv_active_sessions",
           "instant": true,
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 50}]},
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
           "mappings": []
         }
       },
-      "options": {"colorMode": "value", "graphMode": "none"}
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      }
     },
     {
       "id": 3,
-      "title": "Exporter Errors (5m)",
+      "title": "Active Accounts",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ocserv_active_accounts",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Exporter Errors (5m)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "increase(ocserv_scrape_errors_total[5m])",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]},
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
           "mappings": []
         }
       },
-      "options": {"colorMode": "value", "graphMode": "none"}
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      }
     },
     {
-      "id": 4,
+      "id": 5,
       "title": "Scrape Duration",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ocserv_scrape_duration_seconds",
           "instant": true,
           "refId": "A"
@@ -91,27 +229,96 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 3}]},
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
           "mappings": []
         }
       },
-      "options": {"colorMode": "value", "graphMode": "none"}
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      }
     },
     {
-      "id": 5,
-      "title": "Traffic Rate (RX/TX)",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+      "id": 6,
+      "title": "Service Uptime",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ocserv_uptime_seconds",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Traffic Rate (RX/TX)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ocserv_bytes_rx_rate_bytes_per_second",
           "interval": "15s",
           "legendFormat": "RX Rate (B/s)",
           "refId": "A"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ocserv_bytes_tx_rate_bytes_per_second",
           "interval": "15s",
           "legendFormat": "TX Rate (B/s)",
@@ -121,33 +328,55 @@
       "fieldConfig": {
         "defaults": {
           "unit": "Bps",
-          "custom": {"lineWidth": 2, "fillOpacity": 10}
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
         }
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     },
     {
-      "id": 6,
-      "title": "Active Users Details",
+      "id": 8,
+      "title": "Active Session Details",
       "type": "table",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ocserv_user_bytes_rx",
           "format": "table",
           "instant": true,
           "refId": "A"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ocserv_user_bytes_tx",
           "format": "table",
           "instant": true,
           "refId": "B"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ocserv_user_connected_seconds",
           "format": "table",
           "instant": true,
@@ -155,15 +384,33 @@
         }
       ],
       "transformations": [
-        {"id": "merge", "options": {}},
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
-            "excludeByName": {"Time": true, "__name__": true},
-            "indexByName": {"username": 0, "ip": 1, "Value #A": 2, "Value #B": 3, "Value #C": 4},
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "username": 0,
+              "session_id": 1,
+              "ip": 2,
+              "vpn_ip": 3,
+              "device": 4,
+              "Value #A": 5,
+              "Value #B": 6,
+              "Value #C": 7
+            },
             "renameByName": {
               "username": "User",
+              "session_id": "Session ID",
               "ip": "IP",
+              "vpn_ip": "VPN IP",
+              "device": "Device",
               "Value #A": "RX (Bytes)",
               "Value #B": "TX (Bytes)",
               "Value #C": "Connected (s)"
@@ -172,23 +419,308 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {"custom": {"align": "left"}},
+        "defaults": {
+          "custom": {
+            "align": "left"
+          }
+        },
         "overrides": [
           {
-            "matcher": {"id": "byName", "options": "RX (Bytes)"},
-            "properties": [{"id": "unit", "value": "bytes"}, {"id": "custom.align", "value": "right"}]
+            "matcher": {
+              "id": "byName",
+              "options": "RX (Bytes)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.align",
+                "value": "right"
+              }
+            ]
           },
           {
-            "matcher": {"id": "byName", "options": "TX (Bytes)"},
-            "properties": [{"id": "unit", "value": "bytes"}, {"id": "custom.align", "value": "right"}]
+            "matcher": {
+              "id": "byName",
+              "options": "TX (Bytes)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.align",
+                "value": "right"
+              }
+            ]
           },
           {
-            "matcher": {"id": "byName", "options": "Connected (s)"},
-            "properties": [{"id": "unit", "value": "s"}, {"id": "custom.align", "value": "right"}]
+            "matcher": {
+              "id": "byName",
+              "options": "Connected (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.align",
+                "value": "right"
+              }
+            ]
           }
         ]
       },
-      "options": {"showHeader": true}
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 9,
+      "title": "Traffic Total (RX/TX)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ocserv_bytes_rx_total",
+          "interval": "30s",
+          "legendFormat": "RX Total",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ocserv_bytes_tx_total",
+          "interval": "30s",
+          "legendFormat": "TX Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Per Session Traffic (Top 10)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "topk(10, ocserv_user_bytes_rx)",
+          "interval": "30s",
+          "legendFormat": "{{username}} #{{session_id}} (RX)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "topk(10, ocserv_user_bytes_tx)",
+          "interval": "30s",
+          "legendFormat": "{{username}} #{{session_id}} (TX)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Session Traffic Ranking (Top 10)",
+      "type": "bargauge",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "topk(10, ocserv_user_bytes_rx + ocserv_user_bytes_tx)",
+          "legendFormat": "{{username}} #{{session_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Connection Duration",
+      "type": "bargauge",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ocserv_user_connected_seconds",
+          "legendFormat": "{{username}} #{{session_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 13,
+      "title": "Version Info",
+      "type": "table",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ocserv_build_info",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "version": 0
+            },
+            "renameByName": {
+              "version": "Version"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Version"
+            },
+            "properties": [
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "displayName",
+                "value": "Version"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": false
+      }
     }
   ]
 }

@@ -257,13 +257,16 @@ healthcheck:
 | 指标名 | 类型 | 来源 | 说明 |
 |:--|:--|:--|:--|
 | `ocserv_up` | Gauge | 能否成功调用 occtl | 1=在线，0=异常 |
-| `ocserv_active_users` | Gauge | `show users` 返回列表长度 | 当前活跃用户数 |
+| `ocserv_active_sessions` | Gauge | `show users` 返回列表长度 | 当前在线会话数 |
+| `ocserv_active_accounts` | Gauge | `show users` 中 `Username` 去重 | 当前唯一账号数 |
 | `ocserv_uptime_seconds` | Gauge | `show status.uptime` | 主进程运行时长 |
-| `ocserv_bytes_rx_total` | Gauge | 遍历用户列表累加 `RX` | 累计接收字节 |
-| `ocserv_bytes_tx_total` | Gauge | 遍历用户列表累加 `TX` | 累计发送字节 |
+| `ocserv_bytes_rx_total` | Gauge | 遍历用户列表累加 `RX` | 当前活跃会话累计接收字节求和 |
+| `ocserv_bytes_tx_total` | Gauge | 遍历用户列表累加 `TX` | 当前活跃会话累计发送字节求和 |
 | `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 根据相邻两次采集的 `RX` 差值计算 | 当前接收速率 |
 | `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次采集的 `TX` 差值计算 | 当前发送速率 |
 | `ocserv_build_info` | Info | `occtl --version` | ocserv 版本 |
+
+每会话指标使用 `username`, `session_id`, `ip`, `vpn_ip`, `device` 标签。`session_id` 优先来自 ocserv 连接 ID，用于区分同一账号、同一公网 IP 后的多个并发连接。
 
 采集周期：按 `EXPORTER_INTERVAL_SECONDS` 执行 `collect_metrics()`，最小 5 秒。生产建议少于 10 个在线用户用 5 秒，10-100 人用 10 秒，超过 100 人用 15 秒。
 
@@ -291,8 +294,7 @@ healthcheck:
 
 | 看板 | 默认刷新 | 查询重点 | 说明 |
 |:--|:--|:--|:--|
-| Ocserv VPN Overview | 15 秒 | 服务状态、活跃用户、实时速率、采集错误、采集耗时、当前用户明细 | 生产默认长期打开 |
-| Ocserv VPN Details | 30 秒 | 版本、运行时长、累计流量、采集成功率、用户趋势、排行、连接时长 | 排障和分析时打开 |
+| Ocserv VPN | 15 秒 | 服务状态、活跃会话、活跃账号、采集健康、实时速率、当前会话明细、累计流量、会话趋势、排行、连接时长、版本 | 生产默认统一看板 |
 
 ### 4.4 Nginx 反向代理
 
@@ -493,8 +495,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── dashboards/
 │       ├── dashboards.yml              # Grafana dashboard provider
 │       └── definitions/
-│           ├── ocserv.json             # 生产概览看板
-│           └── ocserv-details.json     # 低频详情看板
+│           └── ocserv.json             # 统一监控看板
 │
 ├── nginx/
 │   ├── templates/                      # Nginx 配置模板（支持环境变量替换）

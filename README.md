@@ -172,9 +172,9 @@ ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
                                                     /grafana/  /prometheus/
 ```
 
-- **exporter**：通过 `occtl` 采集用户数、流量、运行时长
+- **exporter**：通过 `occtl` 采集会话数、账号数、流量、运行时长
 - **Prometheus**：监控编排默认每 5 秒拉取指标
-- **Grafana**：预置生产概览与低频详情两个看板，降低长期打开页面时的查询压力
+- **Grafana**：预置统一监控看板，按生产总览优先展示关键状态、实时流量和会话明细
 - **Nginx**：HTTPS 反向代理，子路径分发
 
 ### 3.2 配置环境变量
@@ -233,12 +233,13 @@ docker exec nginx-proxy nginx -t
 | Grafana | `https://your.domain.com:8443/grafana/` | admin / `${GF_ADMIN_PASSWORD}` |
 | Prometheus | `https://your.domain.com:8443/prometheus/` | htpasswd |
 
-**内置仪表盘面板**：活跃用户数、服务状态、运行时长、版本信息、流量速率（RX/TX）、每用户流量、用户排行、连接时长。
+**内置仪表盘面板**：活跃会话数、活跃账号数、服务状态、运行时长、版本信息、流量速率（RX/TX）、每会话流量、用户排行、连接时长。
 
 **Prometheus 常用查询**：
 
 ```
-ocserv_active_users                        # 当前用户数
+ocserv_active_sessions                     # 当前在线会话数
+ocserv_active_accounts                     # 当前唯一账号数
 ocserv_bytes_rx_rate_bytes_per_second      # 当前接收速率（字节/秒）
 ocserv_up                                  # 服务是否在线
 ```
@@ -618,14 +619,34 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 | 指标 | 类型 | 说明 |
 |:--|:--|:--|
 | `ocserv_up` | Gauge | 1=正常, 0=异常 |
-| `ocserv_active_users` | Gauge | 活跃用户数 |
+| `ocserv_active_sessions` | Gauge | 活跃会话数 |
+| `ocserv_active_accounts` | Gauge | 活跃唯一账号数 |
 | `ocserv_uptime_seconds` | Gauge | 运行时长 |
-| `ocserv_bytes_rx/tx_total` | Gauge | 累计收发流量 |
+| `ocserv_bytes_rx/tx_total` | Gauge | 当前活跃会话累计收发流量求和，不是严格单调 Counter |
 | `ocserv_bytes_rx/tx_rate_bytes_per_second` | Gauge | 实时收发速率（字节/秒） |
-| `ocserv_user_bytes_rx/tx` | Gauge | 每用户流量（带 username, ip 标签） |
-| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | Gauge | 每用户实时速率（带 username, ip 标签） |
+| `ocserv_user_bytes_rx/tx` | Gauge | 每会话流量（带 username, session_id, ip, vpn_ip, device 标签） |
+| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | Gauge | 每会话实时速率（带 username, session_id, ip, vpn_ip, device 标签） |
 
 自动清理已断开用户的标签，防止指标泄漏。服务不可用时重置所有指标。
+
+同一账号多设备同时连接时，`ocserv_active_sessions` 会按连接会话计数，`ocserv_active_accounts` 会按唯一账号计数。每会话指标使用 `session_id` 区分连接，即使两台设备位于同一 NAT 公网 IP 后也不会互相覆盖。
+
+**指标重要性评估**：
+
+| 指标 | 重要性 | 评估 |
+|:--|:--|:--|
+| `ocserv_up` | 关键 | 服务可用性核心指标，应保留 |
+| `ocserv_active_sessions` | 关键 | 当前真实在线会话数 |
+| `ocserv_active_accounts` | 高 | 区分同账号多设备场景，排障价值高 |
+| `ocserv_bytes_rx/tx_rate_bytes_per_second` | 高 | 实时带宽面板核心指标 |
+| `ocserv_scrape_errors_total` | 高 | 发现 exporter、occtl 或 socket 异常 |
+| `ocserv_user_bytes_rx/tx` | 中高 | 每会话流量、排行、明细表依赖，标签基数随会话数增长 |
+| `ocserv_user_connected_seconds` | 中高 | 连接时长排障有用 |
+| `ocserv_scrape_duration_seconds` | 中 | 采集性能和 occtl 阻塞排查有用 |
+| `ocserv_bytes_rx/tx_total` | 中 | 活跃会话流量求和，不适合作为严格单调 Counter 使用 |
+| `ocserv_uptime_seconds` | 中 | 服务运行时长辅助排障 |
+| `ocserv_build_info` | 低中 | 版本定位有用，维护成本低 |
+| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | 低中 | 当前明细诊断有价值，Grafana 默认看板未直接展示 |
 
 **环境变量**：`OCSERV_SOCKET`（默认 `/var/run/occtl.socket`）、`METRICS_PORT`（默认 `9100`）、`EXPORTER_INTERVAL_SECONDS`（镜像默认 `15`，监控编排默认 `5`，最小 `5`）、`OCCTL_TIMEOUT_SECONDS`（镜像默认 `5`，监控编排默认 `2`）。
 

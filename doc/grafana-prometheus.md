@@ -10,7 +10,7 @@ ocserv → ocserv-exporter → Prometheus → Grafana
                               Nginx (HTTPS 入口)
 ```
 
-- **ocserv-exporter**：通过 ocserv Unix socket 采集活跃用户、流量、运行时长等指标
+- **ocserv-exporter**：通过 ocserv Unix socket 采集活跃会话、唯一账号、流量、运行时长等指标
 - **Prometheus**：定时拉取指标并存储为时序数据
 - **Grafana**：读取 Prometheus 数据，展示可视化仪表盘
 - **Nginx**：HTTPS 入口（8443 端口），通过子路径 `/grafana/` 和 `/prometheus/` 分发请求。80 端口保留给 certbot 证书续期使用。
@@ -93,18 +93,17 @@ docker logs grafana
 
 ### 查看仪表盘
 
-项目已内置两个 ocserv 监控面板，登录后在 **Dashboards** 中即可看到：
+项目已内置一个 ocserv 统一监控面板，登录后在 **Dashboards** 中即可看到：
 
-- **Ocserv VPN Overview** — 生产默认概览看板，15 秒刷新，保留服务状态、活跃用户、实时速率、采集错误、采集耗时和当前用户明细。
-- **Ocserv VPN Details** — 低频详情看板，30 秒刷新，保留版本、运行时长、累计流量、用户趋势、排行和连接时长，适合排障和分析时打开。
+- **Ocserv VPN** — 生产默认统一看板，15 秒刷新，按顺序展示服务状态、活跃会话、活跃账号、采集健康、实时速率、当前会话明细、累计流量、会话趋势、排行、连接时长和版本信息。
 
-默认长期打开 `Ocserv VPN Overview`。`Ocserv VPN Details` 查询更多用户级和历史趋势数据，不建议作为常驻大屏。
+默认长期打开 `Ocserv VPN`。同一看板内已合并概览和详情指标，避免在 Grafana 中维护多块 ocserv 看板。
 
 ### 添加自定义告警
 
 1. 进入目标面板，点击指标名称 → **Edit**
 2. 在右侧 **Alert** 标签中设置规则，例如：
-   - `ocserv_active_users > 14` → 连接数接近上限时告警
+   - `ocserv_active_sessions > 14` → 连接会话数接近上限时告警
 3. 配置通知渠道（Email / Slack / Webhook 等）
 
 ### 常见问题排查
@@ -137,7 +136,7 @@ docker stats --no-stream grafana prometheus ocserv-exporter
 
 - `OOMKilled=true` 或 `ExitCode=137`：Grafana 大概率被 OOM kill。保持默认 `GRAFANA_MEM_LIMIT=512m`，如果仍发生可提升到 `768m` 或 `1g`。
 - Nginx 出现 `connect() failed (111: Connection refused)`：Grafana 当时不可用，常见于重启或 OOM。
-- Nginx 出现 `upstream timed out`：更像查询慢或 Prometheus 响应慢，优先检查详情看板是否长期打开、Prometheus 负载和查询时间范围。
+- Nginx 出现 `upstream timed out`：更像查询慢或 Prometheus 响应慢，优先检查 Grafana 查询时间范围、Prometheus 负载和统一看板中的高基数会话面板。
 
 修改 `.env` 中的 Grafana 资源限制后需要重建 Grafana 容器：
 
@@ -154,10 +153,11 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --fo
 | 指标名 | 类型 | 说明 |
 |:--|:--|:--|
 | `ocserv_up` | Gauge | 服务状态（1=正常，0=异常） |
-| `ocserv_active_users` | Gauge | 当前活跃用户数 |
+| `ocserv_active_sessions` | Gauge | 当前在线会话数 |
+| `ocserv_active_accounts` | Gauge | 当前唯一账号数 |
 | `ocserv_uptime_seconds` | Gauge | 运行时长（秒） |
-| `ocserv_bytes_rx_total` | Gauge | 累计接收字节数 |
-| `ocserv_bytes_tx_total` | Gauge | 累计发送字节数 |
+| `ocserv_bytes_rx_total` | Gauge | 当前活跃会话累计接收字节求和 |
+| `ocserv_bytes_tx_total` | Gauge | 当前活跃会话累计发送字节求和 |
 | `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 当前接收速率（字节/秒） |
 | `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 当前发送速率（字节/秒） |
 | `ocserv_build_info` | Info | ocserv 版本信息 |
@@ -165,8 +165,11 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --fo
 ### 常用查询语句
 
 ```
-# 当前活跃用户数
-ocserv_active_users
+# 当前在线会话数
+ocserv_active_sessions
+
+# 当前唯一账号数
+ocserv_active_accounts
 
 # 当前接收速率（字节/秒）
 ocserv_bytes_rx_rate_bytes_per_second
@@ -178,9 +181,28 @@ rate(ocserv_bytes_rx_total[1m])
 ocserv_up
 ```
 
+同一账号多设备同时连接时，Grafana 会同时展示会话数和唯一账号数。每会话流量指标带 `session_id` 标签，因此同账号、同公网 IP 的连接也会在明细表和趋势图中分开显示。
+
+### 指标重要性评估
+
+| 指标 | 重要性 | 评估 |
+|:--|:--|:--|
+| `ocserv_up` | 关键 | 服务可用性核心指标，应保留 |
+| `ocserv_active_sessions` | 关键 | 当前真实在线会话数 |
+| `ocserv_active_accounts` | 高 | 区分同账号多设备场景，排障价值高 |
+| `ocserv_bytes_rx/tx_rate_bytes_per_second` | 高 | 实时带宽面板核心指标 |
+| `ocserv_scrape_errors_total` | 高 | 发现 exporter、occtl 或 socket 异常 |
+| `ocserv_user_bytes_rx/tx` | 中高 | 每会话流量、排行、明细表依赖，标签基数随会话数增长 |
+| `ocserv_user_connected_seconds` | 中高 | 连接时长排障有用 |
+| `ocserv_scrape_duration_seconds` | 中 | 采集性能和 occtl 阻塞排查有用 |
+| `ocserv_bytes_rx/tx_total` | 中 | 活跃会话流量求和，不适合作为严格单调 Counter 使用 |
+| `ocserv_uptime_seconds` | 中 | 服务运行时长辅助排障 |
+| `ocserv_build_info` | 低中 | 版本定位有用，维护成本低 |
+| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | 低中 | 当前明细诊断有价值，Grafana 默认看板未直接展示 |
+
 ### 修改采集间隔
 
-采集实时性由三层共同决定：exporter 内部采集间隔、Prometheus 拉取间隔、Grafana 面板刷新间隔。少于 10 个同时在线用户的生产环境建议 exporter 和 Prometheus 保持 5 秒采集，Grafana 生产概览看板使用 15 秒刷新；10-100 人建议采集和看板都使用 10-15 秒；超过 100 人建议使用 15 秒或更长。
+采集实时性由三层共同决定：exporter 内部采集间隔、Prometheus 拉取间隔、Grafana 面板刷新间隔。少于 10 个同时在线用户的生产环境建议 exporter 和 Prometheus 保持 5 秒采集，Grafana 统一看板使用 15 秒刷新；10-100 人建议采集和看板都使用 10-15 秒；超过 100 人建议使用 15 秒或更长。
 
 在 `.env` 中调整 exporter：
 

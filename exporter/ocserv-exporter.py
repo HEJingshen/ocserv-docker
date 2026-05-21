@@ -50,7 +50,8 @@ OCCTL_TIMEOUT_SECONDS = read_float_env("OCCTL_TIMEOUT_SECONDS", 5.0)
 # 服务级别指标
 # ==========================================
 ocserv_up = Gauge("ocserv_up", "Ocserv service status (1=up, 0=down)")
-ocserv_active_users = Gauge("ocserv_active_users", "Number of active VPN users")
+ocserv_active_sessions = Gauge("ocserv_active_sessions", "Number of active VPN sessions")
+ocserv_active_accounts = Gauge("ocserv_active_accounts", "Number of distinct active VPN accounts")
 ocserv_uptime = Gauge("ocserv_uptime_seconds", "Ocserv main process uptime")
 ocserv_info = Info("ocserv_build", "Ocserv version info")
 
@@ -71,26 +72,27 @@ ocserv_tx_rate = Gauge(
 # ==========================================
 # 用户详情指标 (带标签)
 # ==========================================
-ocserv_user_rx = Gauge("ocserv_user_bytes_rx", "Bytes received per user", ["username", "ip"])
-ocserv_user_tx = Gauge("ocserv_user_bytes_tx", "Bytes sent per user", ["username", "ip"])
+USER_LABELS = ["username", "session_id", "ip", "vpn_ip", "device"]
+
+ocserv_user_rx = Gauge("ocserv_user_bytes_rx", "Bytes received per VPN session", USER_LABELS)
+ocserv_user_tx = Gauge("ocserv_user_bytes_tx", "Bytes sent per VPN session", USER_LABELS)
 ocserv_user_rx_rate = Gauge(
     "ocserv_user_bytes_rx_rate_bytes_per_second",
-    "Current receive traffic rate per user in bytes per second",
-    ["username", "ip"],
+    "Current receive traffic rate per VPN session in bytes per second",
+    USER_LABELS,
 )
 ocserv_user_tx_rate = Gauge(
     "ocserv_user_bytes_tx_rate_bytes_per_second",
-    "Current transmit traffic rate per user in bytes per second",
-    ["username", "ip"],
+    "Current transmit traffic rate per VPN session in bytes per second",
+    USER_LABELS,
 )
-ocserv_user_connected = Gauge("ocserv_user_connected_seconds", "User connection duration in seconds", ["username", "ip"])
+ocserv_user_connected = Gauge("ocserv_user_connected_seconds", "VPN session connection duration in seconds", USER_LABELS)
 
 previous_user_traffic = {}
 
 # ==========================================
 # 调试指标
 # ==========================================
-ocserv_scrape_success = Counter("ocserv_scrape_success_total", "Number of successful metric scrapes")
 ocserv_scrape_errors = Counter("ocserv_scrape_errors_total", "Number of failed metric scrapes")
 ocserv_scrape_duration = Gauge("ocserv_scrape_duration_seconds", "Duration of last scrape in seconds")
 
@@ -154,6 +156,44 @@ def calculate_rate(current_value, previous_value, elapsed_seconds):
     return (current_value - previous_value) / elapsed_seconds
 
 
+def metric_label_value(value, default="unknown"):
+    """Return a stable Prometheus label value."""
+    if value is None or value == "":
+        return default
+    return str(value)
+
+
+def get_session_id(user):
+    """Return a session identifier that stays unique for concurrent logins."""
+    for key in ("ID", "Full session", "Session"):
+        value = user.get(key)
+        if value is not None and value != "":
+            return str(value)
+
+    username = metric_label_value(user.get("Username"))
+    ip = metric_label_value(user.get("Remote IP"))
+    vpn_ip = metric_label_value(user.get("IPv4") or user.get("IP"))
+    device = metric_label_value(user.get("Device"))
+    connected_at = metric_label_value(user.get("raw_connected_at"), "0")
+    return f"{username}:{ip}:{vpn_ip}:{device}:{connected_at}"
+
+
+def get_user_label_values(user):
+    """Build the complete label tuple for per-session metrics."""
+    username = metric_label_value(user.get("Username"))
+    session_id = get_session_id(user)
+    ip = metric_label_value(user.get("Remote IP"))
+    vpn_ip = metric_label_value(user.get("IPv4") or user.get("IP"))
+    device = metric_label_value(user.get("Device"))
+    return (username, session_id, ip, vpn_ip, device)
+
+
+def reset_session_counts():
+    """Reset all active session/account counters."""
+    ocserv_active_sessions.set(0)
+    ocserv_active_accounts.set(0)
+
+
 def clear_user_metrics(clear_history=False):
     """Remove all per-user metric labels and optionally reset stored samples."""
     global previous_user_traffic
@@ -183,7 +223,7 @@ def collect_metrics():
     if not os.path.exists(SOCKET_PATH):
         print(f"❌ Socket file not found: {SOCKET_PATH}")
         ocserv_up.set(0)
-        ocserv_active_users.set(0)
+        reset_session_counts()
         ocserv_rx_bytes.set(0)
         ocserv_tx_bytes.set(0)
         ocserv_rx_rate.set(0)
@@ -199,7 +239,7 @@ def collect_metrics():
         ocserv_up.set(0)
         ocserv_scrape_errors.inc()
         # 服务不可用时重置所有流量指标
-        ocserv_active_users.set(0)
+        reset_session_counts()
         ocserv_rx_bytes.set(0)
         ocserv_tx_bytes.set(0)
         ocserv_rx_rate.set(0)
@@ -213,8 +253,11 @@ def collect_metrics():
     ocserv_info.info({"version": OCSERV_VERSION})
 
     # 用户统计
-    if users and isinstance(users, list):
-        ocserv_active_users.set(len(users))
+    if isinstance(users, list):
+        active_sessions = len(users)
+        active_accounts = len({metric_label_value(u.get("Username")) for u in users})
+        ocserv_active_sessions.set(active_sessions)
+        ocserv_active_accounts.set(active_accounts)
 
         # 总流量和实时速率
         rx_total, tx_total = 0, 0
@@ -229,11 +272,9 @@ def collect_metrics():
         current_labels = set()
 
         for u in users:
-            username = u.get("Username", "unknown")
-            ip = u.get("Remote IP", "unknown")
+            label = get_user_label_values(u)
             user_rx = parse_bytes(u.get("RX", "0"))
             user_tx = parse_bytes(u.get("TX", "0"))
-            label = (username, ip)
             current_labels.add(label)
 
             rx_total += user_rx
@@ -257,16 +298,17 @@ def collect_metrics():
             }
 
             # 用户详情指标
-            ocserv_user_rx.labels(username=username, ip=ip).set(user_rx)
-            ocserv_user_tx.labels(username=username, ip=ip).set(user_tx)
-            ocserv_user_rx_rate.labels(username=username, ip=ip).set(user_rx_rate)
-            ocserv_user_tx_rate.labels(username=username, ip=ip).set(user_tx_rate)
+            label_kwargs = dict(zip(USER_LABELS, label))
+            ocserv_user_rx.labels(**label_kwargs).set(user_rx)
+            ocserv_user_tx.labels(**label_kwargs).set(user_tx)
+            ocserv_user_rx_rate.labels(**label_kwargs).set(user_rx_rate)
+            ocserv_user_tx_rate.labels(**label_kwargs).set(user_tx_rate)
 
             # 连接时长
             connected_at = u.get("raw_connected_at", 0)
             if connected_at:
                 connected_seconds = scrape_time - connected_at
-                ocserv_user_connected.labels(username=username, ip=ip).set(connected_seconds)
+                ocserv_user_connected.labels(**label_kwargs).set(connected_seconds)
 
         # 清理已断开用户的旧 label 组合
         for label in old_rx_labels - current_labels:
@@ -288,15 +330,13 @@ def collect_metrics():
         ocserv_rx_rate.set(rx_rate_total)
         ocserv_tx_rate.set(tx_rate_total)
     else:
-        ocserv_active_users.set(0)
+        reset_session_counts()
         ocserv_rx_bytes.set(0)
         ocserv_tx_bytes.set(0)
         ocserv_rx_rate.set(0)
         ocserv_tx_rate.set(0)
         clear_user_metrics(clear_history=True)
 
-    # 记录采集成功
-    ocserv_scrape_success.inc()
     duration = time.time() - start_time
     ocserv_scrape_duration.set(duration)
 
