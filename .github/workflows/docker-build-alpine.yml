@@ -2,8 +2,15 @@ name: Build Alpine Feasibility Images
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ "alpine" ]
+    paths:
+      - 'Dockerfile.alpine'
+      - 'exporter/Dockerfile.alpine'
+      - '.github/workflows/docker-build-alpine.yml'
+      - 'scripts/render-ocserv-conf.sh'
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "alpine" ]
     paths:
       - 'Dockerfile.alpine'
       - 'exporter/Dockerfile.alpine'
