@@ -207,7 +207,7 @@ sudo openconnect -b "https://your.domain.com:${OCSERV_PORT}" --user=username
 | 在线用户 | `docker exec ocserv occtl show users` |
 | 服务状态 | `docker exec ocserv occtl show status` |
 | 重载配置 | `docker exec ocserv occtl reload` |
-| 删除用户 | `docker exec -it -u 0 ocserv ocpasswd -d /etc/ocserv/auth/ocpasswd username` |
+| 删除用户 | `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username` |
 
 ---
 
@@ -446,9 +446,11 @@ docker buildx build \
 | `BASE_IMAGE` | `alpine:3.22` | Alpine 基础镜像 |
 | `ALPINE_FLAVOR` | `slim` | `slim` 或 `full` |
 | `S6_SOURCE` | `auto` | `auto`、`apk` 或 `tarball` |
-| `APK_MIRROR` | `https://dl-cdn.alpinelinux.org/alpine` | Alpine apk 源 |
+| `APK_MIRROR` | `https://mirrors.tuna.tsinghua.edu.cn/alpine` | Alpine apk 源 |
 
 `S6_SOURCE=auto` 会优先尝试 Alpine 仓库中的 `s6-overlay` 包，若 `/init` 不可用则回退到 `src/` 中的 s6-overlay tarball。`S6_SOURCE=apk` 用于强制验证 Alpine 仓库包；`S6_SOURCE=tarball` 用于和现有 Debian 镜像的 s6-overlay 来源对照。
+
+GitHub Actions 中会显式设置 `APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine`，发布构建继续使用 Alpine 官方源。
 
 Alpine `slim` 会禁用 utmp 编译能力，渲染配置时需要同步关闭 `use-utmp`：
 
@@ -610,6 +612,12 @@ sudo ufw allow "${OCSERV_PORT:-443}/udp"
 
 ```bash
 docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
+```
+
+删除用户时同样需要用 `-c/--passwd` 指定密码文件；`-d/--delete` 只是删除开关，不接收密码文件路径：
+
+```bash
+docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username
 ```
 
 先确认运行中的容器实际挂载的是密码目录，并且为可写：

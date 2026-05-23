@@ -4,7 +4,7 @@ FROM ${BASE_IMAGE} AS builder
 
 ARG OCSERV_VERSION=1.4.2
 ARG ALPINE_FLAVOR=slim
-ARG APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 RUN set -eux; \
     . /etc/os-release; \
@@ -94,7 +94,7 @@ ARG S6_OVERLAY_VERSION=3.2.3.0
 ARG ALPINE_FLAVOR=slim
 ARG S6_SOURCE=auto
 ARG BUILD_DATE
-ARG APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 ARG TARGETARCH
 
 LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \

@@ -85,6 +85,7 @@ jobs:
             S6_OVERLAY_VERSION=${{ env.S6_OVERLAY_VERSION }}
             ALPINE_FLAVOR=${{ matrix.flavor }}
             S6_SOURCE=${{ matrix.s6-source }}
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
 
   build-exporter-alpine:
@@ -128,4 +129,5 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}

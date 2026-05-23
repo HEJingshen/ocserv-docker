@@ -3,7 +3,7 @@ ARG BASE_IMAGE=alpine:3.22
 FROM ${BASE_IMAGE} AS builder
 
 ARG OCSERV_VERSION=1.4.2
-ARG APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 RUN set -eux; \
     . /etc/os-release; \
@@ -67,7 +67,7 @@ FROM ${BASE_IMAGE}
 
 ARG OCSERV_VERSION=1.4.2
 ARG BUILD_DATE
-ARG APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv-exporter-alpine" \
