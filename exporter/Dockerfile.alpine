@@ -23,6 +23,7 @@ RUN set -eux; \
         gnutls-dev \
         libev-dev \
         libnl3-dev \
+        linux-headers \
         meson \
         nettle-dev \
         ninja \
