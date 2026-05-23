@@ -249,8 +249,9 @@ healthcheck:
 | 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`，直接执行 `ocserv-exporter.py` |
 | 数据采集 | 通过 `occtl -j show status` 和 `occtl -j show users`（JSON 格式）调用 ocserv 的 Unix socket 接口 |
 | 暴露端口 | `9100` |
-| 采集周期 | 镜像默认 15 秒；监控编排默认 5 秒，适合少于 10 个同时在线用户 |
+| 采集周期 | 镜像和监控编排默认 10 秒；生产均衡低压配置 |
 | occtl 超时 | 镜像默认 5 秒；监控编排默认 2 秒，避免采集阻塞超过 Prometheus timeout |
+| 会话明细 | 默认关闭 `ocserv_user_*` 高基数指标，可通过 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 开启 |
 
 **采集指标**：
 
@@ -260,15 +261,24 @@ healthcheck:
 | `ocserv_active_sessions` | Gauge | `show users` 返回列表长度 | 当前在线会话数 |
 | `ocserv_active_accounts` | Gauge | `show users` 中 `Username` 去重 | 当前唯一账号数 |
 | `ocserv_uptime_seconds` | Gauge | `show status.uptime` | 主进程运行时长 |
-| `ocserv_bytes_rx_total` | Gauge | 遍历用户列表累加 `RX` | 当前活跃会话累计接收字节求和 |
-| `ocserv_bytes_tx_total` | Gauge | 遍历用户列表累加 `TX` | 当前活跃会话累计发送字节求和 |
-| `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 根据相邻两次采集的 `RX` 差值计算 | 当前接收速率 |
-| `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次采集的 `TX` 差值计算 | 当前发送速率 |
+| `ocserv_start_time_seconds` | Gauge | `show status.raw_up_since` | 服务启动时间戳 |
+| `ocserv_sessions_total` | Gauge | `show status.Total sessions` | 服务启动以来处理的总会话数 |
+| `ocserv_authentication_failures_total` | Gauge | `show status.Total authentication failures` | 服务启动以来认证失败总数 |
+| `ocserv_banned_ips` | Gauge | `show status.IPs in ban list` | 当前封禁 IP 数 |
+| `ocserv_stats_*` | Gauge | `show status` stats 字段 | 上次 stats reset 以来的会话、超时、错误关闭、认证失败和流量统计 |
+| `ocserv_auth_time_*_seconds` | Gauge | `show status.raw_*_auth_time` | 平均/最大认证耗时 |
+| `ocserv_session_time_*_seconds` | Gauge | `show status.raw_*_session_time` | 平均/最大会话时长 |
+| `ocserv_stats_bytes_rx_total` | Gauge | `show status.raw_rx` | 上次 stats reset 以来的接收字节累计值 |
+| `ocserv_stats_bytes_tx_total` | Gauge | `show status.raw_tx` | 上次 stats reset 以来的发送字节累计值 |
+| `ocserv_bytes_rx_total` | Gauge | 遍历用户列表累加 `RX` | 当前在线会话累计接收字节求和 |
+| `ocserv_bytes_tx_total` | Gauge | 遍历用户列表累加 `TX` | 当前在线会话累计发送字节求和 |
+| `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前接收速率 |
+| `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前发送速率 |
 | `ocserv_build_info` | Info | `occtl --version` | ocserv 版本 |
 
-每会话指标使用 `username`, `session_id`, `ip`, `vpn_ip`, `device` 标签。`session_id` 优先来自 ocserv 连接 ID，用于区分同一账号、同一公网 IP 后的多个并发连接。
+每会话指标默认关闭。开启后使用 `username`, `session_id`, `ip`, `vpn_ip`, `device` 标签。`session_id` 优先来自 ocserv 连接 ID，用于区分同一账号、同一公网 IP 后的多个并发连接。
 
-采集周期：按 `EXPORTER_INTERVAL_SECONDS` 执行 `collect_metrics()`，最小 5 秒。生产建议少于 10 个在线用户用 5 秒，10-100 人用 10 秒，超过 100 人用 15 秒。
+采集周期：按 `EXPORTER_INTERVAL_SECONDS` 执行 `collect_metrics()`，最小 5 秒。建议小规模排障用 5 秒，均衡生产用 10 秒，资源优先或在线用户较多时用 15 秒。
 
 ### 4.2 Prometheus
 
@@ -278,7 +288,7 @@ healthcheck:
 | 子路径 | `--web.route-prefix=/prometheus` 和 `--web.external-url` 使其在 `/prometheus/` 路径下运行 |
 | 数据存储 | `prometheus_data` Docker 卷，容器重建不丢失 |
 | 采集目标 | `ocserv:9100`，路径 `/metrics` |
-| 采集间隔 | 全局 5 秒 |
+| 采集间隔 | 全局 10 秒 |
 
 ### 4.3 Grafana
 
@@ -294,7 +304,8 @@ healthcheck:
 
 | 看板 | 默认刷新 | 查询重点 | 说明 |
 |:--|:--|:--|:--|
-| Ocserv VPN | 15 秒 | 服务状态、活跃会话、活跃账号、采集健康、实时速率、当前会话明细、累计流量、会话趋势、排行、连接时长、版本 | 生产默认统一看板 |
+| Ocserv VPN Overview | 30 秒 | 服务状态、活跃会话、活跃账号、采集健康、实时速率、累计流量、版本 | 默认长期打开，避免高基数查询 |
+| Ocserv VPN Sessions | 30 秒 | 当前会话明细、排行、连接时长 | 排障时使用，需开启 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` |
 
 ### 4.4 Nginx 反向代理
 
@@ -490,12 +501,13 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── ocserv-exporter.py              # Prometheus 指标采集器
 │
 ├── monitoring/
-│   ├── prometheus.yml                  # 采集配置（5s 间隔）
+│   ├── prometheus.yml                  # 采集配置（10s 间隔）
 │   ├── datasources/prometheus.yml      # Grafana 数据源自动注入
 │   └── dashboards/
 │       ├── dashboards.yml              # Grafana dashboard provider
 │       └── definitions/
-│           └── ocserv.json             # 统一监控看板
+│           ├── ocserv.json             # Overview 总览看板
+│           └── ocserv-sessions.json    # Sessions 会话明细看板
 │
 ├── nginx/
 │   ├── templates/                      # Nginx 配置模板（支持环境变量替换）

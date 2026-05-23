@@ -93,11 +93,12 @@ docker logs grafana
 
 ### 查看仪表盘
 
-项目已内置一个 ocserv 统一监控面板，登录后在 **Dashboards** 中即可看到：
+项目已内置两块 ocserv 监控面板，登录后在 **Dashboards** 中即可看到：
 
-- **Ocserv VPN** — 生产默认统一看板，15 秒刷新，按顺序展示服务状态、活跃会话、活跃账号、采集健康、实时速率、当前会话明细、累计流量、会话趋势、排行、连接时长和版本信息。
+- **Ocserv VPN Overview** — 生产默认总览看板，30 秒刷新，只查询服务级和聚合指标。
+- **Ocserv VPN Sessions** — 排障明细看板，查询 `ocserv_user_*` 和用户排行；需先启用 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true`。
 
-默认长期打开 `Ocserv VPN`。同一看板内已合并概览和详情指标，避免在 Grafana 中维护多块 ocserv 看板。
+默认长期打开 `Ocserv VPN Overview`。只有需要用户排行、每会话表格或连接时长时再打开 Sessions 看板。
 
 ### 添加自定义告警
 
@@ -136,7 +137,7 @@ docker stats --no-stream grafana prometheus ocserv-exporter
 
 - `OOMKilled=true` 或 `ExitCode=137`：Grafana 大概率被 OOM kill。保持默认 `GRAFANA_MEM_LIMIT=512m`，如果仍发生可提升到 `768m` 或 `1g`。
 - Nginx 出现 `connect() failed (111: Connection refused)`：Grafana 当时不可用，常见于重启或 OOM。
-- Nginx 出现 `upstream timed out`：更像查询慢或 Prometheus 响应慢，优先检查 Grafana 查询时间范围、Prometheus 负载和统一看板中的高基数会话面板。
+- Nginx 出现 `upstream timed out`：更像查询慢或 Prometheus 响应慢，优先检查 Grafana 查询时间范围、Prometheus 负载和 Sessions 看板中的高基数会话面板。
 
 修改 `.env` 中的 Grafana 资源限制后需要重建 Grafana 容器：
 
@@ -156,8 +157,14 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --fo
 | `ocserv_active_sessions` | Gauge | 当前在线会话数 |
 | `ocserv_active_accounts` | Gauge | 当前唯一账号数 |
 | `ocserv_uptime_seconds` | Gauge | 运行时长（秒） |
-| `ocserv_bytes_rx_total` | Gauge | 当前活跃会话累计接收字节求和 |
-| `ocserv_bytes_tx_total` | Gauge | 当前活跃会话累计发送字节求和 |
+| `ocserv_start_time_seconds` | Gauge | 服务启动时间戳 |
+| `ocserv_sessions_total` | Gauge | 服务启动以来处理的总会话数 |
+| `ocserv_authentication_failures_total` | Gauge | 服务启动以来认证失败总数 |
+| `ocserv_banned_ips` | Gauge | 当前封禁 IP 数 |
+| `ocserv_stats_bytes_rx_total` | Gauge | `show status.raw_rx`，上次 stats reset 以来的累计接收字节，用于 Overview 的 Traffic Total 面板 |
+| `ocserv_stats_bytes_tx_total` | Gauge | `show status.raw_tx`，上次 stats reset 以来的累计发送字节，用于 Overview 的 Traffic Total 面板 |
+| `ocserv_bytes_rx_total` | Gauge | 当前在线会话累计接收字节求和，固定来自 `show users` |
+| `ocserv_bytes_tx_total` | Gauge | 当前在线会话累计发送字节求和，固定来自 `show users` |
 | `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 当前接收速率（字节/秒） |
 | `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 当前发送速率（字节/秒） |
 | `ocserv_build_info` | Info | ocserv 版本信息 |
@@ -181,7 +188,7 @@ rate(ocserv_bytes_rx_total[1m])
 ocserv_up
 ```
 
-同一账号多设备同时连接时，Grafana 会同时展示会话数和唯一账号数。每会话流量指标带 `session_id` 标签，因此同账号、同公网 IP 的连接也会在明细表和趋势图中分开显示。
+默认 Overview 看板只查询服务级和聚合指标，避免默认加载 `ocserv_user_*` 高基数序列。需要用户排行、每会话表格或连接时长时，设置 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 并打开 Ocserv VPN Sessions 看板。同一账号多设备同时连接时，每会话流量指标带 `session_id` 标签，因此同账号、同公网 IP 的连接也会在明细表和趋势图中分开显示。
 
 ### 指标重要性评估
 
@@ -191,32 +198,41 @@ ocserv_up
 | `ocserv_active_sessions` | 关键 | 当前真实在线会话数 |
 | `ocserv_active_accounts` | 高 | 区分同账号多设备场景，排障价值高 |
 | `ocserv_bytes_rx/tx_rate_bytes_per_second` | 高 | 实时带宽面板核心指标 |
-| `ocserv_scrape_errors_total` | 高 | 发现 exporter、occtl 或 socket 异常 |
-| `ocserv_user_bytes_rx/tx` | 中高 | 每会话流量、排行、明细表依赖，标签基数随会话数增长 |
-| `ocserv_user_connected_seconds` | 中高 | 连接时长排障有用 |
+| `ocserv_sessions_total` / `ocserv_authentication_failures_total` / `ocserv_banned_ips` | 高 | 固定服务级指标，成本低，适合默认开启 |
+| `ocserv_user_bytes_rx/tx` | 中高 | 每会话流量、排行、明细表依赖，标签基数随会话数增长，默认关闭 |
+| `ocserv_user_connected_seconds` | 中高 | 连接时长排障有用，默认关闭 |
 | `ocserv_scrape_duration_seconds` | 中 | 采集性能和 occtl 阻塞排查有用 |
-| `ocserv_bytes_rx/tx_total` | 中 | 活跃会话流量求和，不适合作为严格单调 Counter 使用 |
+| `ocserv_bytes_rx/tx_total` | 中 | 当前在线会话流量求和，不适合作为严格单调 Counter 使用 |
 | `ocserv_uptime_seconds` | 中 | 服务运行时长辅助排障 |
 | `ocserv_build_info` | 低中 | 版本定位有用，维护成本低 |
-| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | 低中 | 当前明细诊断有价值，Grafana 默认看板未直接展示 |
+| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | 低中 | 当前明细诊断有价值，仅 Sessions 看板使用 |
 
 ### 修改采集间隔
 
-采集实时性由三层共同决定：exporter 内部采集间隔、Prometheus 拉取间隔、Grafana 面板刷新间隔。少于 10 个同时在线用户的生产环境建议 exporter 和 Prometheus 保持 5 秒采集，Grafana 统一看板使用 15 秒刷新；10-100 人建议采集和看板都使用 10-15 秒；超过 100 人建议使用 15 秒或更长。
+采集实时性由三层共同决定：exporter 内部采集间隔、Prometheus 拉取间隔、Grafana 面板刷新间隔。生产默认使用 10 秒采集和 30 秒看板刷新，兼顾实时性与资源占用。
+
+三档建议：
+
+| 策略 | exporter / Prometheus | Grafana 刷新 | 适用场景 |
+|:--|:--|:--|:--|
+| 实时优先 | `5s` | `15s` | 小规模、临时排障 |
+| 均衡生产 | `10s` | `30s` | 默认推荐 |
+| 资源优先 | `15s` | `60s` | 在线用户较多或低配服务器 |
 
 在 `.env` 中调整 exporter：
 
 ```env
-EXPORTER_INTERVAL_SECONDS=5
+EXPORTER_INTERVAL_SECONDS=10
 OCCTL_TIMEOUT_SECONDS=2
+EXPORTER_ENABLE_SESSION_DETAIL_METRICS=false
 ```
 
 编辑 `monitoring/prometheus.yml`，同步调整 `scrape_interval` 和 `scrape_timeout`：
 
 ```yaml
 global:
-  scrape_interval: 5s       # Prometheus 拉取频率
-  evaluation_interval: 15s  # 告警规则评估频率
+  scrape_interval: 10s      # Prometheus 拉取频率
+  evaluation_interval: 30s  # 告警规则评估频率
 
 scrape_configs:
   - job_name: "ocserv"
