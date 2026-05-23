@@ -3,6 +3,7 @@
 [![Build & Pull](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build.yml/badge.svg)](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build.yml)
 [![Build & Pull](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build-exporter.yml/badge.svg)](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build-exporter.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/kingsonho/ocserv)](https://hub.docker.com/r/kingsonho/ocserv)
+[![Docker Pulls](https://img.shields.io/docker/pulls/kingsonho/ocserv-exporter)](https://hub.docker.com/r/kingsonho/ocserv-exporter)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
 基于 Docker 的 OpenConnect VPN Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **s6-overlay 进程管理**，可选 **Prometheus + Grafana 监控栈**。
@@ -378,6 +379,7 @@ docker buildx build \
 | `OCSERV_VERSION` | `1.4.2` | ocserv 版本 |
 | `S6_OVERLAY_VERSION` | `3.2.3.0` | s6-overlay 版本 |
 | `BASE_IMAGE` | `debian:trixie-slim` | 基础镜像 |
+| `USE_TUNA_MIRROR` | `true` | 是否使用清华 apt 源；GitHub Actions 中设为 `false` |
 
 **多架构构建**：
 

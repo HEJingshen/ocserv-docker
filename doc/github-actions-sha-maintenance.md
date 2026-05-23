@@ -4,45 +4,13 @@
 
 ## Dependabot 更新
 
-Dependabot 会在每周一 09:00 Asia/Shanghai 检查 GitHub Actions 更新，并把 action 更新合并到一个 pull request 中。
+Dependabot 会在每月 1 日 09:00 Asia/Shanghai 检查 GitHub Actions 更新，并把 action 更新合并到一个 pull request 中。
 
 合并 Dependabot pull request 前需要完成以下审核：
 
 - patch 和 minor 更新可以在 CI 通过，并且 release notes 未显示破坏性 workflow 变更时接受。
 - major 更新必须人工审核后再合并。重点检查 Node runtime 变化、最低 runner 版本要求、被移除的 inputs、被移除的 outputs，以及默认行为变化。
 - `aquasecurity/trivy-action` 更新需要额外谨慎。检查 release notes、安全公告，以及 release 是否签名或不可变。
-
-## 每月人工巡检
-
-即使 Dependabot 没有创建 pull request，也应每月执行一次人工检查。
-
-列出当前固定的 action 引用：
-
-```bash
-rg -n 'uses: .+@[0-9a-f]{40}' .github/workflows
-```
-
-检查某个 action 的最新 release：
-
-```bash
-gh release list -R docker/build-push-action --limit 5
-```
-
-将 release tag 解析为对应的 commit SHA：
-
-```bash
-git ls-remote --tags https://github.com/docker/build-push-action.git 'refs/tags/v7.2.0' 'refs/tags/v7.2.0^{}'
-```
-
-如果 tag 是 annotated tag，使用 `^{}` 解引用后的 commit SHA。如果命令只返回一行，则使用该行 SHA。
-
-更新 workflow 时，必须同时更新 SHA 和同一行版本提示：
-
-```yaml
-uses: owner/action@<40-char-commit-sha> # vX.Y.Z
-```
-
-不要使用 `@master`、`@main`、`@latest` 或 `@vN` 这类可变引用。
 
 ## 验证
 

@@ -80,11 +80,12 @@ jobs:
             OCSERV_VERSION=${{ env.OCSERV_VERSION }}
             S6_OVERLAY_VERSION=${{ env.S6_OVERLAY_VERSION }}
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+            USE_TUNA_MIRROR=false
 
       - name: Test image (PR only)
         if: github.event_name == 'pull_request'
         run: |
-          docker build -t test-image .
+          docker build --build-arg USE_TUNA_MIRROR=false -t test-image .
           docker run --rm --entrypoint ocserv test-image --version || echo "ocserv binary check failed"
 
       - name: Run Trivy vulnerability scanner

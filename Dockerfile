@@ -4,8 +4,9 @@ FROM ${BASE_IMAGE} AS builder
 
 ARG OCSERV_VERSION=1.4.2
 ARG DEBIAN_FRONTEND=noninteractive
+ARG USE_TUNA_MIRROR=true
 
-RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+RUN if [ "${USE_TUNA_MIRROR}" = "true" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's@//.*deb.debian.org@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
     fi
 
@@ -74,6 +75,7 @@ ARG OCSERV_VERSION=1.4.2
 ARG S6_OVERLAY_VERSION=3.2.3.0
 ARG BUILD_DATE
 ARG DEBIAN_FRONTEND=noninteractive
+ARG USE_TUNA_MIRROR=true
 
 LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv" \
@@ -83,7 +85,7 @@ LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/HEJingshen/ocserv-docker"
 
-RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+RUN if [ "${USE_TUNA_MIRROR}" = "true" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's@//.*deb.debian.org@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
     fi
 

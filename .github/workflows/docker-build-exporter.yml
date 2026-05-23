@@ -73,11 +73,12 @@ jobs:
           build-args: |
             OCSERV_VERSION=${{ env.OCSERV_VERSION }}
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+            USE_TUNA_MIRROR=false
 
       - name: Test image (PR only)
         if: github.event_name == 'pull_request'
         run: |
-          docker build -f exporter/Dockerfile -t test-exporter .
+          docker build -f exporter/Dockerfile --build-arg USE_TUNA_MIRROR=false -t test-exporter .
           docker run --rm test-exporter occtl --version || echo "occtl binary check failed"
 
       - name: Run Trivy vulnerability scanner
