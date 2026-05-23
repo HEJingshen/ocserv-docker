@@ -1,0 +1,103 @@
+name: Build Alpine Feasibility Images
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - 'Dockerfile.alpine'
+      - 'exporter/Dockerfile.alpine'
+      - '.github/workflows/docker-build-alpine.yml'
+      - 'scripts/render-ocserv-conf.sh'
+
+env:
+  OCSERV_VERSION: "1.4.2"
+  S6_OVERLAY_VERSION: "3.2.3.0"
+
+jobs:
+  build-ocserv-alpine:
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.s6-source == 'apk' || matrix.flavor == 'full' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [ "slim", "full" ]
+        s6-source: [ "auto", "apk", "tarball" ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download source files
+        run: |
+          mkdir -p src
+          curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
+            https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
+          curl -L -o src/s6-overlay-noarch.tar.xz \
+            https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-noarch.tar.xz
+          curl -L -o src/s6-overlay-x86_64.tar.xz \
+            https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-x86_64.tar.xz
+          curl -L -o src/s6-overlay-aarch64.tar.xz \
+            https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-aarch64.tar.xz
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Set build date
+        id: date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Build ocserv Alpine image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: Dockerfile.alpine
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ocserv:alpine-${{ matrix.flavor }}-${{ matrix.s6-source }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            S6_OVERLAY_VERSION=${{ env.S6_OVERLAY_VERSION }}
+            ALPINE_FLAVOR=${{ matrix.flavor }}
+            S6_SOURCE=${{ matrix.s6-source }}
+            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+
+  build-exporter-alpine:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download source files
+        run: |
+          mkdir -p src
+          curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
+            https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Set build date
+        id: date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Build exporter Alpine image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: exporter/Dockerfile.alpine
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ocserv-exporter:alpine
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}

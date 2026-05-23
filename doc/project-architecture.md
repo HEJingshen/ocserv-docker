@@ -62,6 +62,17 @@
 | 清华源 | 配置 `mirrors.tuna.tsinghua.edu.cn` 加速 apt 下载 |
 | PATH | `/command` 加入 PATH，使 `docker exec` 可用 s6-overlay v3 工具 |
 
+### Alpine 可行性构建
+
+`Dockerfile.alpine` 是独立实验入口，不替换默认 Debian 镜像。它支持 `ALPINE_FLAVOR=slim|full` 和 `S6_SOURCE=auto|apk|tarball`：
+
+| 变体 | 用途 | 关键能力 |
+|:--|:--|:--|
+| `slim` | 生产灰度优先验证目标 | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
+| `full` | 能力验证目标 | 尽量保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
+
+`S6_SOURCE=auto` 会先尝试 Alpine 仓库 `s6-overlay` 包，验证 `/init` 可用后使用；否则回退到仓库 `src/` 中的 s6-overlay tarball。`slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
+
 ### 镜像元数据（LABELs）
 
 构建后的镜像携带 OCI 标准标注，便于运维识别：
@@ -475,6 +486,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 ```
 ├── Dockerfile                          # 多阶段构建 + s6 服务定义（内嵌 s6-init.sh）
+├── Dockerfile.alpine                   # Alpine 可行性构建入口
 ├── docker-compose.yml                  # 主 VPN 服务编排（支持环境变量）
 ├── docker-compose.monitoring.yml       # 监控栈编排（exporter + Prometheus + Grafana + Nginx）
 ├── install-docker.sh                   # Docker 一键安装脚本
@@ -498,6 +510,8 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── ocpasswd                        # 用户密码文件
 │
 ├── exporter/
+│   ├── Dockerfile                      # exporter 多阶段构建
+│   ├── Dockerfile.alpine               # exporter Alpine 可行性构建
 │   └── ocserv-exporter.py              # Prometheus 指标采集器
 │
 ├── monitoring/

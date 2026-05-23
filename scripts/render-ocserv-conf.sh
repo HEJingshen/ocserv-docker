@@ -17,6 +17,7 @@ OUTPUT_FILE=${OCSERV_CONF_OUTPUT:-"${PROJECT_ROOT}/config/ocserv.conf"}
 [ -f "${TEMPLATE_FILE}" ] || fail "template file not found: ${TEMPLATE_FILE}"
 
 DOMAIN=${DOMAIN:-}
+OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-false}
 if [ -z "${DOMAIN}" ]; then
     DOMAIN=$(
         awk '
@@ -73,7 +74,15 @@ OUTPUT_DIR=$(dirname -- "${OUTPUT_FILE}")
 TMP_FILE=$(mktemp "${OUTPUT_DIR}/.ocserv.conf.XXXXXX") || fail "failed to create temporary config"
 trap 'rm -f "${TMP_FILE}"' EXIT HUP INT TERM
 
-awk -v domain="${DOMAIN}" '{ gsub(/\$\{DOMAIN\}/, domain); print }' "${TEMPLATE_FILE}" > "${TMP_FILE}"
+awk -v domain="${DOMAIN}" -v disable_utmp="${OCSERV_DISABLE_UTMP}" '
+    {
+        gsub(/\$\{DOMAIN\}/, domain)
+        if (disable_utmp == "true" && $0 ~ /^[[:space:]]*use-utmp[[:space:]]*=/) {
+            sub(/=.*/, "= false")
+        }
+        print
+    }
+' "${TEMPLATE_FILE}" > "${TMP_FILE}"
 
 if grep -q '\${DOMAIN}' "${TMP_FILE}"; then
     fail "unrendered DOMAIN placeholder remains in generated config"

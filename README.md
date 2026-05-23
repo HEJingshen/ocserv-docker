@@ -414,6 +414,50 @@ docker buildx build --build-arg BASE_IMAGE=ubuntu:24.04 -t ocserv:ubuntu .
 
 > ⚠️ 非 Debian 基础镜像需调整依赖包名并验证 s6-overlay 兼容性。
 
+### 4.5 Alpine 可行性镜像（实验）
+
+仓库提供独立的 Alpine 构建入口，不会替换默认 Debian 镜像：
+
+```bash
+# Alpine slim：生产灰度优先验证目标，保留 LZ4、plain auth、occtl、iptables NAT、s6
+docker buildx build \
+  -f Dockerfile.alpine \
+  --build-arg ALPINE_FLAVOR=slim \
+  --build-arg S6_SOURCE=auto \
+  -t ocserv:1.4.2-alpine-slim .
+
+# Alpine full：能力验证目标，不建议直接作为首批生产候选
+docker buildx build \
+  -f Dockerfile.alpine \
+  --build-arg ALPINE_FLAVOR=full \
+  --build-arg S6_SOURCE=auto \
+  -t ocserv:1.4.2-alpine-full .
+
+# Alpine exporter
+docker buildx build \
+  -f exporter/Dockerfile.alpine \
+  -t ocserv-exporter:1.4.2-alpine .
+```
+
+**Alpine 构建参数**：
+
+| ARG | 默认值 | 说明 |
+|:--|:--|:--|
+| `BASE_IMAGE` | `alpine:3.22` | Alpine 基础镜像 |
+| `ALPINE_FLAVOR` | `slim` | `slim` 或 `full` |
+| `S6_SOURCE` | `auto` | `auto`、`apk` 或 `tarball` |
+| `APK_MIRROR` | `https://dl-cdn.alpinelinux.org/alpine` | Alpine apk 源 |
+
+`S6_SOURCE=auto` 会优先尝试 Alpine 仓库中的 `s6-overlay` 包，若 `/init` 不可用则回退到 `src/` 中的 s6-overlay tarball。`S6_SOURCE=apk` 用于强制验证 Alpine 仓库包；`S6_SOURCE=tarball` 用于和现有 Debian 镜像的 s6-overlay 来源对照。
+
+Alpine `slim` 会禁用 utmp 编译能力，渲染配置时需要同步关闭 `use-utmp`：
+
+```bash
+OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh
+```
+
+Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS 与 OTP/liboath。若 Alpine 稳定仓库缺少对应开发包，构建不会补源码依赖，相关能力需要在可行性报告中标记为未等价。
+
 ---
 
 ## 五、配置参考
