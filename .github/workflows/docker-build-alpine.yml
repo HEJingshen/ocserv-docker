@@ -18,18 +18,25 @@ on:
       - 'scripts/render-ocserv-conf.sh'
 
 env:
+  REGISTRY: docker.io
+  OCSERV_IMAGE_NAME: kingsonho/ocserv
+  EXPORTER_IMAGE_NAME: kingsonho/ocserv-exporter
   OCSERV_VERSION: "1.4.2"
   S6_OVERLAY_VERSION: "3.2.3.0"
 
 jobs:
   build-ocserv-alpine:
     runs-on: ubuntu-24.04
-    continue-on-error: ${{ matrix.s6-source == 'apk' || matrix.flavor == 'full' }}
     strategy:
       fail-fast: false
       matrix:
-        flavor: [ "slim", "full" ]
-        s6-source: [ "auto", "apk", "tarball" ]
+        include:
+          - flavor: slim
+            s6-source: apk
+            tag: alpine-slim
+          - flavor: full
+            s6-source: apk
+            tag: alpine
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -52,6 +59,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
+      - name: Login to Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Set build date
         id: date
         run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
@@ -62,8 +76,8 @@ jobs:
           context: .
           file: Dockerfile.alpine
           platforms: linux/amd64,linux/arm64
-          push: false
-          tags: ocserv:alpine-${{ matrix.flavor }}-${{ matrix.s6-source }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ matrix.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -91,6 +105,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
+      - name: Login to Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Set build date
         id: date
         run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
@@ -101,8 +122,8 @@ jobs:
           context: .
           file: exporter/Dockerfile.alpine
           platforms: linux/amd64,linux/arm64
-          push: false
-          tags: ocserv-exporter:alpine
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:alpine
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
