@@ -8,9 +8,13 @@ ARG APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
 
 RUN set -eux; \
     . /etc/os-release; \
+    ALPINE_BRANCH="${VERSION_ID}"; \
+    case "${ALPINE_BRANCH}" in \
+        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
+    esac; \
     printf '%s/v%s/main\n%s/v%s/community\n' \
-        "${APK_MIRROR}" "${VERSION_ID}" \
-        "${APK_MIRROR}" "${VERSION_ID}" \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
         > /etc/apk/repositories
 
 RUN set -eux; \
@@ -105,9 +109,13 @@ LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
 
 RUN set -eux; \
     . /etc/os-release; \
+    ALPINE_BRANCH="${VERSION_ID}"; \
+    case "${ALPINE_BRANCH}" in \
+        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
+    esac; \
     printf '%s/v%s/main\n%s/v%s/community\n' \
-        "${APK_MIRROR}" "${VERSION_ID}" \
-        "${APK_MIRROR}" "${VERSION_ID}" \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
         > /etc/apk/repositories
 
 COPY --from=builder /out/ /
