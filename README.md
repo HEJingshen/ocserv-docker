@@ -1,6 +1,7 @@
 # ocserv-docker
 
 [![Build & Pull](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build.yml/badge.svg)](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build.yml)
+[![Build & Pull](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build-exporter.yml/badge.svg)](https://github.com/HEJingshen/ocserv-docker/actions/workflows/docker-build-exporter.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/kingsonho/ocserv)](https://hub.docker.com/r/kingsonho/ocserv)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
