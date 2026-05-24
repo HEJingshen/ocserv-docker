@@ -6,6 +6,7 @@ AGENTS.md
 
 # Local source archives
 src/*.tar.xz
+src/*.tar.gz
 
 # Environment variables (contains sensitive data)
 .env

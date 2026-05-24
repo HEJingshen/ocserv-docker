@@ -2,11 +2,11 @@
 
 ## 总览
 
-本项目将 OpenConnect VPN Server（ocserv）容器化，围绕 **VPN 服务** 核心，向外扩展 **监控栈**、**安全防护**、**CI/CD 自动化** 三层能力。
+本项目将 OpenConnect Server（ocserv）容器化，围绕 **主服务** 核心，向外扩展 **监控栈**、**安全防护**、**CI/CD 自动化** 三层能力。
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    用户 VPN 客户端                    │
+│                      用户客户端                       │
 └──────────────────────┬──────────────────────────────┘
                        │ :443 TCP/UDP
 ┌──────────────────────▼──────────────────────────────┐
@@ -64,7 +64,7 @@
 
 ### Alpine 可行性构建
 
-`Dockerfile.alpine` 是独立实验入口，不替换默认 Debian 镜像。它支持 `ALPINE_FLAVOR=slim|full` 和 `S6_SOURCE=auto|apk|tarball`：
+`Dockerfile.alpine` 是独立实验入口，不替换默认 Debian 镜像。当前基线为 `alpine:3.23`，让 Docker 官方镜像自动跟随 v3.23 分支最新 patch。它支持 `ALPINE_FLAVOR=slim|full` 和 `S6_SOURCE=auto|apk|tarball`：
 
 | 变体 | 用途 | 关键能力 |
 |:--|:--|:--|
@@ -72,6 +72,8 @@
 | `full` | 能力验证目标 | 尽量保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
 
 `S6_SOURCE=auto` 会先尝试 Alpine 仓库 `s6-overlay` 包，验证 `/init` 可用后使用；否则回退到仓库 `src/` 中的 s6-overlay tarball。`slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
+
+仓库同时提供 `Dockerfile.alpine-minirootfs` 和 `exporter/Dockerfile.alpine-minirootfs` 作为供应链可追溯实验入口。它们从已下载并校验的 `alpine-minirootfs-3.23.4-{arch}.tar.gz` 创建 `alpine-rootfs` stage，builder 与 runtime 都从同一 rootfs 派生；minirootfs tarball 由 `scripts/download-alpine-minirootfs.sh` 下载到 `src/`，不提交到 Git。
 
 ### 镜像元数据（LABELs）
 
@@ -109,10 +111,10 @@ Dockerfile 中通过 `RUN <<'ENDSCRIPT'` 内联脚本创建 s6 服务树：
 
 ### 暴露端口
 
-- `443/tcp` — VPN TCP 连接（标准 HTTPS 端口）
-- `443/udp` — VPN UDP 连接（DTLS，AnyConnect 协议支持）
+- `443/tcp` — TCP 连接（标准 HTTPS 端口）
+- `443/udp` — UDP 连接（DTLS，AnyConnect 协议支持）
 
-> VPN 服务使用标准 443 端口，客户端无需指定端口即可连接。
+> ocserv 使用标准 443 端口，客户端无需指定端口即可连接。
 
 ### 健康检查
 
@@ -140,13 +142,13 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
    ├─ /run/ocserv   (socket 存放)
    └─ /var/log/ocserv (日志目录)
 
-4. 解析 VPN IPv4 子网（从 ocserv.conf）
+4. 解析客户端 IPv4 子网（从 ocserv.conf）
    ├─ 格式A: ipv4-network = 10.10.10.0/24       → 直接使用 CIDR
    └─ 格式B: ipv4-network = 10.10.10.0          → 配合 ipv4-netmask 计算前缀
               ipv4-netmask = 255.255.255.0
 
 5. 配置 iptables NAT/转发规则
-   ├─ FORWARD 链: 允许 VPN 子网双向转发
+   ├─ FORWARD 链: 允许客户端子网双向转发
    └─ NAT POSTROUTING: MASQUERADE 伪装（出口接口自动检测）
 
 6. 若无法解析子网，使用默认值 10.10.10.0/24
@@ -155,13 +157,13 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 **注意**：原有的 `entrypoint.sh` 文件已不再使用，初始化逻辑已内嵌至 Dockerfile 的 `RUN <<'ENDSCRIPT'` 块中，生成 `/etc/ocserv/s6-init.sh`。旧 `entrypoint.sh` 保留为遗留文件。
 
-这种设计确保配置错误在启动阶段就被拦截，而不是等 ocserv 崩溃后才发现问题。同时，自动配置 iptables 规则使 VPN 客户端无需额外手动配置即可通过容器上网。
+这种设计确保配置错误在启动阶段就被拦截，而不是等 ocserv 崩溃后才发现问题。同时，自动配置 iptables 规则使客户端无需额外手动配置即可通过容器上网。
 
 ---
 
 ## 三、容器编排（docker-compose.yml）
 
-主 VPN 服务的核心配置：
+主服务的核心配置：
 
 ### 环境变量管理
 
@@ -177,8 +179,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
-| `OCSERV_IMAGE` | `kingsonho/ocserv:latest` | VPN 服务镜像 |
-| `OCSERV_PORT` | `443` | VPN 服务宿主机端口 |
+| `OCSERV_IMAGE` | `kingsonho/ocserv:latest` | ocserv 服务镜像 |
+| `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
 | `TZ` | `Asia/Shanghai` | 时区设置 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
 | `LOG_MAX_FILE` | `3` | 日志文件保留数量 |
@@ -190,7 +192,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 配置项 | 值 | 作用 |
 |:--|:--|:--|
-| `ports` | `${OCSERV_PORT:-443}:443/tcp+udp` | 映射 VPN 监听端口到宿主机（容器内部固定监听 443） |
+| `ports` | `${OCSERV_PORT:-443}:443/tcp+udp` | 映射 ocserv 监听端口到宿主机（容器内部固定监听 443） |
 
 > **端口映射格式**：`宿主机端口:容器端口`。容器内 ocserv 服务固定监听 443 端口（由 `ocserv.conf` 配置），仅可通过 `OCSERV_PORT` 环境变量修改宿主机映射端口。
 
@@ -209,7 +211,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | 配置项 | 值 | 作用 |
 |:--|:--|:--|
 | `cap_add` | `NET_ADMIN` | 允许容器操作网络栈（NAT、路由表） |
-| `devices` | `/dev/net/tun` | TUN 设备，VPN 隧道必需 |
+| `devices` | `/dev/net/tun` | TUN 设备，隧道连接必需 |
 | `sysctls` | `net.ipv4.ip_forward=1`<br>`net.ipv6.conf.all.forwarding=1` | 启用内核 IPv4/IPv6 转发，使流量能穿过容器 |
 
 ### 卷挂载
@@ -249,7 +251,7 @@ healthcheck:
 
 ## 四、监控栈（docker-compose.monitoring.yml）
 
-所有监控组件通过独立的 compose 文件编排，与主 VPN 服务解耦，可单独启停。
+所有监控组件通过独立的 compose 文件编排，与主服务解耦，可单独启停。
 
 ### 4.1 ocserv-exporter
 
@@ -315,8 +317,8 @@ healthcheck:
 
 | 看板 | 默认刷新 | 查询重点 | 说明 |
 |:--|:--|:--|:--|
-| Ocserv VPN Overview | 30 秒 | 服务状态、活跃会话、活跃账号、采集健康、实时速率、累计流量、版本 | 默认长期打开，避免高基数查询 |
-| Ocserv VPN Sessions | 30 秒 | 当前会话明细、排行、连接时长 | 排障时使用，需开启 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` |
+| Ocserv Overview | 30 秒 | 服务状态、活跃会话、活跃账号、采集健康、实时速率、累计流量、版本 | 默认长期打开，避免高基数查询 |
+| Ocserv Sessions | 30 秒 | 当前会话明细、排行、连接时长 | 排障时使用，需开启 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` |
 
 ### 4.4 Nginx 反向代理
 
@@ -328,7 +330,7 @@ healthcheck:
 | 子路径路由 | `/grafana/` → Grafana，`/prometheus/` → Prometheus |
 | 配置生成 | 启动时严格校验变量/证书/认证文件，通过 `envsubst` 原子渲染配置，并在 `nginx -t` 通过后启动 |
 
-> 80 端口未映射，保留给 certbot HTTP-01 验证使用。VPN 服务独立使用 `${OCSERV_PORT:-443}` 端口。
+> 80 端口未映射，保留给 certbot HTTP-01 验证使用。ocserv 独立使用 `${OCSERV_PORT:-443}` 端口。
 
 **模板化配置机制**：
 
@@ -487,17 +489,20 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ```
 ├── Dockerfile                          # 多阶段构建 + s6 服务定义（内嵌 s6-init.sh）
 ├── Dockerfile.alpine                   # Alpine 可行性构建入口
-├── docker-compose.yml                  # 主 VPN 服务编排（支持环境变量）
+├── Dockerfile.alpine-minirootfs        # Alpine minirootfs 可追溯实验入口
+├── docker-compose.yml                  # 主服务编排（支持环境变量）
 ├── docker-compose.monitoring.yml       # 监控栈编排（exporter + Prometheus + Grafana + Nginx）
 ├── install-docker.sh                   # Docker 一键安装脚本
 ├── setup-fail2ban.sh                   # Fail2Ban 部署脚本
 ├── scripts/
+│   ├── download-alpine-minirootfs.sh   # 下载并校验 Alpine minirootfs tarball
 │   └── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
 ├── .env.example                        # 环境变量模板（提交到 Git）
 ├── .env                                # 实际环境变量（不提交，包含敏感配置）
 │
 ├── src/                                # 本地构建素材（不提交到 Git）
 │   ├── ocserv-1.4.2.tar.xz             # ocserv 源码
+│   ├── alpine-minirootfs-*.tar.gz      # Alpine minirootfs 实验构建输入
 │   ├── s6-overlay-noarch.tar.xz        # s6-overlay 通用组件
 │   ├── s6-overlay-x86_64.tar.xz        # s6-overlay amd64 二进制
 │   └── s6-overlay-aarch64.tar.xz       # s6-overlay arm64 二进制
@@ -512,6 +517,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ├── exporter/
 │   ├── Dockerfile                      # exporter 多阶段构建
 │   ├── Dockerfile.alpine               # exporter Alpine 可行性构建
+│   ├── Dockerfile.alpine-minirootfs    # exporter Alpine minirootfs 实验构建
 │   └── ocserv-exporter.py              # Prometheus 指标采集器
 │
 ├── monitoring/

@@ -81,7 +81,7 @@ docker logs grafana
 | Grafana | `https://${DOMAIN}:${MONITORING_PORT}/grafana/` | admin / `${GF_ADMIN_PASSWORD}` |
 | Prometheus | `https://${DOMAIN}:${MONITORING_PORT}/prometheus/` | htpasswd（步骤 3 设置） |
 
-> 实际访问地址由 `.env` 文件中的 `DOMAIN` 和 `MONITORING_PORT` 变量决定。默认 `MONITORING_PORT=8443`，VPN 服务使用 `${OCSERV_PORT:-443}` 端口。
+> 实际访问地址由 `.env` 文件中的 `DOMAIN` 和 `MONITORING_PORT` 变量决定。默认 `MONITORING_PORT=8443`，ocserv 使用 `${OCSERV_PORT:-443}` 端口。
 
 ## Grafana 使用指南
 
@@ -95,10 +95,10 @@ docker logs grafana
 
 项目已内置两块 ocserv 监控面板，登录后在 **Dashboards** 中即可看到：
 
-- **Ocserv VPN Overview** — 生产默认总览看板，30 秒刷新，只查询服务级和聚合指标。
-- **Ocserv VPN Sessions** — 排障明细看板，查询 `ocserv_user_*` 和用户排行；需先启用 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true`。
+- **Ocserv Overview** — 生产默认总览看板，30 秒刷新，只查询服务级和聚合指标。
+- **Ocserv Sessions** — 排障明细看板，查询 `ocserv_user_*` 和用户排行；需先启用 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true`。
 
-默认长期打开 `Ocserv VPN Overview`。只有需要用户排行、每会话表格或连接时长时再打开 Sessions 看板。
+默认长期打开 `Ocserv Overview`。只有需要用户排行、每会话表格或连接时长时再打开 Sessions 看板。
 
 ### 添加自定义告警
 
@@ -188,7 +188,7 @@ rate(ocserv_bytes_rx_total[1m])
 ocserv_up
 ```
 
-默认 Overview 看板只查询服务级和聚合指标，避免默认加载 `ocserv_user_*` 高基数序列。需要用户排行、每会话表格或连接时长时，设置 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 并打开 Ocserv VPN Sessions 看板。同一账号多设备同时连接时，每会话流量指标带 `session_id` 标签，因此同账号、同公网 IP 的连接也会在明细表和趋势图中分开显示。
+默认 Overview 看板只查询服务级和聚合指标，避免默认加载 `ocserv_user_*` 高基数序列。需要用户排行、每会话表格或连接时长时，设置 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 并打开 Ocserv Sessions 看板。同一账号多设备同时连接时，每会话流量指标带 `session_id` 标签，因此同账号、同公网 IP 的连接也会在明细表和趋势图中分开显示。
 
 ### 指标重要性评估
 
@@ -268,4 +268,4 @@ docker compose -f docker-compose.monitoring.yml down
 docker compose -f docker-compose.monitoring.yml down -v
 ```
 
-> 主 VPN 服务（`docker-compose.yml`）不受影响。
+> 主服务（`docker-compose.yml`）不受影响。

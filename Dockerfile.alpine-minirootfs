@@ -1,6 +1,15 @@
-ARG BASE_IMAGE=alpine:3.23
+ARG ALPINE_VERSION=3.23
+ARG ALPINE_PATCH_VERSION=3.23.4
+ARG ALPINE_ARCH=x86_64
 
-FROM ${BASE_IMAGE} AS builder
+FROM scratch AS alpine-rootfs
+ARG ALPINE_VERSION
+ARG ALPINE_PATCH_VERSION
+ARG ALPINE_ARCH
+ADD src/alpine-minirootfs-${ALPINE_PATCH_VERSION}-${ALPINE_ARCH}.tar.gz /
+CMD ["/bin/sh"]
+
+FROM alpine-rootfs AS builder
 
 ARG OCSERV_VERSION=1.4.2
 ARG ALPINE_FLAVOR=slim
@@ -87,10 +96,14 @@ RUN set -eux; \
     DESTDIR=/out ninja -C build install; \
     rm -rf /tmp/ocserv-*
 
-FROM ${BASE_IMAGE}
+FROM alpine-rootfs
 
 ARG OCSERV_VERSION=1.4.2
 ARG S6_OVERLAY_VERSION=3.2.3.0
+ARG ALPINE_VERSION=3.23
+ARG ALPINE_PATCH_VERSION=3.23.4
+ARG ALPINE_ARCH=x86_64
+ARG ALPINE_MINIROOTFS_SHA256
 ARG ALPINE_FLAVOR=slim
 ARG S6_SOURCE=auto
 ARG BUILD_DATE
@@ -98,9 +111,13 @@ ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 ARG TARGETARCH
 
 LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
-      org.opencontainers.image.title="ocserv-alpine" \
-      org.opencontainers.image.description="OpenConnect VPN Server Alpine feasibility image" \
+      org.opencontainers.image.title="ocserv-alpine-minirootfs" \
+      org.opencontainers.image.description="OpenConnect VPN Server Alpine minirootfs feasibility image" \
       org.opencontainers.image.version="${OCSERV_VERSION}" \
+      org.opencontainers.image.alpine-version="${ALPINE_VERSION}" \
+      org.opencontainers.image.alpine-minirootfs-version="${ALPINE_PATCH_VERSION}" \
+      org.opencontainers.image.alpine-minirootfs-arch="${ALPINE_ARCH}" \
+      org.opencontainers.image.alpine-minirootfs-sha256="${ALPINE_MINIROOTFS_SHA256}" \
       org.opencontainers.image.s6-overlay-version="${S6_OVERLAY_VERSION}" \
       org.opencontainers.image.alpine-flavor="${ALPINE_FLAVOR}" \
       org.opencontainers.image.s6-source="${S6_SOURCE}" \

@@ -6,7 +6,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/kingsonho/ocserv-exporter)](https://hub.docker.com/r/kingsonho/ocserv-exporter)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
-基于 Docker 的 OpenConnect VPN Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **s6-overlay 进程管理**，可选 **Prometheus + Grafana 监控栈**。
+基于 Docker 的 OpenConnect Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **s6-overlay 进程管理**，可选 **Prometheus + Grafana 监控栈**。
 
 ---
 
@@ -31,8 +31,8 @@
 | 操作系统 | Linux（Debian / Ubuntu / CentOS / Rocky / Alma 等） |
 | CPU 架构 | x86_64 或 ARM64 |
 | 内核模块 | `tun`（`/dev/net/tun` 存在） |
-| 内存 | 仅 VPN ≥ 64MB；VPN + 监控 ≥ 512MB |
-| 端口 | TCP 443 + UDP 443（VPN）；8443（监控，可选） |
+| 内存 | 仅主服务 ≥ 64MB；主服务 + 监控 ≥ 512MB |
+| 端口 | TCP 443 + UDP 443（ocserv）；8443（监控，可选） |
 
 ### 1.2 克隆项目
 
@@ -122,7 +122,7 @@ vim .env
 | 变量 | 说明 | 默认值 |
 |:--|:--|:--|
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
-| `OCSERV_PORT` | VPN 服务对外端口（宿主机） | `443` |
+| `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
 | `HEALTH_*` | 健康检查参数 | 30s / 5s / 3 / 15s |
@@ -236,7 +236,7 @@ vim .env
 
 `.env.example` 已按部署方式分为两部分：
 
-- **「基础部署配置」** — 单独部署 VPN 时的变量（与 Section 二共享）
+- **「基础部署配置」** — 单独部署 ocserv 时的变量（与 Section 二共享）
 - **「附加监控配置」** — 仅在启用监控栈时需关注的变量
 
 **基础部署中必须修改**：
@@ -439,14 +439,39 @@ docker buildx build \
   -t ocserv-exporter:1.4.2-alpine .
 ```
 
+默认 Alpine 镜像使用 `alpine:3.23`，会跟随 Docker 官方 v3.23 分支自动映射到最新 patch 版本。
+
 **Alpine 构建参数**：
 
 | ARG | 默认值 | 说明 |
 |:--|:--|:--|
-| `BASE_IMAGE` | `alpine:3.22` | Alpine 基础镜像 |
+| `BASE_IMAGE` | `alpine:3.23` | Alpine 基础镜像，跟随 v3.23 最新 patch |
 | `ALPINE_FLAVOR` | `slim` | `slim` 或 `full` |
 | `S6_SOURCE` | `auto` | `auto`、`apk` 或 `tarball` |
 | `APK_MIRROR` | `https://mirrors.tuna.tsinghua.edu.cn/alpine` | Alpine apk 源 |
+
+**Alpine minirootfs 实验入口**：
+
+```bash
+# 下载并校验官方 minirootfs，不提交 tarball
+ALPINE_ARCH=x86_64 ./scripts/download-alpine-minirootfs.sh
+
+# 主镜像 minirootfs 实验构建
+docker buildx build \
+  -f Dockerfile.alpine-minirootfs \
+  --build-arg ALPINE_ARCH=x86_64 \
+  --build-arg ALPINE_FLAVOR=slim \
+  --build-arg S6_SOURCE=auto \
+  -t ocserv:1.4.2-alpine-minirootfs-slim .
+
+# exporter minirootfs 实验构建
+docker buildx build \
+  -f exporter/Dockerfile.alpine-minirootfs \
+  --build-arg ALPINE_ARCH=x86_64 \
+  -t ocserv-exporter:1.4.2-alpine-minirootfs .
+```
+
+minirootfs 入口默认使用 `ALPINE_VERSION=3.23` 和 `ALPINE_PATCH_VERSION=3.23.4`，并通过 `scripts/download-alpine-minirootfs.sh` 校验官方 tarball。`x86_64` 默认校验值为 `85498865362aa7ebececa0d725a2f2e4db7ac4e4b2850b8df21645afa0d03ee3`，`aarch64` 默认校验值为 `9250667a8affac8f1e98086392f80f43f086626701e9bce33398eb9b6c0bd64c`。
 
 `S6_SOURCE=auto` 会优先尝试 Alpine 仓库中的 `s6-overlay` 包，若 `/init` 不可用则回退到 `src/` 中的 s6-overlay tarball。`S6_SOURCE=apk` 用于强制验证 Alpine 仓库包；`S6_SOURCE=tarball` 用于和现有 Debian 镜像的 s6-overlay 来源对照。
 
@@ -473,7 +498,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `auth` | 认证方式 | `plain[passwd=/etc/ocserv/auth/ocpasswd]` |
 | `server-cert` | TLS 证书 | `/etc/ocserv/fullchain.pem` |
 | `server-key` | TLS 私钥 | `/etc/ocserv/privkey.pem` |
-| `ipv4-network` | VPN IP 段 | `10.10.10.0` |
+| `ipv4-network` | 客户端 IP 段 | `10.10.10.0` |
 | `ipv4-netmask` | 子网掩码 | `255.255.255.0` |
 | `dns` | 推送 DNS | `8.8.8.8` |
 | `max-clients` | 最大客户端（0=不限） | `0` |
@@ -514,7 +539,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 |:--|:--|:--|
 | `TZ` | 时区设置 | `Asia/Shanghai` |
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
-| `OCSERV_PORT` | VPN 服务对外端口（宿主机） | `443` |
+| `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
 | `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
 | `LOG_MAX_FILE` | 日志文件保留数量 | `3` |
