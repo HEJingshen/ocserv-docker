@@ -411,7 +411,7 @@ docker buildx build \
 
 GitHub Actions 中会显式设置 `APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine`，发布构建继续使用 Alpine 官方源。
 
-Dockerfile 使用 BuildKit cache mount 加速 `apk` 安装，最终镜像层不保留 apk 索引缓存。`exporter` 镜像使用专用非 root 用户运行；主 `ocserv` 镜像因需要 s6 init、`NET_ADMIN`、TUN 设备和 iptables，仍保留 root 运行。
+Dockerfile 使用 BuildKit cache mount 加速 `apk` 安装，最终镜像层不保留 apk 索引缓存。`exporter` 镜像使用 Alpine 内置 `nobody` 非 root 用户运行，以匹配默认 `run-as-user = nobody` 生成的 `occtl.socket` 所有者；主 `ocserv` 镜像因需要 s6 init、`NET_ADMIN`、TUN 设备和 iptables，仍保留 root 运行。
 
 Alpine `slim` 会禁用 utmp 编译能力，渲染配置时需要同步关闭 `use-utmp`：
 

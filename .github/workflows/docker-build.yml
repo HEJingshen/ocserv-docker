@@ -87,7 +87,7 @@ jobs:
 
       - name: Lint Dockerfiles
         run: |
-          docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 --failure-threshold error Dockerfile exporter/Dockerfile
+          docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile exporter/Dockerfile
 
       - name: Validate Compose files
         run: |

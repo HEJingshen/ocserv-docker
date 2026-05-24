@@ -79,8 +79,6 @@ ARG ALPINE_ARCH=x86_64
 ARG ALPINE_MINIROOTFS_SHA256
 ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
-ARG EXPORTER_UID=65532
-ARG EXPORTER_GID=65532
 
 LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv-exporter-alpine-minirootfs" \
@@ -111,13 +109,11 @@ RUN --mount=type=cache,target=/var/cache/apk \
         | tr ',' '\n' \
         | sort -u \
         | awk 'NF { print "so:" $1 }')"; \
-    apk add --update-cache --virtual .occtl-rundeps ${runDeps}; \
-    addgroup -g "${EXPORTER_GID}" -S exporter; \
-    adduser -u "${EXPORTER_UID}" -S -D -H -h /app -s /sbin/nologin -G exporter exporter
+    apk add --update-cache --virtual .occtl-rundeps ${runDeps}
 
 WORKDIR /app
 
-COPY --chown=exporter:exporter exporter/ocserv_exporter.py .
+COPY --chown=nobody:nobody exporter/ocserv_exporter.py .
 
 ENV OCSERV_SOCKET=/var/run/occtl.socket
 ENV METRICS_PORT=9100
@@ -127,6 +123,6 @@ ENV EXPORTER_ENABLE_SESSION_DETAIL_METRICS=false
 
 EXPOSE 9100
 
-USER exporter
+USER nobody
 
 CMD ["python3", "-m", "ocserv_exporter"]
