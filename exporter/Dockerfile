@@ -82,7 +82,7 @@ ARG ALPINE_MINIROOTFS_SHA256
 ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
-LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
+LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv-exporter-alpine-minirootfs" \
       org.opencontainers.image.description="ocserv Prometheus Exporter Alpine minirootfs feasibility image" \
       org.opencontainers.image.version="${OCSERV_VERSION}" \
@@ -119,7 +119,7 @@ RUN set -eux; \
 
 WORKDIR /app
 
-COPY exporter/ocserv-exporter.py .
+COPY exporter/ocserv_exporter.py .
 
 ENV OCSERV_SOCKET=/var/run/occtl.socket
 ENV METRICS_PORT=9100
@@ -129,4 +129,4 @@ ENV EXPORTER_ENABLE_SESSION_DETAIL_METRICS=false
 
 EXPOSE 9100
 
-CMD ["python3", "ocserv-exporter.py"]
+CMD ["python3", "-m", "ocserv_exporter"]

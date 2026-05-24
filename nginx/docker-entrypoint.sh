@@ -25,7 +25,6 @@ require_command() {
 TEMPLATE_DIR=${TEMPLATE_DIR:-/etc/nginx/templates}
 CONF_DIR=${CONF_DIR:-/etc/nginx/conf.d}
 SNIPPET_FILE=${SNIPPET_FILE:-/etc/nginx/snippets/ssl-params.conf}
-HTPASSWD_FILE=${HTPASSWD_FILE:-/etc/nginx/.htpasswd}
 LETSENCRYPT_LIVE_DIR=${LETSENCRYPT_LIVE_DIR:-/etc/letsencrypt/live}
 NGINX_BIN=${NGINX_BIN:-nginx}
 
@@ -84,8 +83,6 @@ CERT_FILE="${LETSENCRYPT_LIVE_DIR}/${DOMAIN}/fullchain.pem"
 KEY_FILE="${LETSENCRYPT_LIVE_DIR}/${DOMAIN}/privkey.pem"
 require_file "${CERT_FILE}" "TLS certificate"
 require_file "${KEY_FILE}" "TLS private key"
-require_file "${HTPASSWD_FILE}" "htpasswd file"
-[ -s "${HTPASSWD_FILE}" ] || fail "htpasswd file is empty: ${HTPASSWD_FILE}"
 
 TEMPLATE_COUNT=0
 for TEMPLATE in "${TEMPLATE_DIR}"/*.conf.template; do

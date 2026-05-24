@@ -36,24 +36,6 @@ server {
         proxy_send_timeout 3600s;
     }
 
-    # 📈 Prometheus 子路径代理（带基础认证）
-    location /prometheus/ {
-        auth_basic "Prometheus Access Restricted";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-
-        proxy_pass http://prometheus:9090/prometheus/;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # 🚫 拦截 Prometheus 高危管理 API（外部不可访问）
-    location ~ ^/prometheus/api/v1/admin {
-        deny all;
-        return 403;
-    }
-
     # 根路径重定向 — 保留原始端口
     location = / {
         return 302 https://$http_host/grafana/;

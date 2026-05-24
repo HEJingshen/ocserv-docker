@@ -3,13 +3,18 @@
 CLAUDE.md
 AGENTS.md
 .DS_Store
+**/.DS_Store
 
 # Local source archives
-src/*.tar.xz
-src/*.tar.gz
+src/
 
 # Environment variables (contains sensitive data)
 .env
 
-# Documentation
-doc/
+# Runtime data and generated files
+logs/
+nginx/logs/
+nginx/conf.d/
+nginx/.htpasswd
+config/ocserv.conf
+config/auth/ocpasswd

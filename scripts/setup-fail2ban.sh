@@ -13,13 +13,12 @@ fi
 echo "📝 部署配置文件..."
 sudo tee /etc/fail2ban/filter.d/nginx-auth.conf > /dev/null << 'EOF'
 [Definition]
-failregex = ^<HOST> - \S+ \[.*\] "\w+ /prometheus/.*" 401 .*$
-            ^<HOST> - \S+ \[.*\] "\w+ /grafana/(login|api/login).*" (401|403) .*$
+failregex = ^<HOST> - \S+ \[.*\] "\w+ /grafana/(login|api/login).*" (401|403) .*$
 ignoreregex = ^<HOST> - \S+ \[.*\] "\w+ /(health|metrics|favicon|static|public|robots\.txt|\.well-known).*" .*$
 EOF
 
-# ⚠️ 自动获取当前项目绝对路径并写入 jail 配置
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve the repository root even though this script lives in scripts/.
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 sudo tee /etc/fail2ban/jail.d/nginx-auth.conf > /dev/null << EOF
 [nginx-auth]
 enabled  = true

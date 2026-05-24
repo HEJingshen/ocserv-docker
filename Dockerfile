@@ -110,7 +110,7 @@ ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 ARG TARGETARCH
 
-LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
+LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv-alpine-minirootfs" \
       org.opencontainers.image.description="OpenConnect VPN Server Alpine minirootfs feasibility image" \
       org.opencontainers.image.version="${OCSERV_VERSION}" \
@@ -122,7 +122,7 @@ LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
       org.opencontainers.image.alpine-flavor="${ALPINE_FLAVOR}" \
       org.opencontainers.image.s6-source="${S6_SOURCE}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.source="https://github.com/HEJingshen/ocserv-docker"
+      org.opencontainers.image.source="https://github.com/GentleKingson/ocserv-docker"
 
 RUN set -eux; \
     . /etc/os-release; \
@@ -199,109 +199,16 @@ RUN set -eux; \
     ln -s ../ocserv-init /etc/s6-overlay/s6-rc.d/user/contents.d/; \
     ln -s ../ocserv /etc/s6-overlay/s6-rc.d/user/contents.d/
 
-RUN <<'ENDSCRIPT'
-#!/bin/sh
-set -e
+COPY docker/ocserv/s6-init.sh /etc/ocserv/s6-init.sh
 
-cat > /etc/ocserv/s6-init.sh << 'INITFILE'
-#!/bin/sh
-set -e
-
-echo "=== ocserv initialization start ==="
-
-if [ ! -f /etc/ocserv/ocserv.conf ]; then
-    echo "ERROR: /etc/ocserv/ocserv.conf not found"
-    echo "  Mount config via -v ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro"
-    exit 1
-fi
-
-if [ ! -r /etc/ocserv/ocserv.conf ]; then
-    echo "ERROR: /etc/ocserv/ocserv.conf is not readable"
-    exit 1
-fi
-
-if ! command -v ocserv >/dev/null 2>&1; then
-    echo "ERROR: ocserv binary not found"
-    exit 1
-fi
-
-mkdir -p /run/ocserv /var/log/ocserv
-
-VPN_CIDR=""
-VPN_NETWORK_VAL=$(grep -E '^[[:space:]]*ipv4-network[[:space:]]*=' /etc/ocserv/ocserv.conf 2>/dev/null \
-    | head -1 | sed 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*[#;].*$//; s/^[[:space:]]*//; s/[[:space:]]*$//')
-
-if [ -n "${VPN_NETWORK_VAL}" ]; then
-    case "${VPN_NETWORK_VAL}" in
-        */*)
-            VPN_CIDR="${VPN_NETWORK_VAL}"
-            ;;
-        *)
-            VPN_NETMASK_VAL=$(grep -E '^[[:space:]]*ipv4-netmask[[:space:]]*=' /etc/ocserv/ocserv.conf 2>/dev/null \
-                | head -1 | sed 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*[#;].*$//; s/^[[:space:]]*//; s/[[:space:]]*$//')
-            if [ -n "${VPN_NETMASK_VAL}" ]; then
-                _prefix=0
-                _old_IFS="${IFS}"
-                IFS='.'
-                set -- ${VPN_NETMASK_VAL}
-                IFS="${_old_IFS}"
-                for _octet in "$1" "$2" "$3" "$4"; do
-                    case "${_octet}" in
-                        255) _prefix=$((_prefix + 8)) ;;
-                        254) _prefix=$((_prefix + 7)) ;;
-                        252) _prefix=$((_prefix + 6)) ;;
-                        248) _prefix=$((_prefix + 5)) ;;
-                        240) _prefix=$((_prefix + 4)) ;;
-                        224) _prefix=$((_prefix + 3)) ;;
-                        192) _prefix=$((_prefix + 2)) ;;
-                        128) _prefix=$((_prefix + 1)) ;;
-                        0) ;;
-                        *) _prefix=0; break ;;
-                    esac
-                done
-                if [ "${_prefix}" -gt 0 ]; then
-                    VPN_CIDR="${VPN_NETWORK_VAL}/${_prefix}"
-                fi
-            fi
-            ;;
-    esac
-fi
-
-if [ -z "${VPN_CIDR}" ]; then
-    VPN_CIDR="10.10.10.0/24"
-    echo "WARNING: Unable to parse VPN subnet from config, using default ${VPN_CIDR}"
-fi
-
-echo "Configuring iptables for VPN subnet: ${VPN_CIDR}"
-
-DEFAULT_IF=$(ip route | awk '/default/ {print $5; exit}')
-if [ -z "${DEFAULT_IF}" ]; then
-    DEFAULT_IF="eth0"
-fi
-
-echo "Default outbound interface: ${DEFAULT_IF}"
-
-iptables -C FORWARD -s "${VPN_CIDR}" -j ACCEPT 2>/dev/null \
-    || iptables -A FORWARD -s "${VPN_CIDR}" -j ACCEPT
-iptables -C FORWARD -d "${VPN_CIDR}" -j ACCEPT 2>/dev/null \
-    || iptables -A FORWARD -d "${VPN_CIDR}" -j ACCEPT
-iptables -t nat -C POSTROUTING -s "${VPN_CIDR}" -o "${DEFAULT_IF}" -j MASQUERADE 2>/dev/null \
-    || iptables -t nat -A POSTROUTING -s "${VPN_CIDR}" -o "${DEFAULT_IF}" -j MASQUERADE
-
-echo "iptables rules configured successfully"
-echo "=== ocserv initialization complete ==="
-exit 0
-INITFILE
-chmod +x /etc/ocserv/s6-init.sh
-
-printf '#!/command/execlineb -P\n/etc/ocserv/s6-init.sh\n' \
-    > /etc/s6-overlay/s6-rc.d/ocserv-init/up
-chmod +x /etc/s6-overlay/s6-rc.d/ocserv-init/up
-
-printf '#!/bin/sh\nexec ocserv -c /etc/ocserv/ocserv.conf -f\n' \
-    > /etc/s6-overlay/s6-rc.d/ocserv/run
-chmod +x /etc/s6-overlay/s6-rc.d/ocserv/run
-ENDSCRIPT
+RUN set -eux; \
+    chmod +x /etc/ocserv/s6-init.sh; \
+    printf '#!/command/execlineb -P\n/etc/ocserv/s6-init.sh\n' \
+        > /etc/s6-overlay/s6-rc.d/ocserv-init/up; \
+    chmod +x /etc/s6-overlay/s6-rc.d/ocserv-init/up; \
+    printf '#!/bin/sh\nexec ocserv -c /etc/ocserv/ocserv.conf -f\n' \
+        > /etc/s6-overlay/s6-rc.d/ocserv/run; \
+    chmod +x /etc/s6-overlay/s6-rc.d/ocserv/run
 
 EXPOSE 443/tcp 443/udp
 

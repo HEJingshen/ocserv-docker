@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-import importlib.util
+import importlib
 import os
 import sys
 import types
 import unittest
-from pathlib import Path
 from unittest import mock
 
 
@@ -53,9 +52,7 @@ fake_prometheus_client.start_http_server = lambda *args, **kwargs: None
 fake_prometheus_client.Gauge = FakeGauge
 fake_prometheus_client.Info = FakeInfo
 sys.modules["prometheus_client"] = fake_prometheus_client
-
-
-EXPORTER_PATH = Path(__file__).with_name("ocserv-exporter.py")
+sys.path.insert(0, os.path.dirname(__file__))
 
 
 def load_exporter(session_detail_metrics=None):
@@ -65,11 +62,8 @@ def load_exporter(session_detail_metrics=None):
         os.environ["EXPORTER_ENABLE_SESSION_DETAIL_METRICS"] = "true" if session_detail_metrics else "false"
 
     FakeGauge.registry = []
-    module_name = f"ocserv_exporter_under_test_{len(sys.modules)}"
-    spec = importlib.util.spec_from_file_location(module_name, EXPORTER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    sys.modules.pop("ocserv_exporter", None)
+    return importlib.import_module("ocserv_exporter")
 
 
 exporter = load_exporter(session_detail_metrics=True)

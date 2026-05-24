@@ -7,18 +7,46 @@ on:
     tags: [ "v*" ]
     paths:
       - 'Dockerfile'
+      - 'docker/**'
       - 'exporter/Dockerfile'
+      - 'exporter/ocserv-exporter.py'
+      - 'exporter/ocserv_exporter.py'
+      - 'exporter/test_ocserv_exporter.py'
+      - 'docs/**'
       - '.github/workflows/docker-build.yml'
+      - '.env.example'
+      - 'docker-compose.yml'
+      - 'docker-compose.monitoring.yml'
+      - 'fail2ban/**'
+      - 'nginx/**'
+      - 'monitoring/**'
       - 'scripts/download-alpine-minirootfs.sh'
+      - 'scripts/prepare-ocserv-config.sh'
       - 'scripts/render-ocserv-conf.sh'
+      - 'scripts/setup-fail2ban.sh'
+      - 'tests/**'
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
+      - 'docker/**'
       - 'exporter/Dockerfile'
+      - 'exporter/ocserv-exporter.py'
+      - 'exporter/ocserv_exporter.py'
+      - 'exporter/test_ocserv_exporter.py'
+      - 'docs/**'
       - '.github/workflows/docker-build.yml'
+      - '.env.example'
+      - 'docker-compose.yml'
+      - 'docker-compose.monitoring.yml'
+      - 'fail2ban/**'
+      - 'nginx/**'
+      - 'monitoring/**'
       - 'scripts/download-alpine-minirootfs.sh'
+      - 'scripts/prepare-ocserv-config.sh'
       - 'scripts/render-ocserv-conf.sh'
+      - 'scripts/setup-fail2ban.sh'
+      - 'tests/**'
 
 env:
   REGISTRY: docker.io
@@ -32,7 +60,35 @@ env:
   ALPINE_AARCH64_SHA256: 9250667a8affac8f1e98086392f80f43f086626701e9bce33398eb9b6c0bd64c
 
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run unit tests
+        run: |
+          python3 -m unittest exporter/test_ocserv_exporter.py tests/test_fail2ban_filter.py
+
+      - name: Check shell scripts
+        run: |
+          sh -n scripts/render-ocserv-conf.sh
+          sh -n scripts/download-alpine-minirootfs.sh
+          sh -n scripts/prepare-ocserv-config.sh
+          sh -n nginx/docker-entrypoint.sh
+          sh -n docker/ocserv/s6-init.sh
+          bash -n scripts/setup-fail2ban.sh
+          sh tests/test_nginx_entrypoint.sh
+
+      - name: Validate Compose files
+        run: |
+          EDITOR=true ./scripts/prepare-ocserv-config.sh
+          mkdir -p nginx/conf.d nginx/logs
+          docker compose config >/tmp/docker-compose.yml
+          docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config >/tmp/docker-compose.monitoring.yml
+
   build-ocserv:
+    needs: validate
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -184,6 +240,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_slim_arm64.outputs.digest }}
 
   build-exporter:
+    needs: validate
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
