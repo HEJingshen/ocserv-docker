@@ -6,9 +6,9 @@ The default build now uses explicit Alpine minirootfs for both images:
 
 | Image | Dockerfile | Published tag |
 |:--|:--|:--|
-| ocserv full | `Dockerfile` | `kingsonho/ocserv:alpine` |
-| ocserv slim | `Dockerfile` | `kingsonho/ocserv:alpine-slim` |
-| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:alpine` |
+| ocserv full | `Dockerfile` | `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2` |
+| ocserv slim | `Dockerfile` | `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv:1.4.2-slim` |
+| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:latest`, `kingsonho/ocserv-exporter:1.4.2` |
 
 The build uses a checked Alpine rootfs tarball instead of a floating Docker base image. Builder and runtime stages derive from the same `alpine-rootfs` stage, so package availability and runtime behavior are tied to one verified rootfs input.
 
@@ -41,7 +41,7 @@ docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:alpine .
+  -t ocserv:latest .
 ```
 
 Build the main slim image:
@@ -52,7 +52,7 @@ docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=slim \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:alpine-slim .
+  -t ocserv:latest-slim .
 ```
 
 Build the exporter image:
@@ -61,7 +61,7 @@ Build the exporter image:
 docker buildx build \
   -f exporter/Dockerfile \
   --build-arg ALPINE_ARCH=x86_64 \
-  -t ocserv-exporter:alpine .
+  -t ocserv-exporter:latest .
 ```
 
 For arm64, use `ALPINE_ARCH=aarch64` and build with `--platform linux/arm64`.
@@ -73,7 +73,7 @@ For arm64, use `ALPINE_ARCH=aarch64` and build with `--platform linux/arm64`.
 - Verify `/etc/alpine-release` reports `3.23.x`.
 - Verify `apk --version`, `ocserv --version`, `occtl --version`, and executable `/init`.
 - Verify exporter starts and exposes `:9100/metrics`.
-- Confirm workflow publishes `ocserv:alpine`, `ocserv:alpine-slim`, and `ocserv-exporter:alpine`.
+- Confirm workflow publishes `ocserv:latest`, `ocserv:1.4.2`, `ocserv:latest-slim`, `ocserv:1.4.2-slim`, `ocserv-exporter:latest`, and `ocserv-exporter:1.4.2`.
 
 ## Sources
 

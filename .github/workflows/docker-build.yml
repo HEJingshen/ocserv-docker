@@ -231,11 +231,13 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:alpine \
+            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:latest \
+            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }} \
             ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_full_amd64.outputs.digest }} \
             ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_full_arm64.outputs.digest }}
           docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:alpine-slim \
+            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:latest-slim \
+            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}-slim \
             ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_slim_amd64.outputs.digest }} \
             ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_slim_arm64.outputs.digest }}
 
@@ -325,6 +327,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:alpine \
+            -t ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:latest \
+            -t ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:${{ env.OCSERV_VERSION }} \
             ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}@${{ steps.exporter_amd64.outputs.digest }} \
             ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}@${{ steps.exporter_arm64.outputs.digest }}

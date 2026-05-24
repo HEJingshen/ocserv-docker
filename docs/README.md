@@ -121,7 +121,7 @@ services:
 |:--|:--|:--|
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
-| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:alpine` |
+| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
 | `HEALTH_*` | 健康检查参数 | 30s / 5s / 3 / 15s |
 
@@ -339,22 +339,22 @@ ALPINE_ARCH=x86_64 ./scripts/download-alpine-minirootfs.sh
 ### 4.2 构建 ocserv 镜像
 
 ```bash
-# full 变体，对应发布标签 kingsonho/ocserv:alpine
+# full 变体，对应发布标签 kingsonho/ocserv:latest 与 kingsonho/ocserv:1.4.2
 docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:alpine .
+  -t ocserv:latest .
 
-# slim 变体，对应发布标签 kingsonho/ocserv:alpine-slim
+# slim 变体，对应发布标签 kingsonho/ocserv:latest-slim 与 kingsonho/ocserv:1.4.2-slim
 docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=slim \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:alpine-slim .
+  -t ocserv:latest-slim .
 ```
 
-构建后在 `.env` 中设置 `OCSERV_IMAGE=ocserv:alpine` 或 `OCSERV_IMAGE=ocserv:alpine-slim`。
+构建后在 `.env` 中设置 `OCSERV_IMAGE=ocserv:latest` 或 `OCSERV_IMAGE=ocserv:latest-slim`。
 
 **构建参数**：
 
@@ -384,15 +384,15 @@ ALPINE_ARCH=aarch64 ./scripts/download-alpine-minirootfs.sh
 docker buildx build --platform linux/amd64 \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
-  -t registry.example.com/ocserv:alpine-amd64 .
+  -t registry.example.com/ocserv:1.4.2-amd64 .
 
 docker buildx build --platform linux/arm64 \
   --build-arg ALPINE_ARCH=aarch64 \
   --build-arg ALPINE_FLAVOR=full \
-  -t registry.example.com/ocserv:alpine-arm64 .
+  -t registry.example.com/ocserv:1.4.2-arm64 .
 ```
 
-**验证**：`docker run --rm --entrypoint ocserv ocserv:alpine --version`
+**验证**：`docker run --rm --entrypoint ocserv ocserv:latest --version`
 
 ### 4.3 构建 Exporter 镜像
 
@@ -400,12 +400,12 @@ docker buildx build --platform linux/arm64 \
 docker buildx build \
   -f exporter/Dockerfile \
   --build-arg ALPINE_ARCH=x86_64 \
-  -t ocserv-exporter:alpine .
+  -t ocserv-exporter:latest .
 ```
 
-构建后在 `.env` 中设置 `EXPORTER_IMAGE=ocserv-exporter:alpine`。
+构建后在 `.env` 中设置 `EXPORTER_IMAGE=ocserv-exporter:latest`。
 
-**验证**：`docker run --rm --entrypoint occtl ocserv-exporter:alpine --version`
+**验证**：`docker run --rm --entrypoint occtl ocserv-exporter:latest --version`
 
 `S6_SOURCE=auto` 会优先尝试 Alpine 仓库中的 `s6-overlay` 包，若 `/init` 不可用则回退到 `src/` 中的 s6-overlay tarball。`S6_SOURCE=apk` 用于强制验证 Alpine 仓库包；`S6_SOURCE=tarball` 用于和 Alpine 仓库包来源对照。
 
@@ -474,7 +474,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `TZ` | 时区设置 | `Asia/Shanghai` |
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
-| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:alpine` |
+| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
 | `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
 | `LOG_MAX_FILE` | 日志文件保留数量 | `3` |
 | `HEALTH_INTERVAL` | 健康检查间隔 | `30s` |
@@ -488,7 +488,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 |:--|:--|:--|
 | `MONITORING_PORT` | 监控面板对外端口（HTTPS） | `8443` |
 | `NETWORK_NAME` | Docker 网络名称 | `monitor-net` |
-| `EXPORTER_IMAGE` | ocserv-exporter 镜像 | `kingsonho/ocserv-exporter:alpine` |
+| `EXPORTER_IMAGE` | ocserv-exporter 镜像 | `kingsonho/ocserv-exporter:latest` |
 | `PROMETHEUS_IMAGE` | Prometheus 镜像 | `prom/prometheus:latest` |
 | `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:latest` |
 | `NGINX_IMAGE` | Nginx 镜像 | `nginx:alpine` |
@@ -795,8 +795,8 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 
 | 触发事件 | 生成标签 |
 |:--|:--|
-| push main/master | `alpine`、`alpine-slim`、`ocserv-exporter:alpine` |
-| push `v*` 标签 | `alpine`、`alpine-slim`、`ocserv-exporter:alpine` |
+| push main/master | `ocserv:latest`、`ocserv:1.4.2`、`ocserv:latest-slim`、`ocserv:1.4.2-slim`、`ocserv-exporter:latest`、`ocserv-exporter:1.4.2` |
+| push `v*` 标签 | `ocserv:latest`、`ocserv:1.4.2`、`ocserv:latest-slim`、`ocserv:1.4.2-slim`、`ocserv-exporter:latest`、`ocserv-exporter:1.4.2` |
 | PR | 仅构建测试，不推送标签 |
 
 流程：下载源码和 minirootfs → QEMU + Buildx → 分架构构建 → 创建多架构 manifest → 推送。

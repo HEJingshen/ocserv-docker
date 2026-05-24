@@ -49,7 +49,7 @@
 | 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需 Alpine 依赖 |
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
-| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；发布中 `alpine` 为 full，`alpine-slim` 为 slim |
+| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；发布中 `latest`/版本号为 full，`latest-slim`/版本号-slim 为 slim |
 | apk 源 | 默认配置 `mirrors.tuna.tsinghua.edu.cn`，CI 显式使用 Alpine 官方源 |
 
 ### 阶段二：Runtime
@@ -68,9 +68,9 @@
 
 | 变体 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `full` | 默认发布标签 `kingsonho/ocserv:alpine` | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
-| `slim` | 精简发布标签 `kingsonho/ocserv:alpine-slim` | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
-| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:alpine` | Python exporter + `occtl` |
+| `full` | 默认发布标签 `kingsonho/ocserv:latest` 与版本号标签 | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
+| `slim` | 精简发布标签 `kingsonho/ocserv:latest-slim` 与版本号-slim 标签 | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
+| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:latest` 与版本号标签 | Python exporter + `occtl` |
 
 `slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
 
@@ -178,7 +178,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
-| `OCSERV_IMAGE` | `kingsonho/ocserv:alpine` | ocserv 服务镜像 |
+| `OCSERV_IMAGE` | `kingsonho/ocserv:latest` | ocserv 服务镜像 |
 | `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
 | `TZ` | `Asia/Shanghai` | 时区设置 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
@@ -469,17 +469,17 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
        └─ 产物: digest-only image
        │
 7. 创建 multi-arch manifest
-       ├─ kingsonho/ocserv:alpine
-       ├─ kingsonho/ocserv:alpine-slim
-       └─ kingsonho/ocserv-exporter:alpine
+       ├─ kingsonho/ocserv:latest 与 kingsonho/ocserv:1.4.2
+       ├─ kingsonho/ocserv:latest-slim 与 kingsonho/ocserv:1.4.2-slim
+       └─ kingsonho/ocserv-exporter:latest 与 kingsonho/ocserv-exporter:1.4.2
 ```
 
 ### 标签策略
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| push main/master | `kingsonho/ocserv:alpine`, `kingsonho/ocserv:alpine-slim`, `kingsonho/ocserv-exporter:alpine` |
-| push v* 标签 | `kingsonho/ocserv:alpine`, `kingsonho/ocserv:alpine-slim`, `kingsonho/ocserv-exporter:alpine` |
+| push main/master | `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:latest`, `kingsonho/ocserv-exporter:1.4.2` |
+| push v* 标签 | `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:latest`, `kingsonho/ocserv-exporter:1.4.2` |
 | PR | 仅构建测试，不推送镜像 |
 
 ---
