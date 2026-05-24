@@ -1,39 +1,39 @@
-# Alpine Minirootfs Build Baseline
+# Alpine Minirootfs 构建基线
 
-## Summary
+## 摘要
 
-The default build now uses explicit Alpine minirootfs for both images:
+当前默认构建为两个镜像都显式使用 Alpine minirootfs：
 
-| Image | Dockerfile | Published tag |
+| 镜像 | Dockerfile | 发布标签 |
 |:--|:--|:--|
-| ocserv full | `Dockerfile` | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest` |
-| ocserv slim | `Dockerfile` | `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv:latest-slim` |
-| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:1.4.2`, `kingsonho/ocserv-exporter:latest` |
+| ocserv full | `Dockerfile` | `kingsonho/ocserv:1.4.2`；`latest` 指向该版本标签 |
+| ocserv slim | `Dockerfile` | `kingsonho/ocserv:1.4.2-slim`；`latest-slim` 指向该版本标签 |
+| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:1.4.2`；`latest` 指向该版本标签 |
 
-The build uses a checked Alpine rootfs tarball instead of a floating Docker base image. Builder and runtime stages derive from the same `alpine-rootfs` stage, so package availability and runtime behavior are tied to one verified rootfs input.
+构建使用已校验的 Alpine rootfs tarball，而不是浮动 Docker 基础镜像。Builder 和 runtime 阶段都从同一个 `alpine-rootfs` 阶段派生，因此包可用性和运行时行为都绑定到同一个已验证的 rootfs 输入。
 
-## Version Baseline
+## 版本基线
 
-| Item | Value |
+| 项目 | 值 |
 |:--|:--|
-| Alpine branch | `3.23` |
+| Alpine 分支 | `3.23` |
 | Minirootfs patch | `3.23.4` |
 | x86_64 tarball | `alpine-minirootfs-3.23.4-x86_64.tar.gz` |
 | x86_64 sha256 | `85498865362aa7ebececa0d725a2f2e4db7ac4e4b2850b8df21645afa0d03ee3` |
 | aarch64 tarball | `alpine-minirootfs-3.23.4-aarch64.tar.gz` |
 | aarch64 sha256 | `9250667a8affac8f1e98086392f80f43f086626701e9bce33398eb9b6c0bd64c` |
 
-Alpine v3.23 introduced `apk-tools v3` while preserving the v2 package and index formats. The current Dockerfiles use BuildKit cache mounts for `apk` indexes, keep the virtual package and `so:` runtime dependency flow, and avoid committing apk index cache into final layers. GitHub Actions validates the minirootfs build path.
+Alpine v3.23 引入了 `apk-tools v3`，同时保留 v2 包和索引格式。当前 Dockerfile 使用 BuildKit cache mount 缓存 `apk` 索引，保留 virtual package 和 `so:` 运行时依赖解析流程，并避免把 apk 索引缓存写入最终镜像层。GitHub Actions 会验证 minirootfs 构建路径。
 
-## Build Flow
+## 构建流程
 
-Download and verify a minirootfs tarball before building:
+构建前先下载并校验 minirootfs tarball：
 
 ```bash
 ALPINE_ARCH=x86_64 ./scripts/download-alpine-minirootfs.sh
 ```
 
-Build the main full image:
+构建主镜像 full 变体：
 
 ```bash
 docker buildx build \
@@ -44,7 +44,7 @@ docker buildx build \
   -t ocserv:1.4.2 .
 ```
 
-Build the main slim image:
+构建主镜像 slim 变体：
 
 ```bash
 docker buildx build \
@@ -55,7 +55,7 @@ docker buildx build \
   -t ocserv:1.4.2-slim .
 ```
 
-Build the exporter image:
+构建 exporter 镜像：
 
 ```bash
 docker buildx build \
@@ -64,20 +64,20 @@ docker buildx build \
   -t ocserv-exporter:1.4.2 .
 ```
 
-For arm64, use `ALPINE_ARCH=aarch64` and build with `--platform linux/arm64`.
+arm64 构建使用 `ALPINE_ARCH=aarch64`，并配合 `--platform linux/arm64`。
 
-## Validation Checklist
+## 验证清单
 
-- Build `Dockerfile` with `ALPINE_FLAVOR=full` and `ALPINE_FLAVOR=slim`.
-- Build `exporter/Dockerfile`.
-- Verify `/etc/alpine-release` reports `3.23.x`.
-- Verify `apk --version`, `ocserv --version`, `occtl --version`, and executable `/init`.
-- Verify exporter starts and exposes `:9100/metrics`.
-- Confirm workflow publishes version tags, compatibility `latest` tags, SBOM/provenance attestations, and multi-architecture manifests.
+- 使用 `ALPINE_FLAVOR=full` 和 `ALPINE_FLAVOR=slim` 构建 `Dockerfile`。
+- 构建 `exporter/Dockerfile`。
+- 确认 `/etc/alpine-release` 输出 `3.23.x`。
+- 确认 `apk --version`、`ocserv --version`、`occtl --version` 正常，并确认 `/init` 可执行。
+- 确认 exporter 可以启动并暴露 `:9100/metrics`。
+- 确认 workflow 发布版本标签，从版本标签创建 `latest` 别名，并为多架构 manifest 保留 SBOM/provenance attestation。
 
-## Sources
+## 资料来源
 
-- Alpine release branches: https://www.alpinelinux.org/releases/
-- Alpine 3.23 release notes: https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.23.0
-- Alpine minirootfs x86_64 directory: https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/
-- Alpine minirootfs aarch64 directory: https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/aarch64/
+- Alpine 发布分支：https://www.alpinelinux.org/releases/
+- Alpine 3.23 发布说明：https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.23.0
+- Alpine minirootfs x86_64 目录：https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/
+- Alpine minirootfs aarch64 目录：https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/aarch64/

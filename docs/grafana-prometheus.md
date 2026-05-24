@@ -40,7 +40,7 @@ sudo certbot certonly --standalone -d your.domain.com \
 | 变量 | 说明 | 示例 |
 |:--|:--|:--|
 | `DOMAIN` | 你的域名 | `vpn.example.com` |
-| `GF_ADMIN_PASSWORD` | Grafana 管理员密码（建议修改默认值） | `your_secure_password` |
+| `GF_ADMIN_PASSWORD` | Grafana 管理员密码（必须设置，否则 Compose 配置阶段失败） | `your_secure_password` |
 | `SSL_CERT_DIR` | SSL 证书目录（如果非默认路径） | `/etc/letsencrypt` |
 
 > **注意**：域名配置现在集中在 `.env` 文件中，无需手动修改 `docker-compose.monitoring.yml` 或 `nginx/conf.d/` 中的硬编码域名。Nginx 配置会在容器启动时通过 `envsubst` 自动生成。
@@ -231,7 +231,7 @@ scrape_configs:
 修改 Prometheus 配置后重载 Prometheus（无需重启容器）：
 
 ```bash
-docker exec prometheus wget -qO- --post-data='' http://localhost:9090/-/reload
+docker exec prometheus wget -qO- --post-data='' http://localhost:9090/prometheus/-/reload
 ```
 
 修改 `.env` 中的 exporter 间隔后需要重建或重启 exporter 容器：
@@ -251,10 +251,10 @@ Prometheus 和 Grafana 的数据通过 Docker 卷持久化，不会因容器重�
 
 ```bash
 # 仅停止监控组件，保留数据
-docker compose -f docker-compose.monitoring.yml down
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml stop ocserv-exporter prometheus grafana nginx
 
 # 彻底清理（包括数据）
-docker compose -f docker-compose.monitoring.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml down -v
 ```
 
-> 主服务（`docker-compose.yml`）不受影响。
+> 监控编排引用了主服务 `ocserv`，停止或清理监控栈时也要同时传入 `docker-compose.yml` 和 `docker-compose.monitoring.yml`。

@@ -123,7 +123,7 @@ services:
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
 | `OCSERV_MAX_CLIENTS` | 最大客户端数，渲染到 `max-clients` | `32` |
-| `OCSERV_MEM_LIMIT` / `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存与内存+swap 上限 | `768m` / `768m` |
+| `OCSERV_MEM_LIMIT` / `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存与内存+swap 上限 | `512m` / `512m` |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
 | `HEALTH_*` | 健康检查参数 | 30s / 5s / 3 / 15s |
 
@@ -245,7 +245,7 @@ ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
 
 | 变量 | 说明 | 示例 |
 |:--|:--|:--|
-| `GF_ADMIN_PASSWORD` | Grafana 密码 | `YourStrongPassword123!` |
+| `GF_ADMIN_PASSWORD` | Grafana 密码；必须设置，否则 Compose 配置阶段失败 | `YourStrongPassword123!` |
 | `SSL_CERT_DIR` | SSL 证书目录（Nginx 使用） | `/etc/letsencrypt` |
 
 Nginx 启动时会严格校验 `DOMAIN`、`MONITORING_PORT`、TLS 证书和生成后的配置；任一项不合法都会阻止容器启动。
@@ -341,14 +341,14 @@ ALPINE_ARCH=x86_64 ./scripts/download-alpine-minirootfs.sh
 ### 4.2 构建 ocserv 镜像
 
 ```bash
-# full 变体，对应发布标签 kingsonho/ocserv:latest 与 kingsonho/ocserv:1.4.2
+# full 变体，对应发布标签 kingsonho/ocserv:1.4.2；latest 作为该版本标签别名
 docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
   --build-arg S6_SOURCE=apk \
   -t ocserv:1.4.2 .
 
-# slim 变体，对应发布标签 kingsonho/ocserv:latest-slim 与 kingsonho/ocserv:1.4.2-slim
+# slim 变体，对应发布标签 kingsonho/ocserv:1.4.2-slim；latest-slim 作为该版本标签别名
 docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=slim \
@@ -482,8 +482,8 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
 | `OCSERV_MAX_CLIENTS` | 最大客户端数，渲染到 `max-clients` | `32` |
-| `OCSERV_MEM_LIMIT` | ocserv 容器内存上限 | `768m` |
-| `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存+swap 上限 | `768m` |
+| `OCSERV_MEM_LIMIT` | ocserv 容器内存上限 | `512m` |
+| `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存+swap 上限 | `512m` |
 | `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
 | `LOG_MAX_FILE` | 日志文件保留数量 | `3` |
 | `HEALTH_INTERVAL` | 健康检查间隔 | `30s` |
@@ -501,7 +501,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `PROMETHEUS_IMAGE` | Prometheus 镜像 | `prom/prometheus:v3.11.3` |
 | `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:13.0.1` |
 | `NGINX_IMAGE` | Nginx 镜像 | `nginx:1.28.3-alpine3.23-slim` |
-| `GF_ADMIN_PASSWORD` | Grafana 管理员密码 | `change-me-before-production` |
+| `GF_ADMIN_PASSWORD` | Grafana 管理员密码；必须在 `.env` 中显式设置 | 无默认值 |
 | `GF_ALLOW_SIGN_UP` | 允许用户注册 | `false` |
 | `GF_DASHBOARDS_MIN_REFRESH_INTERVAL` | Grafana 看板最小刷新间隔，生产默认防止低于 30s | `30s` |
 | `GF_ANALYTICS_REPORTING_ENABLED` | Grafana 匿名统计上报 | `false` |
@@ -731,7 +731,7 @@ done
 '
 ```
 
-如果单个 `ocserv-worker` 的 `RssAnon` 在有持续流量时单调增长，且用户断开后对应 worker 不退出或匿名内存不释放，按疑似 worker 内存泄漏处理。先确认正在使用固定版本 `kingsonho/ocserv:1.4.2`，并保持默认的 `compression = false`、`persistent-cookies = false`、`session-timeout = 86400`、`OCSERV_MEM_LIMIT=768m`。若 30-60 分钟压测后仍快速增长，保留两次 `/proc/*/status`、`ocserv --version`、`occtl show users/status` 输出，再升级到上游版本对照或内存剖析。
+如果单个 `ocserv-worker` 的 `RssAnon` 在有持续流量时单调增长，且用户断开后对应 worker 不退出或匿名内存不释放，按疑似 worker 内存泄漏处理。先确认正在使用固定版本 `kingsonho/ocserv:1.4.2`，并保持默认的 `compression = false`、`persistent-cookies = false`、`session-timeout = 86400`、`OCSERV_MEM_LIMIT=512m`。若 30-60 分钟压测后仍快速增长，保留两次 `/proc/*/status`、`ocserv --version`、`occtl show users/status` 输出，再升级到上游版本对照或内存剖析。
 
 ### 6.8 证书续期后处理
 
@@ -827,11 +827,11 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 
 | 触发事件 | 生成标签 |
 |:--|:--|
-| push main/master | `ocserv:1.4.2`、`ocserv:latest`、`ocserv:1.4.2-slim`、`ocserv:latest-slim`、`ocserv-exporter:1.4.2`、`ocserv-exporter:latest` |
-| push `v*` 标签 | `ocserv:1.4.2`、`ocserv:latest`、`ocserv:1.4.2-slim`、`ocserv:latest-slim`、`ocserv-exporter:1.4.2`、`ocserv-exporter:latest` |
+| push main/master | 先发布 `ocserv:1.4.2`、`ocserv:1.4.2-slim`、`ocserv-exporter:1.4.2`；再让 `ocserv:latest`、`ocserv:latest-slim`、`ocserv-exporter:latest` 指向对应版本标签 |
+| push `v*` 标签 | 先发布 `ocserv:1.4.2`、`ocserv:1.4.2-slim`、`ocserv-exporter:1.4.2`；再让 `ocserv:latest`、`ocserv:latest-slim`、`ocserv-exporter:latest` 指向对应版本标签 |
 | PR | 仅构建测试，不推送标签 |
 
-流程：下载源码和 minirootfs → Dockerfile 静态检查 → QEMU + Buildx → 分架构构建 → 生成 SBOM/provenance attestation → 创建多架构 manifest → 推送。
+流程：下载源码和 minirootfs → Dockerfile 静态检查 → QEMU + Buildx → 分架构构建 → 生成 SBOM/provenance attestation → 创建版本标签多架构 manifest → 从版本标签创建 latest 别名 → 推送。
 
 生产部署可将 `.env` 中镜像值改为 digest 形式，例如 `kingsonho/ocserv@sha256:<digest>`，以获得完全可复现的拉取结果。
 

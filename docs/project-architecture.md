@@ -49,7 +49,7 @@
 | 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需 Alpine 依赖 |
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
-| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；生产默认使用版本号标签，发布仍保留 `latest` 兼容标签 |
+| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；生产默认使用版本号标签，`latest` 作为最新版本标签别名发布 |
 | apk 源 | 默认配置 `mirrors.tuna.tsinghua.edu.cn`，CI 显式使用 Alpine 官方源 |
 
 ### 阶段二：Runtime
@@ -68,9 +68,9 @@
 
 | 变体 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `full` | 默认生产标签 `kingsonho/ocserv:1.4.2`，兼容 `latest` | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
-| `slim` | 精简生产标签 `kingsonho/ocserv:1.4.2-slim`，兼容 `latest-slim` | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
-| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:1.4.2`，兼容 `latest` | Python exporter + `occtl` |
+| `full` | 默认生产标签 `kingsonho/ocserv:1.4.2`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
+| `slim` | 精简生产标签 `kingsonho/ocserv:1.4.2-slim`，`latest-slim` 指向该版本标签 | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
+| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:1.4.2`，`latest` 指向该版本标签 | Python exporter + `occtl` |
 
 `slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
 
@@ -469,17 +469,16 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
        └─ 产物: digest-only image + SBOM/provenance attestation
        │
 7. 创建 multi-arch manifest
-       ├─ kingsonho/ocserv:1.4.2 与 kingsonho/ocserv:latest
-       ├─ kingsonho/ocserv:1.4.2-slim 与 kingsonho/ocserv:latest-slim
-       └─ kingsonho/ocserv-exporter:1.4.2 与 kingsonho/ocserv-exporter:latest
+       ├─ 先创建版本标签: kingsonho/ocserv:1.4.2, kingsonho/ocserv:1.4.2-slim, kingsonho/ocserv-exporter:1.4.2
+       └─ 再从版本标签创建 latest 别名: latest, latest-slim, ocserv-exporter:latest
 ```
 
 ### 标签策略
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| push main/master | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv-exporter:1.4.2`, `kingsonho/ocserv-exporter:latest` |
-| push v* 标签 | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv-exporter:1.4.2`, `kingsonho/ocserv-exporter:latest` |
+| push main/master | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `latest-slim`, `ocserv-exporter:latest` 指向对应版本标签 |
+| push v* 标签 | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `latest-slim`, `ocserv-exporter:latest` 指向对应版本标签 |
 | PR | 仅构建测试，不推送镜像 |
 
 ---

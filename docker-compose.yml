@@ -3,8 +3,8 @@ services:
     image: ${OCSERV_IMAGE:-kingsonho/ocserv:1.4.2}
     container_name: ocserv
     restart: unless-stopped
-    mem_limit: ${OCSERV_MEM_LIMIT:-768m}
-    memswap_limit: ${OCSERV_MEMSWAP_LIMIT:-768m}
+    mem_limit: ${OCSERV_MEM_LIMIT:-512m}
+    memswap_limit: ${OCSERV_MEMSWAP_LIMIT:-512m}
 
     # 网络与端口
     # 格式: "宿主机端口:容器端口"
