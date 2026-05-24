@@ -16,27 +16,51 @@ OUTPUT_FILE=${OCSERV_CONF_OUTPUT:-"${PROJECT_ROOT}/config/ocserv.conf"}
 [ -f "${ENV_FILE}" ] || fail "env file not found: ${ENV_FILE}. Copy .env.example to .env first."
 [ -f "${TEMPLATE_FILE}" ] || fail "template file not found: ${TEMPLATE_FILE}"
 
-DOMAIN=${DOMAIN:-}
-OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-false}
-if [ -z "${DOMAIN}" ]; then
-    DOMAIN=$(
-        awk '
-            /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-            /^[[:space:]]*DOMAIN[[:space:]]*=/ {
-                value = $0
-                sub(/^[[:space:]]*DOMAIN[[:space:]]*=[[:space:]]*/, "", value)
+env_value() {
+    awk -v key="$1" '
+        /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+        {
+            line = $0
+            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+            if (line ~ "^[[:space:]]*" key "[[:space:]]*=") {
+                value = line
+                sub("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*", "", value)
                 sub(/[[:space:]]+#.*$/, "", value)
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
                 if ((value ~ /^".*"$/) || (value ~ /^\047.*\047$/)) {
                     value = substr(value, 2, length(value) - 2)
                 }
             }
-            END { print value }
-        ' "${ENV_FILE}"
-    )
+        }
+        END { print value }
+    ' "${ENV_FILE}"
+}
+
+DOMAIN=${DOMAIN:-}
+if [ -z "${DOMAIN}" ]; then
+    DOMAIN=$(env_value DOMAIN)
 fi
+OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-$(env_value OCSERV_DISABLE_UTMP)}
+OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-false}
+OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_value OCSERV_MAX_CLIENTS)}
+OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}
 
 [ -n "${DOMAIN:-}" ] || fail "DOMAIN is empty in ${ENV_FILE}"
+
+case "${OCSERV_DISABLE_UTMP}" in
+    true|false)
+        ;;
+    *)
+        fail "OCSERV_DISABLE_UTMP must be true or false: ${OCSERV_DISABLE_UTMP}"
+        ;;
+esac
+
+case "${OCSERV_MAX_CLIENTS}" in
+    ''|*[!0-9]*)
+        fail "OCSERV_MAX_CLIENTS must be a positive integer: ${OCSERV_MAX_CLIENTS}"
+        ;;
+esac
+[ "${OCSERV_MAX_CLIENTS}" -ge 1 ] || fail "OCSERV_MAX_CLIENTS must be at least 1"
 
 case "${DOMAIN}" in
     *[!A-Za-z0-9.-]*)
@@ -74,9 +98,14 @@ OUTPUT_DIR=$(dirname -- "${OUTPUT_FILE}")
 TMP_FILE=$(mktemp "${OUTPUT_DIR}/.ocserv.conf.XXXXXX") || fail "failed to create temporary config"
 trap 'rm -f "${TMP_FILE}"' EXIT HUP INT TERM
 
-awk -v domain="${DOMAIN}" -v disable_utmp="${OCSERV_DISABLE_UTMP}" '
+awk -v domain="${DOMAIN}" \
+    -v disable_utmp="${OCSERV_DISABLE_UTMP}" \
+    -v max_clients="${OCSERV_MAX_CLIENTS}" '
     {
         gsub(/\$\{DOMAIN\}/, domain)
+        if ($0 ~ /^[[:space:]]*max-clients[[:space:]]*=/) {
+            sub(/=.*/, "= " max_clients)
+        }
         if (disable_utmp == "true" && $0 ~ /^[[:space:]]*use-utmp[[:space:]]*=/) {
             sub(/=.*/, "= false")
         }
@@ -92,4 +121,5 @@ chmod 0644 "${TMP_FILE}"
 mv "${TMP_FILE}" "${OUTPUT_FILE}"
 trap - EXIT HUP INT TERM
 
-printf 'Rendered %s from %s using DOMAIN=%s\n' "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}"
+printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s\n' \
+    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}"

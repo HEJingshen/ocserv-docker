@@ -122,6 +122,8 @@ services:
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
+| `OCSERV_MAX_CLIENTS` | 最大客户端数，渲染到 `max-clients` | `32` |
+| `OCSERV_MEM_LIMIT` / `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存与内存+swap 上限 | `768m` / `768m` |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
 | `HEALTH_*` | 健康检查参数 | 30s / 5s / 3 / 15s |
 
@@ -437,10 +439,12 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `ipv4-network` | 客户端 IP 段 | `10.10.10.0` |
 | `ipv4-netmask` | 子网掩码 | `255.255.255.0` |
 | `dns` | 推送 DNS | `8.8.8.8` |
-| `max-clients` | 最大客户端（0=不限） | `0` |
+| `max-clients` | 最大客户端 | `32` |
 | `keepalive` | 心跳间隔（秒） | `30` |
 | `dpd` | 死连接检测（秒） | `90` |
-| `compression` | 启用压缩 | `true` |
+| `compression` | 启用压缩 | `false` |
+| `session-timeout` | 单次会话最长连接时间（秒） | `86400` |
+| `persistent-cookies` | 断开后保持 cookie 可用 | `false` |
 | `try-mtu-discovery` | MTU 自动发现 | `true` |
 | `isolate-workers` | 隔离工作进程 | `true` |
 | `run-as-user` | 运行用户 | `nobody` |
@@ -477,6 +481,9 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
+| `OCSERV_MAX_CLIENTS` | 最大客户端数，渲染到 `max-clients` | `32` |
+| `OCSERV_MEM_LIMIT` | ocserv 容器内存上限 | `768m` |
+| `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存+swap 上限 | `768m` |
 | `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
 | `LOG_MAX_FILE` | 日志文件保留数量 | `3` |
 | `HEALTH_INTERVAL` | 健康检查间隔 | `30s` |
@@ -693,7 +700,7 @@ sudo ls -ld "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}"
 ```bash
 docker logs ocserv-exporter
 docker exec ocserv ls -la /var/run/occtl.socket
-docker exec ocserv occtl -j show status
+docker exec ocserv occtl -s /var/run/occtl.socket -j show status
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prometheus wget -qO- http://ocserv:9100/metrics
 ```
 
@@ -703,7 +710,30 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prome
 | 版本不匹配 | 确保 exporter 与 ocserv 版本一致 |
 | Prometheus 无法访问指标 | exporter 使用 `network_mode: service:ocserv` 与 ocserv 共用网络命名空间，因此 Prometheus 目标是 `ocserv:9100`，不需要也不应额外映射 exporter 端口 |
 
-### 6.7 证书续期后处理
+### 6.7 ocserv 内存增长排查
+
+先区分 Docker 统计、监控栈和单个 `ocserv-worker` 进程内存：
+
+```bash
+docker stats --no-stream ocserv ocserv-exporter prometheus grafana nginx-proxy
+docker exec ocserv occtl -s /var/run/occtl.socket show status
+docker exec ocserv occtl -s /var/run/occtl.socket show users
+docker exec ocserv sh -c '
+for p in /proc/[0-9]*; do
+  comm=$(cat "$p/comm" 2>/dev/null || true)
+  case "$comm" in
+    ocserv*)
+      echo "--- pid ${p##*/} $comm ---"
+      grep -E "Name|State|VmRSS|VmHWM|VmSize|RssAnon|RssFile|Threads" "$p/status" 2>/dev/null || true
+      ;;
+  esac
+done
+'
+```
+
+如果单个 `ocserv-worker` 的 `RssAnon` 在有持续流量时单调增长，且用户断开后对应 worker 不退出或匿名内存不释放，按疑似 worker 内存泄漏处理。先确认正在使用固定版本 `kingsonho/ocserv:1.4.2`，并保持默认的 `compression = false`、`persistent-cookies = false`、`session-timeout = 86400`、`OCSERV_MEM_LIMIT=768m`。若 30-60 分钟压测后仍快速增长，保留两次 `/proc/*/status`、`ocserv --version`、`occtl show users/status` 输出，再升级到上游版本对照或内存剖析。
+
+### 6.8 证书续期后处理
 
 | 挂载方式 | 续期后操作 |
 |:--|:--|

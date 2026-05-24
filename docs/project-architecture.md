@@ -516,7 +516,6 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ├── exporter/
 │   ├── Dockerfile                      # exporter Alpine minirootfs 多阶段构建
 │   ├── ocserv_exporter.py              # Prometheus 指标采集器模块
-│   ├── ocserv-exporter.py              # 兼容旧文件名的 wrapper
 │   └── test_ocserv_exporter.py         # exporter 单元测试
 │
 ├── monitoring/
