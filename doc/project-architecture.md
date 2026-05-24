@@ -39,41 +39,40 @@
 
 ## 一、镜像构建（Dockerfile）
 
-采用多阶段构建，将 **编译** 和 **运行** 分离，最小化最终镜像体积。
+采用 Alpine minirootfs 多阶段构建，将 **编译** 和 **运行** 分离，并固定 rootfs tarball 与 sha256 校验值。
 
 ### 阶段一：Builder
 
 | 项目 | 说明 |
 |:--|:--|
-| 基础镜像 | `debian:trixie-slim`（可通过 `BASE_IMAGE` ARG 自定义） |
-| 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需依赖 |
+| 基础镜像 | 已校验的 `alpine-minirootfs-3.23.4-{arch}.tar.gz` |
+| 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需 Alpine 依赖 |
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
-| s6-overlay | 在 builder 阶段解压 s6-overlay tarball（此阶段有 `xz-utils`），输出到 `/tmp/s6-out` |
-| 清华源 | 配置 `mirrors.tuna.tsinghua.edu.cn` 加速 apt 下载 |
+| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；发布中 `alpine` 为 full，`alpine-slim` 为 slim |
+| apk 源 | 默认配置 `mirrors.tuna.tsinghua.edu.cn`，CI 显式使用 Alpine 官方源 |
 
 ### 阶段二：Runtime
 
 | 项目 | 说明 |
 |:--|:--|
-| 基础镜像 | `debian:trixie-slim`（全新环境） |
-| 运行依赖 | 仅安装 ocserv 运行时所需的共享库 + `iproute2` + `iptables`：<br>`libgnutls30t64`, `libev4`, `libreadline8t64`, `libtasn1-6`, `libpam0g`, `liblz4-1`, `libseccomp2`, `libnl-route-3-200`, `libkrb5-3`, `libradcli4`, `liboath0t64`, `libprotobuf-c1`, `libtalloc2` |
-| 产物复制 | `COPY --from=builder /out /`（编译产物） + `COPY --from=builder /tmp/s6-out/ /`（s6-overlay） |
-| 清华源 | 配置 `mirrors.tuna.tsinghua.edu.cn` 加速 apt 下载 |
+| 基础镜像 | 与 builder 相同的已校验 Alpine minirootfs |
+| 运行依赖 | 通过 `scanelf` 解析 ocserv 二进制所需共享库，并用 `apk add --virtual .ocserv-rundeps so:*` 安装 |
+| 产物复制 | `COPY --from=builder /out/ /` |
+| s6-overlay | `S6_SOURCE=auto|apk|tarball` 控制来源，发布构建使用 `apk` |
 | PATH | `/command` 加入 PATH，使 `docker exec` 可用 s6-overlay v3 工具 |
 
-### Alpine 可行性构建
+### Minirootfs 基线
 
-`Dockerfile.alpine` 是独立实验入口，不替换默认 Debian 镜像。当前基线为 `alpine:3.23`，让 Docker 官方镜像自动跟随 v3.23 分支最新 patch。它支持 `ALPINE_FLAVOR=slim|full` 和 `S6_SOURCE=auto|apk|tarball`：
+`Dockerfile` 和 `exporter/Dockerfile` 均从 `scratch` 创建 `alpine-rootfs` stage，再让 builder 与 runtime 从同一 rootfs 派生。minirootfs tarball 由 `scripts/download-alpine-minirootfs.sh` 下载到 `src/`，不提交到 Git。
 
 | 变体 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `slim` | 生产灰度优先验证目标 | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
-| `full` | 能力验证目标 | 尽量保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
+| `full` | 默认发布标签 `kingsonho/ocserv:alpine` | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
+| `slim` | 精简发布标签 `kingsonho/ocserv:alpine-slim` | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
+| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:alpine` | Python exporter + `occtl` |
 
-`S6_SOURCE=auto` 会先尝试 Alpine 仓库 `s6-overlay` 包，验证 `/init` 可用后使用；否则回退到仓库 `src/` 中的 s6-overlay tarball。`slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
-
-仓库同时提供 `Dockerfile.alpine-minirootfs` 和 `exporter/Dockerfile.alpine-minirootfs` 作为供应链可追溯实验入口。它们从已下载并校验的 `alpine-minirootfs-3.23.4-{arch}.tar.gz` 创建 `alpine-rootfs` stage，builder 与 runtime 都从同一 rootfs 派生；minirootfs tarball 由 `scripts/download-alpine-minirootfs.sh` 下载到 `src/`，不提交到 Git。
+`slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
 
 ### 镜像元数据（LABELs）
 
@@ -179,7 +178,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
-| `OCSERV_IMAGE` | `kingsonho/ocserv:latest` | ocserv 服务镜像 |
+| `OCSERV_IMAGE` | `kingsonho/ocserv:alpine` | ocserv 服务镜像 |
 | `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
 | `TZ` | `Asia/Shanghai` | 时区设置 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
@@ -257,7 +256,7 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 基础镜像 | `debian:trixie-slim`（可通过 `BASE_IMAGE` ARG 自定义） |
+| 基础镜像 | 已校验的 `alpine-minirootfs-3.23.4-{arch}.tar.gz` |
 | 构建方式 | 多阶段构建，builder 从 ocserv 源码只编译 `occtl`，runtime 复制该二进制 |
 | 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`，直接执行 `ocserv-exporter.py` |
 | 数据采集 | 通过 `occtl -j show status` 和 `occtl -j show users`（JSON 格式）调用 ocserv 的 Unix socket 接口 |
@@ -449,7 +448,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 | 事件 | 行为 |
 |:--|:--|
 | push 到 `main`/`master` | 构建 + 推送 |
-| push `v*` 标签 | 构建 + 推送固定版本标签 |
+| push `v*` 标签 | 构建 + 推送 |
 | pull request | 仅构建（不推送） |
 
 ### 构建流程
@@ -461,25 +460,28 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
        │
 3. 设置 Buildx → 多架构构建引擎
        │
-4. 登录 Docker Hub（非 PR 时）
+4. 下载 ocserv、s6-overlay 和 Alpine minirootfs
        │
-5. 生成标签元数据
-       ├─ ocserv 版本标签: 1.4.2
-       └─ main/master 分支额外生成 latest
+5. 登录 Docker Hub（非 PR 时）
        │
 6. 构建 + 推送
-       ├─ 平台: linux/amd64, linux/arm64
+       ├─ 分平台构建: linux/amd64, linux/arm64
        ├─ 缓存: GitHub Actions 缓存（gha）
-       ├─ 参数: OCSERV_VERSION, S6_OVERLAY_VERSION, BASE_IMAGE
-       └─ 前置: src/ 目录下需有 ocserv 源码和 s6-overlay tarball
+       ├─ 参数: OCSERV_VERSION, S6_OVERLAY_VERSION, ALPINE_ARCH, ALPINE_FLAVOR
+       └─ 产物: digest-only image
+       │
+7. 创建 multi-arch manifest
+       ├─ kingsonho/ocserv:alpine
+       ├─ kingsonho/ocserv:alpine-slim
+       └─ kingsonho/ocserv-exporter:alpine
 ```
 
 ### 标签策略
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| push main/master | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest` |
-| push v* 标签 | `kingsonho/ocserv:1.4.2` |
+| push main/master | `kingsonho/ocserv:alpine`, `kingsonho/ocserv:alpine-slim`, `kingsonho/ocserv-exporter:alpine` |
+| push v* 标签 | `kingsonho/ocserv:alpine`, `kingsonho/ocserv:alpine-slim`, `kingsonho/ocserv-exporter:alpine` |
 | PR | 仅构建测试，不推送镜像 |
 
 ---
@@ -488,8 +490,6 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 ```
 ├── Dockerfile                          # 多阶段构建 + s6 服务定义（内嵌 s6-init.sh）
-├── Dockerfile.alpine                   # Alpine 可行性构建入口
-├── Dockerfile.alpine-minirootfs        # Alpine minirootfs 可追溯实验入口
 ├── docker-compose.yml                  # 主服务编排（支持环境变量）
 ├── docker-compose.monitoring.yml       # 监控栈编排（exporter + Prometheus + Grafana + Nginx）
 ├── install-docker.sh                   # Docker 一键安装脚本
@@ -502,7 +502,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │
 ├── src/                                # 本地构建素材（不提交到 Git）
 │   ├── ocserv-1.4.2.tar.xz             # ocserv 源码
-│   ├── alpine-minirootfs-*.tar.gz      # Alpine minirootfs 实验构建输入
+│   ├── alpine-minirootfs-*.tar.gz      # Alpine minirootfs 构建输入
 │   ├── s6-overlay-noarch.tar.xz        # s6-overlay 通用组件
 │   ├── s6-overlay-x86_64.tar.xz        # s6-overlay amd64 二进制
 │   └── s6-overlay-aarch64.tar.xz       # s6-overlay arm64 二进制
@@ -515,9 +515,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── ocpasswd                        # 用户密码文件
 │
 ├── exporter/
-│   ├── Dockerfile                      # exporter 多阶段构建
-│   ├── Dockerfile.alpine               # exporter Alpine 可行性构建
-│   ├── Dockerfile.alpine-minirootfs    # exporter Alpine minirootfs 实验构建
+│   ├── Dockerfile                      # exporter Alpine minirootfs 多阶段构建
 │   └── ocserv-exporter.py              # Prometheus 指标采集器
 │
 ├── monitoring/

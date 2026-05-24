@@ -1,41 +1,74 @@
-ARG BASE_IMAGE=debian:trixie-slim
+ARG ALPINE_VERSION=3.23
+ARG ALPINE_PATCH_VERSION=3.23.4
+ARG ALPINE_ARCH=x86_64
 
-FROM ${BASE_IMAGE} AS builder
+FROM scratch AS alpine-rootfs
+ARG ALPINE_VERSION
+ARG ALPINE_PATCH_VERSION
+ARG ALPINE_ARCH
+ADD src/alpine-minirootfs-${ALPINE_PATCH_VERSION}-${ALPINE_ARCH}.tar.gz /
+CMD ["/bin/sh"]
+
+FROM alpine-rootfs AS builder
 
 ARG OCSERV_VERSION=1.4.2
-ARG DEBIAN_FRONTEND=noninteractive
-ARG USE_TUNA_MIRROR=true
-
-RUN if [ "${USE_TUNA_MIRROR}" = "true" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i 's@//.*deb.debian.org@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
-    fi
+ARG ALPINE_FLAVOR=slim
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-        build-essential \
+    . /etc/os-release; \
+    ALPINE_BRANCH="${VERSION_ID}"; \
+    case "${ALPINE_BRANCH}" in \
+        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
+    esac; \
+    printf '%s/v%s/main\n%s/v%s/community\n' \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
+        > /etc/apk/repositories
+
+RUN set -eux; \
+    apk add --no-cache \
+        build-base \
         ca-certificates \
         gawk \
-        ipcalc \
+        gnutls-dev \
+        gperf \
         libev-dev \
-        libgnutls28-dev \
-        libkrb5-dev \
-        liblz4-dev \
-        libnl-route-3-dev \
-        liboath-dev \
-        libpam0g-dev \
-        libprotobuf-c-dev \
-        libradcli-dev \
-        libreadline-dev \
-        libseccomp-dev \
-        libtalloc-dev \
-        libtasn1-bin \
+        libnl3-dev \
+        linux-headers \
+        lz4-dev \
         meson \
-        ninja-build \
-        pkg-config \
+        nettle-dev \
+        ninja \
+        pkgconf \
+        protobuf-c-dev \
         protobuf-c-compiler \
-        xz-utils; \
-    rm -rf /var/lib/apt/lists/*
+        readline-dev \
+        xz; \
+    if ! command -v ipcalc >/dev/null 2>&1; then \
+        printf '#!/bin/sh\nexec busybox ipcalc "$@"\n' > /usr/local/bin/ipcalc; \
+        chmod +x /usr/local/bin/ipcalc; \
+    fi; \
+    case "${ALPINE_FLAVOR}" in \
+        slim) \
+            apk add --no-cache libxcrypt-dev || true; \
+            ;; \
+        full) \
+            apk add --no-cache \
+                krb5-dev \
+                libseccomp-dev \
+                libtasn1-dev \
+                linux-pam-dev \
+                talloc-dev; \
+            apk add --no-cache oath-toolkit-dev || echo "WARNING: oath-toolkit-dev unavailable; OTP/liboath will remain auto-detected"; \
+            apk add --no-cache radcli-dev || echo "WARNING: radcli-dev unavailable; RADIUS will remain auto-detected"; \
+            apk add --no-cache libxcrypt-dev || true; \
+            ;; \
+        *) \
+            echo "Unsupported ALPINE_FLAVOR=${ALPINE_FLAVOR}; expected slim or full"; \
+            exit 1; \
+            ;; \
+    esac
 
 COPY src/ocserv-${OCSERV_VERSION}.tar.xz /tmp/ocserv-${OCSERV_VERSION}.tar.xz
 
@@ -43,75 +76,114 @@ RUN set -eux; \
     cd /tmp; \
     tar -xf ocserv-${OCSERV_VERSION}.tar.xz; \
     cd ocserv-${OCSERV_VERSION}; \
+    case "${ALPINE_FLAVOR}" in \
+        slim) \
+            MESON_FEATURES="-Dpam=disabled -Dradius=disabled -Dgssapi=disabled -Dliboath=disabled -Dsystemd=disabled -Dutmp=disabled -Dlibwrap=disabled -Dseccomp=disabled -Dlz4=enabled -Dlibnl=enabled"; \
+            ;; \
+        full) \
+            MESON_FEATURES="-Dpam=enabled -Dradius=auto -Dgssapi=enabled -Dliboath=auto -Dsystemd=disabled -Dutmp=auto -Dlibwrap=auto -Dseccomp=enabled -Dlz4=enabled -Dlibnl=enabled"; \
+            ;; \
+    esac; \
     meson setup build \
         --prefix /usr \
         --buildtype=release \
         -Doidc-auth=disabled \
+        -Dfirewall-script=iptables \
         -Dlocal-llhttp=true \
-        -Dlocal-pcl=true; \
+        -Dlocal-pcl=true \
+        ${MESON_FEATURES}; \
     ninja -C build; \
     DESTDIR=/out ninja -C build install; \
     rm -rf /tmp/ocserv-*
 
+FROM alpine-rootfs
+
+ARG OCSERV_VERSION=1.4.2
+ARG S6_OVERLAY_VERSION=3.2.3.0
+ARG ALPINE_VERSION=3.23
+ARG ALPINE_PATCH_VERSION=3.23.4
+ARG ALPINE_ARCH=x86_64
+ARG ALPINE_MINIROOTFS_SHA256
+ARG ALPINE_FLAVOR=slim
+ARG S6_SOURCE=auto
+ARG BUILD_DATE
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+ARG TARGETARCH
+
+LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
+      org.opencontainers.image.title="ocserv-alpine-minirootfs" \
+      org.opencontainers.image.description="OpenConnect VPN Server Alpine minirootfs feasibility image" \
+      org.opencontainers.image.version="${OCSERV_VERSION}" \
+      org.opencontainers.image.alpine-version="${ALPINE_VERSION}" \
+      org.opencontainers.image.alpine-minirootfs-version="${ALPINE_PATCH_VERSION}" \
+      org.opencontainers.image.alpine-minirootfs-arch="${ALPINE_ARCH}" \
+      org.opencontainers.image.alpine-minirootfs-sha256="${ALPINE_MINIROOTFS_SHA256}" \
+      org.opencontainers.image.s6-overlay-version="${S6_OVERLAY_VERSION}" \
+      org.opencontainers.image.alpine-flavor="${ALPINE_FLAVOR}" \
+      org.opencontainers.image.s6-source="${S6_SOURCE}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.source="https://github.com/HEJingshen/ocserv-docker"
+
+RUN set -eux; \
+    . /etc/os-release; \
+    ALPINE_BRANCH="${VERSION_ID}"; \
+    case "${ALPINE_BRANCH}" in \
+        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
+    esac; \
+    printf '%s/v%s/main\n%s/v%s/community\n' \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
+        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
+        > /etc/apk/repositories
+
+COPY --from=builder /out/ /
 COPY src/s6-overlay-noarch.tar.xz /tmp/
 COPY src/s6-overlay-x86_64.tar.xz /tmp/
 COPY src/s6-overlay-aarch64.tar.xz /tmp/
 
 RUN set -eux; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "$ARCH" in \
-        amd64) S6_ARCH=x86_64 ;; \
-        arm64) S6_ARCH=aarch64 ;; \
-        *) echo "Unsupported architecture: $ARCH"; exit 1 ;; \
-    esac; \
-    mkdir -p /tmp/s6-out; \
-    tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /tmp/s6-out; \
-    tar -Jxpf /tmp/s6-overlay-${S6_ARCH}.tar.xz -C /tmp/s6-out; \
-    rm -f /tmp/s6-overlay-*.tar.xz
-
-FROM ${BASE_IMAGE}
-
-ARG OCSERV_VERSION=1.4.2
-ARG S6_OVERLAY_VERSION=3.2.3.0
-ARG BUILD_DATE
-ARG DEBIAN_FRONTEND=noninteractive
-ARG USE_TUNA_MIRROR=true
-
-LABEL maintainer="72605370+HEJingshen@users.noreply.github.com" \
-      org.opencontainers.image.title="ocserv" \
-      org.opencontainers.image.description="OpenConnect VPN Server" \
-      org.opencontainers.image.version="${OCSERV_VERSION}" \
-      org.opencontainers.image.s6-overlay-version="${S6_OVERLAY_VERSION}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.source="https://github.com/HEJingshen/ocserv-docker"
-
-RUN if [ "${USE_TUNA_MIRROR}" = "true" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i 's@//.*deb.debian.org@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
-    fi
-
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
+    apk add --no-cache \
         ca-certificates \
+        grep \
         iproute2 \
         iptables \
-        libev4 \
-        libgnutls30t64 \
-        libkrb5-3 \
-        liblz4-1 \
-        libnl-route-3-200 \
-        liboath0t64 \
-        libpam0g \
-        libprotobuf-c1 \
-        libradcli4 \
-        libreadline8t64 \
-        libseccomp2 \
-        libtalloc2 \
-        libtasn1-6; \
-    rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /out/ /
-COPY --from=builder /tmp/s6-out/ /
+        pax-utils \
+        sed \
+        tzdata \
+        xz; \
+    runDeps="$(scanelf --needed --nobanner --format '%n#p' \
+            /usr/bin/occtl /usr/bin/ocpasswd /usr/sbin/ocserv /usr/sbin/ocserv-worker \
+        | tr ',' '\n' \
+        | sort -u \
+        | awk 'NF { print "so:" $1 }')"; \
+    apk add --no-cache --virtual .ocserv-rundeps ${runDeps}; \
+    case "${S6_SOURCE}" in \
+        apk) \
+            apk add --no-cache s6-overlay; \
+            [ -x /init ]; \
+            ;; \
+        tarball) \
+            /bin/sh -c 'case "${TARGETARCH}" in amd64) S6_ARCH=x86_64 ;; arm64) S6_ARCH=aarch64 ;; *) echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; esac; tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /; tar -Jxpf /tmp/s6-overlay-${S6_ARCH}.tar.xz -C /'; \
+            ;; \
+        auto) \
+            if apk add --no-cache s6-overlay && [ -x /init ]; then \
+                echo "Using Alpine s6-overlay package"; \
+            else \
+                echo "Falling back to bundled s6-overlay tarballs"; \
+                case "${TARGETARCH}" in \
+                    amd64) S6_ARCH=x86_64 ;; \
+                    arm64) S6_ARCH=aarch64 ;; \
+                    *) echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
+                esac; \
+                tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /; \
+                tar -Jxpf /tmp/s6-overlay-${S6_ARCH}.tar.xz -C /; \
+            fi; \
+            ;; \
+        *) \
+            echo "Unsupported S6_SOURCE=${S6_SOURCE}; expected auto, apk, or tarball"; \
+            exit 1; \
+            ;; \
+    esac; \
+    rm -f /tmp/s6-overlay-*.tar.xz
 
 ENV PATH="/command:${PATH}"
 

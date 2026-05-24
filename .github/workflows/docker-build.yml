@@ -1,29 +1,39 @@
-name: Build & Push Ocserv Image
+name: Build Alpine Minirootfs Images
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
     tags: [ "v*" ]
     paths:
       - 'Dockerfile'
+      - 'exporter/Dockerfile'
       - '.github/workflows/docker-build.yml'
+      - 'scripts/download-alpine-minirootfs.sh'
+      - 'scripts/render-ocserv-conf.sh'
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
+      - 'exporter/Dockerfile'
       - '.github/workflows/docker-build.yml'
+      - 'scripts/download-alpine-minirootfs.sh'
+      - 'scripts/render-ocserv-conf.sh'
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: kingsonho/ocserv
+  OCSERV_IMAGE_NAME: kingsonho/ocserv
+  EXPORTER_IMAGE_NAME: kingsonho/ocserv-exporter
   OCSERV_VERSION: "1.4.2"
   S6_OVERLAY_VERSION: "3.2.3.0"
+  ALPINE_VERSION: "3.23"
+  ALPINE_PATCH_VERSION: "3.23.4"
+  ALPINE_X86_64_SHA256: 85498865362aa7ebececa0d725a2f2e4db7ac4e4b2850b8df21645afa0d03ee3
+  ALPINE_AARCH64_SHA256: 9250667a8affac8f1e98086392f80f43f086626701e9bce33398eb9b6c0bd64c
 
 jobs:
-  build:
+  build-ocserv:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -39,8 +49,20 @@ jobs:
             https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-x86_64.tar.xz
           curl -L -o src/s6-overlay-aarch64.tar.xz \
             https://github.com/just-containers/s6-overlay/releases/download/v${{ env.S6_OVERLAY_VERSION }}/s6-overlay-aarch64.tar.xz
+          ALPINE_VERSION=${{ env.ALPINE_VERSION }} \
+          ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }} \
+          ALPINE_ARCH=x86_64 \
+          ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_X86_64_SHA256 }} \
+          APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine \
+            ./scripts/download-alpine-minirootfs.sh
+          ALPINE_VERSION=${{ env.ALPINE_VERSION }} \
+          ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }} \
+          ALPINE_ARCH=aarch64 \
+          ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_AARCH64_SHA256 }} \
+          APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine \
+            ./scripts/download-alpine-minirootfs.sh
 
-      - name: Set up QEMU (多架构模拟)
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Set up Docker Buildx
@@ -53,46 +75,199 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract Metadata (标签/注解)
-        id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ env.OCSERV_VERSION }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
-
       - name: Set build date
         id: date
         run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
-      - name: Build & Push
+      - name: Build ocserv full amd64
+        id: ocserv_full_amd64
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          file: Dockerfile
+          platforms: linux/amd64
+          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             OCSERV_VERSION=${{ env.OCSERV_VERSION }}
             S6_OVERLAY_VERSION=${{ env.S6_OVERLAY_VERSION }}
+            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
+            ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }}
+            ALPINE_ARCH=x86_64
+            ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_X86_64_SHA256 }}
+            ALPINE_FLAVOR=full
+            S6_SOURCE=apk
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
-            USE_TUNA_MIRROR=false
 
-      - name: Test image (PR only)
-        if: github.event_name == 'pull_request'
-        run: |
-          docker build --build-arg USE_TUNA_MIRROR=false -t test-image .
-          docker run --rm --entrypoint ocserv test-image --version || echo "ocserv binary check failed"
-
-      - name: Run Trivy vulnerability scanner
-        if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      - name: Build ocserv full arm64
+        id: ocserv_full_arm64
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.OCSERV_VERSION }}
-          format: 'table'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH'
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            S6_OVERLAY_VERSION=${{ env.S6_OVERLAY_VERSION }}
+            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
+            ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }}
+            ALPINE_ARCH=aarch64
+            ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_AARCH64_SHA256 }}
+            ALPINE_FLAVOR=full
+            S6_SOURCE=apk
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+
+      - name: Build ocserv slim amd64
+        id: ocserv_slim_amd64
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            S6_OVERLAY_VERSION=${{ env.S6_OVERLAY_VERSION }}
+            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
+            ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }}
+            ALPINE_ARCH=x86_64
+            ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_X86_64_SHA256 }}
+            ALPINE_FLAVOR=slim
+            S6_SOURCE=apk
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+
+      - name: Build ocserv slim arm64
+        id: ocserv_slim_arm64
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            S6_OVERLAY_VERSION=${{ env.S6_OVERLAY_VERSION }}
+            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
+            ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }}
+            ALPINE_ARCH=aarch64
+            ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_AARCH64_SHA256 }}
+            ALPINE_FLAVOR=slim
+            S6_SOURCE=apk
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+
+      - name: Push ocserv manifests
+        if: github.event_name != 'pull_request'
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:alpine \
+            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_full_amd64.outputs.digest }} \
+            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_full_arm64.outputs.digest }}
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:alpine-slim \
+            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_slim_amd64.outputs.digest }} \
+            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_slim_arm64.outputs.digest }}
+
+  build-exporter:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download source files
+        run: |
+          mkdir -p src
+          curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
+            https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
+          ALPINE_VERSION=${{ env.ALPINE_VERSION }} \
+          ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }} \
+          ALPINE_ARCH=x86_64 \
+          ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_X86_64_SHA256 }} \
+          APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine \
+            ./scripts/download-alpine-minirootfs.sh
+          ALPINE_VERSION=${{ env.ALPINE_VERSION }} \
+          ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }} \
+          ALPINE_ARCH=aarch64 \
+          ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_AARCH64_SHA256 }} \
+          APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine \
+            ./scripts/download-alpine-minirootfs.sh
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Login to Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set build date
+        id: date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Build exporter amd64
+        id: exporter_amd64
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: exporter/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
+            ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }}
+            ALPINE_ARCH=x86_64
+            ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_X86_64_SHA256 }}
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+
+      - name: Build exporter arm64
+        id: exporter_arm64
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: exporter/Dockerfile
+          platforms: linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
+            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
+            ALPINE_PATCH_VERSION=${{ env.ALPINE_PATCH_VERSION }}
+            ALPINE_ARCH=aarch64
+            ALPINE_MINIROOTFS_SHA256=${{ env.ALPINE_AARCH64_SHA256 }}
+            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+
+      - name: Push exporter manifest
+        if: github.event_name != 'pull_request'
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:alpine \
+            ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}@${{ steps.exporter_amd64.outputs.digest }} \
+            ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}@${{ steps.exporter_arm64.outputs.digest }}

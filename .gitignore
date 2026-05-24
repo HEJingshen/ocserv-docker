@@ -10,3 +10,6 @@ src/*.tar.gz
 
 # Environment variables (contains sensitive data)
 .env
+
+# Doc files
+doc/*.md

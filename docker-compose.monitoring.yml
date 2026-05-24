@@ -1,6 +1,6 @@
 services:
   ocserv-exporter:
-    image: ${EXPORTER_IMAGE:-kingsonho/ocserv-exporter:latest}
+    image: ${EXPORTER_IMAGE:-kingsonho/ocserv-exporter:alpine}
     container_name: ocserv-exporter
     restart: unless-stopped
     network_mode: "service:ocserv"
