@@ -88,6 +88,9 @@ jobs:
           docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile exporter/Dockerfile
 
       - name: Validate Compose files
+        env:
+          # CI-only value for Compose interpolation; production must set this in .env.
+          GF_ADMIN_PASSWORD: ci-validation-only
         run: |
           EDITOR=true ./scripts/prepare-ocserv-config.sh
           mkdir -p nginx/conf.d nginx/logs
