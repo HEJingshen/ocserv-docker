@@ -1,6 +1,6 @@
 services:
   ocserv-exporter:
-    image: ${EXPORTER_IMAGE:-kingsonho/ocserv-exporter:latest}
+    image: ${EXPORTER_IMAGE:-kingsonho/ocserv-exporter:1.4.2}
     container_name: ocserv-exporter
     restart: unless-stopped
     network_mode: "service:ocserv"
@@ -17,7 +17,7 @@ services:
         condition: service_healthy
 
   prometheus:
-    image: ${PROMETHEUS_IMAGE:-prom/prometheus:latest}
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.11.3}
     container_name: prometheus
     restart: unless-stopped
     # ⬇️ 关键：注入子路径路由参数
@@ -36,7 +36,7 @@ services:
       - monitor-net
 
   grafana:
-    image: ${GRAFANA_IMAGE:-grafana/grafana:latest}
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.0.1}
     container_name: grafana
     restart: unless-stopped
     mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
@@ -66,7 +66,7 @@ services:
         condition: service_started
 
   nginx:
-    image: ${NGINX_IMAGE:-nginx:alpine}
+    image: ${NGINX_IMAGE:-nginx:1.28.3-alpine3.23-slim}
     container_name: nginx-proxy
     restart: unless-stopped
     ports:

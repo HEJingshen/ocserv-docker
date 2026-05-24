@@ -1,11 +1,30 @@
 # Version control
 .git/
+.github/
 
 # Local data
 logs/
 config/
+nginx/logs/
+nginx/conf.d/
 
 # IDE / editor
 .DS_Store
+**/.DS_Store
 *.swp
 *~
+
+# Non-build project files
+docs/
+tests/
+monitoring/
+fail2ban/
+README.md
+install-docker.sh
+docker-compose*.yml
+.env
+.env.*
+
+# Keep only scripts needed by Dockerfile COPY.
+scripts/*
+!scripts/configure-alpine-repositories.sh

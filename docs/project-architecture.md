@@ -49,7 +49,7 @@
 | 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需 Alpine 依赖 |
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
-| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；发布中 `latest`/版本号为 full，`latest-slim`/版本号-slim 为 slim |
+| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；生产默认使用版本号标签，发布仍保留 `latest` 兼容标签 |
 | apk 源 | 默认配置 `mirrors.tuna.tsinghua.edu.cn`，CI 显式使用 Alpine 官方源 |
 
 ### 阶段二：Runtime
@@ -68,9 +68,9 @@
 
 | 变体 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `full` | 默认发布标签 `kingsonho/ocserv:latest` 与版本号标签 | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
-| `slim` | 精简发布标签 `kingsonho/ocserv:latest-slim` 与版本号-slim 标签 | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
-| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:latest` 与版本号标签 | Python exporter + `occtl` |
+| `full` | 默认生产标签 `kingsonho/ocserv:1.4.2`，兼容 `latest` | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
+| `slim` | 精简生产标签 `kingsonho/ocserv:1.4.2-slim`，兼容 `latest-slim` | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
+| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:1.4.2`，兼容 `latest` | Python exporter + `occtl` |
 
 `slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
 
@@ -178,7 +178,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
-| `OCSERV_IMAGE` | `kingsonho/ocserv:latest` | ocserv 服务镜像 |
+| `OCSERV_IMAGE` | `kingsonho/ocserv:1.4.2` | ocserv 服务镜像 |
 | `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
 | `TZ` | `Asia/Shanghai` | 时区设置 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
@@ -296,7 +296,7 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 镜像 | `prom/prometheus:latest` |
+| 镜像 | `prom/prometheus:v3.11.3` |
 | 子路径 | `--web.route-prefix=/prometheus` 用于内部访问路径；默认不通过 Nginx 对外暴露 |
 | 数据存储 | `prometheus_data` Docker 卷，容器重建不丢失 |
 | 采集目标 | `ocserv:9100`，路径 `/metrics` |
@@ -306,7 +306,7 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 镜像 | `grafana/grafana:latest` |
+| 镜像 | `grafana/grafana:13.0.1` |
 | 子路径 | `GF_SERVER_SERVE_FROM_SUB_PATH=true` + `GF_SERVER_ROOT_URL=https://your.domain.com:8443/grafana/` |
 | 数据存储 | `grafana_data` Docker 卷 |
 | 自动配置 | 通过 `monitoring/datasources/` 和 `monitoring/dashboards/` 自动注入数据源和看板 |
@@ -323,7 +323,7 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 镜像 | `nginx:alpine` |
+| 镜像 | `nginx:1.28.3-alpine3.23-slim` |
 | 端口 | `${MONITORING_PORT:-8443}`（HTTPS） |
 | TLS | Let's Encrypt 证书，挂载 `${SSL_CERT_DIR}` |
 | 子路径路由 | `/grafana/` → Grafana |
@@ -466,20 +466,20 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
        ├─ 分平台构建: linux/amd64, linux/arm64
        ├─ 缓存: GitHub Actions 缓存（gha）
        ├─ 参数: OCSERV_VERSION, S6_OVERLAY_VERSION, ALPINE_ARCH, ALPINE_FLAVOR
-       └─ 产物: digest-only image
+       └─ 产物: digest-only image + SBOM/provenance attestation
        │
 7. 创建 multi-arch manifest
-       ├─ kingsonho/ocserv:latest 与 kingsonho/ocserv:1.4.2
-       ├─ kingsonho/ocserv:latest-slim 与 kingsonho/ocserv:1.4.2-slim
-       └─ kingsonho/ocserv-exporter:latest 与 kingsonho/ocserv-exporter:1.4.2
+       ├─ kingsonho/ocserv:1.4.2 与 kingsonho/ocserv:latest
+       ├─ kingsonho/ocserv:1.4.2-slim 与 kingsonho/ocserv:latest-slim
+       └─ kingsonho/ocserv-exporter:1.4.2 与 kingsonho/ocserv-exporter:latest
 ```
 
 ### 标签策略
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| push main/master | `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:latest`, `kingsonho/ocserv-exporter:1.4.2` |
-| push v* 标签 | `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:latest`, `kingsonho/ocserv-exporter:1.4.2` |
+| push main/master | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv-exporter:1.4.2`, `kingsonho/ocserv-exporter:latest` |
+| push v* 标签 | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv-exporter:1.4.2`, `kingsonho/ocserv-exporter:latest` |
 | PR | 仅构建测试，不推送镜像 |
 
 ---

@@ -1,6 +1,6 @@
 services:
   ocserv:
-    image: ${OCSERV_IMAGE:-kingsonho/ocserv:latest}
+    image: ${OCSERV_IMAGE:-kingsonho/ocserv:1.4.2}
     container_name: ocserv
     restart: unless-stopped
 

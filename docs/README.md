@@ -121,7 +121,7 @@ services:
 |:--|:--|:--|
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
-| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
+| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
 | `HEALTH_*` | 健康检查参数 | 30s / 5s / 3 / 15s |
 
@@ -334,7 +334,7 @@ wget -O src/s6-overlay-aarch64.tar.xz https://github.com/just-containers/s6-over
 ALPINE_ARCH=x86_64 ./scripts/download-alpine-minirootfs.sh
 ```
 
-当前主镜像 `Dockerfile` 会无条件复制 `s6-overlay-noarch.tar.xz`、`s6-overlay-x86_64.tar.xz` 和 `s6-overlay-aarch64.tar.xz`。即使只构建 amd64，也需要三个 s6-overlay 文件都存在，否则 Docker 构建上下文校验会失败。
+主镜像 `Dockerfile` 只复制 `s6-overlay-noarch.tar.xz` 和当前 `ALPINE_ARCH` 对应的 tarball。单架构构建只需要准备目标架构文件；多架构构建仍需同时准备 `x86_64` 和 `aarch64`。
 
 ### 4.2 构建 ocserv 镜像
 
@@ -344,17 +344,17 @@ docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:latest .
+  -t ocserv:1.4.2 .
 
 # slim 变体，对应发布标签 kingsonho/ocserv:latest-slim 与 kingsonho/ocserv:1.4.2-slim
 docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=slim \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:latest-slim .
+  -t ocserv:1.4.2-slim .
 ```
 
-构建后在 `.env` 中设置 `OCSERV_IMAGE=ocserv:latest` 或 `OCSERV_IMAGE=ocserv:latest-slim`。
+构建后在 `.env` 中设置 `OCSERV_IMAGE=ocserv:1.4.2` 或 `OCSERV_IMAGE=ocserv:1.4.2-slim`。生产部署建议使用版本标签或 digest，`latest` 只适合快速试用。
 
 **构建参数**：
 
@@ -392,7 +392,7 @@ docker buildx build --platform linux/arm64 \
   -t registry.example.com/ocserv:1.4.2-arm64 .
 ```
 
-**验证**：`docker run --rm --entrypoint ocserv ocserv:latest --version`
+**验证**：`docker run --rm --entrypoint ocserv ocserv:1.4.2 --version`
 
 ### 4.3 构建 Exporter 镜像
 
@@ -400,16 +400,18 @@ docker buildx build --platform linux/arm64 \
 docker buildx build \
   -f exporter/Dockerfile \
   --build-arg ALPINE_ARCH=x86_64 \
-  -t ocserv-exporter:latest .
+  -t ocserv-exporter:1.4.2 .
 ```
 
-构建后在 `.env` 中设置 `EXPORTER_IMAGE=ocserv-exporter:latest`。
+构建后在 `.env` 中设置 `EXPORTER_IMAGE=ocserv-exporter:1.4.2`。
 
-**验证**：`docker run --rm --entrypoint occtl ocserv-exporter:latest --version`
+**验证**：`docker run --rm --entrypoint occtl ocserv-exporter:1.4.2 --version`
 
 `S6_SOURCE=auto` 会优先尝试 Alpine 仓库中的 `s6-overlay` 包，若 `/init` 不可用则回退到 `src/` 中的 s6-overlay tarball。`S6_SOURCE=apk` 用于强制验证 Alpine 仓库包；`S6_SOURCE=tarball` 用于和 Alpine 仓库包来源对照。
 
 GitHub Actions 中会显式设置 `APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine`，发布构建继续使用 Alpine 官方源。
+
+Dockerfile 使用 BuildKit cache mount 加速 `apk` 安装，最终镜像层不保留 apk 索引缓存。`exporter` 镜像使用专用非 root 用户运行；主 `ocserv` 镜像因需要 s6 init、`NET_ADMIN`、TUN 设备和 iptables，仍保留 root 运行。
 
 Alpine `slim` 会禁用 utmp 编译能力，渲染配置时需要同步关闭 `use-utmp`：
 
@@ -474,7 +476,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `TZ` | 时区设置 | `Asia/Shanghai` |
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
-| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:latest` |
+| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
 | `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
 | `LOG_MAX_FILE` | 日志文件保留数量 | `3` |
 | `HEALTH_INTERVAL` | 健康检查间隔 | `30s` |
@@ -488,10 +490,10 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 |:--|:--|:--|
 | `MONITORING_PORT` | 监控面板对外端口（HTTPS） | `8443` |
 | `NETWORK_NAME` | Docker 网络名称 | `monitor-net` |
-| `EXPORTER_IMAGE` | ocserv-exporter 镜像 | `kingsonho/ocserv-exporter:latest` |
-| `PROMETHEUS_IMAGE` | Prometheus 镜像 | `prom/prometheus:latest` |
-| `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:latest` |
-| `NGINX_IMAGE` | Nginx 镜像 | `nginx:alpine` |
+| `EXPORTER_IMAGE` | ocserv-exporter 镜像 | `kingsonho/ocserv-exporter:1.4.2` |
+| `PROMETHEUS_IMAGE` | Prometheus 镜像 | `prom/prometheus:v3.11.3` |
+| `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:13.0.1` |
+| `NGINX_IMAGE` | Nginx 镜像 | `nginx:1.28.3-alpine3.23-slim` |
 | `GF_ADMIN_PASSWORD` | Grafana 管理员密码 | `change-me-before-production` |
 | `GF_ALLOW_SIGN_UP` | 允许用户注册 | `false` |
 | `GF_DASHBOARDS_MIN_REFRESH_INTERVAL` | Grafana 看板最小刷新间隔，生产默认防止低于 30s | `30s` |
@@ -795,11 +797,13 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 
 | 触发事件 | 生成标签 |
 |:--|:--|
-| push main/master | `ocserv:latest`、`ocserv:1.4.2`、`ocserv:latest-slim`、`ocserv:1.4.2-slim`、`ocserv-exporter:latest`、`ocserv-exporter:1.4.2` |
-| push `v*` 标签 | `ocserv:latest`、`ocserv:1.4.2`、`ocserv:latest-slim`、`ocserv:1.4.2-slim`、`ocserv-exporter:latest`、`ocserv-exporter:1.4.2` |
+| push main/master | `ocserv:1.4.2`、`ocserv:latest`、`ocserv:1.4.2-slim`、`ocserv:latest-slim`、`ocserv-exporter:1.4.2`、`ocserv-exporter:latest` |
+| push `v*` 标签 | `ocserv:1.4.2`、`ocserv:latest`、`ocserv:1.4.2-slim`、`ocserv:latest-slim`、`ocserv-exporter:1.4.2`、`ocserv-exporter:latest` |
 | PR | 仅构建测试，不推送标签 |
 
-流程：下载源码和 minirootfs → QEMU + Buildx → 分架构构建 → 创建多架构 manifest → 推送。
+流程：下载源码和 minirootfs → Dockerfile 静态检查 → QEMU + Buildx → 分架构构建 → 生成 SBOM/provenance attestation → 创建多架构 manifest → 推送。
+
+生产部署可将 `.env` 中镜像值改为 digest 形式，例如 `kingsonho/ocserv@sha256:<digest>`，以获得完全可复现的拉取结果。
 
 ### 7.5 Fail2Ban 安全防护
 

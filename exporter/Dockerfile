@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 ARG ALPINE_VERSION=3.23
 ARG ALPINE_PATCH_VERSION=3.23.4
 ARG ALPINE_ARCH=x86_64
@@ -14,19 +16,15 @@ FROM alpine-rootfs AS builder
 ARG OCSERV_VERSION=1.4.2
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
-RUN set -eux; \
-    . /etc/os-release; \
-    ALPINE_BRANCH="${VERSION_ID}"; \
-    case "${ALPINE_BRANCH}" in \
-        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
-    esac; \
-    printf '%s/v%s/main\n%s/v%s/community\n' \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        > /etc/apk/repositories
+COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
 
 RUN set -eux; \
-    apk add --no-cache \
+    chmod +x /usr/local/bin/configure-alpine-repositories; \
+    configure-alpine-repositories "${APK_MIRROR}"
+
+RUN --mount=type=cache,target=/var/cache/apk \
+    set -eux; \
+    apk add --update-cache \
         build-base \
         ca-certificates \
         gnutls-dev \
@@ -81,6 +79,8 @@ ARG ALPINE_ARCH=x86_64
 ARG ALPINE_MINIROOTFS_SHA256
 ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+ARG EXPORTER_UID=65532
+ARG EXPORTER_GID=65532
 
 LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv-exporter-alpine-minirootfs" \
@@ -92,21 +92,17 @@ LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.alpine-minirootfs-sha256="${ALPINE_MINIROOTFS_SHA256}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
+COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
+
 RUN set -eux; \
-    . /etc/os-release; \
-    ALPINE_BRANCH="${VERSION_ID}"; \
-    case "${ALPINE_BRANCH}" in \
-        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
-    esac; \
-    printf '%s/v%s/main\n%s/v%s/community\n' \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        > /etc/apk/repositories
+    chmod +x /usr/local/bin/configure-alpine-repositories; \
+    configure-alpine-repositories "${APK_MIRROR}"
 
 COPY --from=builder /out/usr/bin/occtl /usr/bin/occtl
 
-RUN set -eux; \
-    apk add --no-cache \
+RUN --mount=type=cache,target=/var/cache/apk \
+    set -eux; \
+    apk add --update-cache \
         ca-certificates \
         pax-utils \
         py3-prometheus-client \
@@ -115,11 +111,13 @@ RUN set -eux; \
         | tr ',' '\n' \
         | sort -u \
         | awk 'NF { print "so:" $1 }')"; \
-    apk add --no-cache --virtual .occtl-rundeps ${runDeps}
+    apk add --update-cache --virtual .occtl-rundeps ${runDeps}; \
+    addgroup -g "${EXPORTER_GID}" -S exporter; \
+    adduser -u "${EXPORTER_UID}" -S -D -H -h /app -s /sbin/nologin -G exporter exporter
 
 WORKDIR /app
 
-COPY exporter/ocserv_exporter.py .
+COPY --chown=exporter:exporter exporter/ocserv_exporter.py .
 
 ENV OCSERV_SOCKET=/var/run/occtl.socket
 ENV METRICS_PORT=9100
@@ -128,5 +126,7 @@ ENV OCCTL_TIMEOUT_SECONDS=5
 ENV EXPORTER_ENABLE_SESSION_DETAIL_METRICS=false
 
 EXPOSE 9100
+
+USER exporter
 
 CMD ["python3", "-m", "ocserv_exporter"]

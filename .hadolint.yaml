@@ -1,0 +1,14 @@
+ignored:
+  # Alpine packages are intentionally resolved from a pinned minirootfs branch.
+  - DL3018
+  # BuildKit cache mounts keep apk indexes out of the final layer.
+  - DL3019
+  # The main ocserv image must run as root for s6 init, NET_ADMIN, TUN, and iptables.
+  - DL3002
+  # ADD is intentional for extracting the verified Alpine minirootfs tarball.
+  - DL3020
+  # RUN instructions are split where that improves Docker cache reuse.
+  - DL3059
+  # POSIX sh is used by Alpine; intentional word splitting is documented below.
+  - DL4006
+  - SC2086

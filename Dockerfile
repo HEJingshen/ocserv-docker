@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 ARG ALPINE_VERSION=3.23
 ARG ALPINE_PATCH_VERSION=3.23.4
 ARG ALPINE_ARCH=x86_64
@@ -15,19 +17,15 @@ ARG OCSERV_VERSION=1.4.2
 ARG ALPINE_FLAVOR=slim
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
-RUN set -eux; \
-    . /etc/os-release; \
-    ALPINE_BRANCH="${VERSION_ID}"; \
-    case "${ALPINE_BRANCH}" in \
-        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
-    esac; \
-    printf '%s/v%s/main\n%s/v%s/community\n' \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        > /etc/apk/repositories
+COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
 
 RUN set -eux; \
-    apk add --no-cache \
+    chmod +x /usr/local/bin/configure-alpine-repositories; \
+    configure-alpine-repositories "${APK_MIRROR}"
+
+RUN --mount=type=cache,target=/var/cache/apk \
+    set -eux; \
+    apk add --update-cache \
         build-base \
         ca-certificates \
         gawk \
@@ -51,18 +49,18 @@ RUN set -eux; \
     fi; \
     case "${ALPINE_FLAVOR}" in \
         slim) \
-            apk add --no-cache libxcrypt-dev || true; \
+            apk add --update-cache libxcrypt-dev || true; \
             ;; \
         full) \
-            apk add --no-cache \
+            apk add --update-cache \
                 krb5-dev \
                 libseccomp-dev \
                 libtasn1-dev \
                 linux-pam-dev \
                 talloc-dev; \
-            apk add --no-cache oath-toolkit-dev || echo "WARNING: oath-toolkit-dev unavailable; OTP/liboath will remain auto-detected"; \
-            apk add --no-cache radcli-dev || echo "WARNING: radcli-dev unavailable; RADIUS will remain auto-detected"; \
-            apk add --no-cache libxcrypt-dev || true; \
+            apk add --update-cache oath-toolkit-dev || echo "WARNING: oath-toolkit-dev unavailable; OTP/liboath will remain auto-detected"; \
+            apk add --update-cache radcli-dev || echo "WARNING: radcli-dev unavailable; RADIUS will remain auto-detected"; \
+            apk add --update-cache libxcrypt-dev || true; \
             ;; \
         *) \
             echo "Unsupported ALPINE_FLAVOR=${ALPINE_FLAVOR}; expected slim or full"; \
@@ -108,7 +106,6 @@ ARG ALPINE_FLAVOR=slim
 ARG S6_SOURCE=auto
 ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
-ARG TARGETARCH
 
 LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv-alpine-minirootfs" \
@@ -124,24 +121,18 @@ LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/GentleKingson/ocserv-docker"
 
+COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
+
 RUN set -eux; \
-    . /etc/os-release; \
-    ALPINE_BRANCH="${VERSION_ID}"; \
-    case "${ALPINE_BRANCH}" in \
-        *.*.*) ALPINE_BRANCH="${ALPINE_BRANCH%.*}" ;; \
-    esac; \
-    printf '%s/v%s/main\n%s/v%s/community\n' \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        "${APK_MIRROR}" "${ALPINE_BRANCH}" \
-        > /etc/apk/repositories
+    chmod +x /usr/local/bin/configure-alpine-repositories; \
+    configure-alpine-repositories "${APK_MIRROR}"
 
 COPY --from=builder /out/ /
-COPY src/s6-overlay-noarch.tar.xz /tmp/
-COPY src/s6-overlay-x86_64.tar.xz /tmp/
-COPY src/s6-overlay-aarch64.tar.xz /tmp/
+COPY src/s6-overlay-noarch.tar.xz src/s6-overlay-${ALPINE_ARCH}.tar.xz /tmp/
 
-RUN set -eux; \
-    apk add --no-cache \
+RUN --mount=type=cache,target=/var/cache/apk \
+    set -eux; \
+    apk add --update-cache \
         ca-certificates \
         grep \
         iproute2 \
@@ -155,27 +146,23 @@ RUN set -eux; \
         | tr ',' '\n' \
         | sort -u \
         | awk 'NF { print "so:" $1 }')"; \
-    apk add --no-cache --virtual .ocserv-rundeps ${runDeps}; \
+    apk add --update-cache --virtual .ocserv-rundeps ${runDeps}; \
     case "${S6_SOURCE}" in \
         apk) \
-            apk add --no-cache s6-overlay; \
+            apk add --update-cache s6-overlay; \
             [ -x /init ]; \
             ;; \
         tarball) \
-            /bin/sh -c 'case "${TARGETARCH}" in amd64) S6_ARCH=x86_64 ;; arm64) S6_ARCH=aarch64 ;; *) echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; esac; tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /; tar -Jxpf /tmp/s6-overlay-${S6_ARCH}.tar.xz -C /'; \
+            tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /; \
+            tar -Jxpf "/tmp/s6-overlay-${ALPINE_ARCH}.tar.xz" -C /; \
             ;; \
         auto) \
-            if apk add --no-cache s6-overlay && [ -x /init ]; then \
+            if apk add --update-cache s6-overlay && [ -x /init ]; then \
                 echo "Using Alpine s6-overlay package"; \
             else \
                 echo "Falling back to bundled s6-overlay tarballs"; \
-                case "${TARGETARCH}" in \
-                    amd64) S6_ARCH=x86_64 ;; \
-                    arm64) S6_ARCH=aarch64 ;; \
-                    *) echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
-                esac; \
                 tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /; \
-                tar -Jxpf /tmp/s6-overlay-${S6_ARCH}.tar.xz -C /; \
+                tar -Jxpf "/tmp/s6-overlay-${ALPINE_ARCH}.tar.xz" -C /; \
             fi; \
             ;; \
         *) \

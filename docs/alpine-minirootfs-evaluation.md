@@ -6,9 +6,9 @@ The default build now uses explicit Alpine minirootfs for both images:
 
 | Image | Dockerfile | Published tag |
 |:--|:--|:--|
-| ocserv full | `Dockerfile` | `kingsonho/ocserv:latest`, `kingsonho/ocserv:1.4.2` |
-| ocserv slim | `Dockerfile` | `kingsonho/ocserv:latest-slim`, `kingsonho/ocserv:1.4.2-slim` |
-| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:latest`, `kingsonho/ocserv-exporter:1.4.2` |
+| ocserv full | `Dockerfile` | `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:latest` |
+| ocserv slim | `Dockerfile` | `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv:latest-slim` |
+| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:1.4.2`, `kingsonho/ocserv-exporter:latest` |
 
 The build uses a checked Alpine rootfs tarball instead of a floating Docker base image. Builder and runtime stages derive from the same `alpine-rootfs` stage, so package availability and runtime behavior are tied to one verified rootfs input.
 
@@ -23,7 +23,7 @@ The build uses a checked Alpine rootfs tarball instead of a floating Docker base
 | aarch64 tarball | `alpine-minirootfs-3.23.4-aarch64.tar.gz` |
 | aarch64 sha256 | `9250667a8affac8f1e98086392f80f43f086626701e9bce33398eb9b6c0bd64c` |
 
-Alpine v3.23 introduced `apk-tools v3` while preserving the v2 package and index formats. The current Dockerfiles keep the existing `apk add --no-cache`, virtual package, and `so:` runtime dependency flow. GitHub Actions has validated the minirootfs build path successfully.
+Alpine v3.23 introduced `apk-tools v3` while preserving the v2 package and index formats. The current Dockerfiles use BuildKit cache mounts for `apk` indexes, keep the virtual package and `so:` runtime dependency flow, and avoid committing apk index cache into final layers. GitHub Actions validates the minirootfs build path.
 
 ## Build Flow
 
@@ -41,7 +41,7 @@ docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:latest .
+  -t ocserv:1.4.2 .
 ```
 
 Build the main slim image:
@@ -52,7 +52,7 @@ docker buildx build \
   --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=slim \
   --build-arg S6_SOURCE=apk \
-  -t ocserv:latest-slim .
+  -t ocserv:1.4.2-slim .
 ```
 
 Build the exporter image:
@@ -61,7 +61,7 @@ Build the exporter image:
 docker buildx build \
   -f exporter/Dockerfile \
   --build-arg ALPINE_ARCH=x86_64 \
-  -t ocserv-exporter:latest .
+  -t ocserv-exporter:1.4.2 .
 ```
 
 For arm64, use `ALPINE_ARCH=aarch64` and build with `--platform linux/arm64`.
@@ -73,7 +73,7 @@ For arm64, use `ALPINE_ARCH=aarch64` and build with `--platform linux/arm64`.
 - Verify `/etc/alpine-release` reports `3.23.x`.
 - Verify `apk --version`, `ocserv --version`, `occtl --version`, and executable `/init`.
 - Verify exporter starts and exposes `:9100/metrics`.
-- Confirm workflow publishes `ocserv:latest`, `ocserv:1.4.2`, `ocserv:latest-slim`, `ocserv:1.4.2-slim`, `ocserv-exporter:latest`, and `ocserv-exporter:1.4.2`.
+- Confirm workflow publishes version tags, compatibility `latest` tags, SBOM/provenance attestations, and multi-architecture manifests.
 
 ## Sources
 
