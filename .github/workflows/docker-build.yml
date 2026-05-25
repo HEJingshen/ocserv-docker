@@ -4,51 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches: [ "main", "master" ]
-    tags: [ "v*" ]
     paths:
       - 'Dockerfile'
-      - 'docker/**'
-      - 'exporter/Dockerfile'
-      - 'exporter/ocserv_exporter.py'
-      - 'exporter/test_ocserv_exporter.py'
-      - 'docs/**'
-      - '.github/workflows/docker-build.yml'
-      - '.env.example'
-      - 'docker-compose.yml'
-      - 'docker-compose.monitoring.yml'
-      - '.hadolint.yaml'
-      - 'fail2ban/**'
-      - 'nginx/**'
-      - 'monitoring/**'
-      - 'scripts/configure-alpine-repositories.sh'
-      - 'scripts/download-alpine-minirootfs.sh'
-      - 'scripts/prepare-ocserv-config.sh'
-      - 'scripts/render-ocserv-conf.sh'
-      - 'scripts/setup-fail2ban.sh'
-      - 'tests/**'
+      - '**/Dockerfile'
+      - '.github/workflows/**'
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
-      - 'docker/**'
-      - 'exporter/Dockerfile'
-      - 'exporter/ocserv_exporter.py'
-      - 'exporter/test_ocserv_exporter.py'
-      - 'docs/**'
-      - '.github/workflows/docker-build.yml'
-      - '.env.example'
-      - 'docker-compose.yml'
-      - 'docker-compose.monitoring.yml'
-      - '.hadolint.yaml'
-      - 'fail2ban/**'
-      - 'nginx/**'
-      - 'monitoring/**'
-      - 'scripts/configure-alpine-repositories.sh'
-      - 'scripts/download-alpine-minirootfs.sh'
-      - 'scripts/prepare-ocserv-config.sh'
-      - 'scripts/render-ocserv-conf.sh'
-      - 'scripts/setup-fail2ban.sh'
-      - 'tests/**'
+      - '**/Dockerfile'
+      - '.github/workflows/**'
 
 env:
   REGISTRY: docker.io
