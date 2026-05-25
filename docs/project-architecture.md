@@ -325,7 +325,7 @@ healthcheck:
 |:--|:--|
 | 镜像 | `nginx:1.28.3-alpine3.23-slim` |
 | 端口 | `${MONITORING_PORT:-8443}`（HTTPS） |
-| TLS | Let's Encrypt 证书，挂载 `${SSL_CERT_DIR}` |
+| TLS | Let's Encrypt 证书，挂载 `/etc/letsencrypt/live/${DOMAIN}` 下的证书文件 |
 | 子路径路由 | `/grafana/` → Grafana |
 | 配置生成 | 启动时严格校验变量/证书，通过 `envsubst` 原子渲染配置，并在 `nginx -t` 通过后启动 |
 
@@ -494,6 +494,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── ocserv/s6-init.sh               # ocserv 容器启动前初始化脚本
 ├── scripts/
 │   ├── prepare-ocserv-config.sh        # 交互式准备 .env、目录权限并渲染 ocserv.conf
+│   ├── prepare-monitoring-config.sh    # 交互式准备完整监控栈部署前配置
 │   ├── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
 │   └── setup-fail2ban.sh               # Fail2Ban 部署脚本
 ├── .env.example                        # 环境变量模板（提交到 Git）

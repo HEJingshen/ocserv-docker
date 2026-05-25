@@ -75,7 +75,8 @@ services:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:rw
       - ./nginx/snippets:/etc/nginx/snippets:ro
-      - ${SSL_CERT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
+      - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/etc/letsencrypt/live/${DOMAIN}/fullchain.pem:ro
+      - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/etc/letsencrypt/live/${DOMAIN}/privkey.pem:ro
       - ./nginx/logs:/var/log/nginx
       - ./nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
     # 使用自定义 entrypoint 处理环境变量替换

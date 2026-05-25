@@ -13,6 +13,9 @@ class StaticConfigTest(unittest.TestCase):
         cls.dockerfile = (ROOT_DIR / "Dockerfile").read_text(encoding="utf-8")
         cls.exporter_dockerfile = (ROOT_DIR / "exporter" / "Dockerfile").read_text(encoding="utf-8")
         cls.ocserv_template = (ROOT_DIR / "config" / "ocserv.conf.template").read_text(encoding="utf-8")
+        cls.env_example = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
+        cls.compose = (ROOT_DIR / "docker-compose.yml").read_text(encoding="utf-8")
+        cls.monitoring_compose = (ROOT_DIR / "docker-compose.monitoring.yml").read_text(encoding="utf-8")
 
     def test_ocserv_seccomp_build_support_is_disabled(self):
         self.assertNotIn("libseccomp-dev", self.dockerfile)
@@ -39,6 +42,27 @@ class StaticConfigTest(unittest.TestCase):
             "alpine-" + "mini" + "rootfs",
         ):
             self.assertNotIn(old_token, combined)
+
+    def test_monitoring_uses_same_letsencrypt_certificate_mounts(self):
+        old_cert_dir_var = "SSL_" + "CERT_DIR"
+        self.assertNotIn(old_cert_dir_var, self.env_example)
+        self.assertNotIn(old_cert_dir_var, self.monitoring_compose)
+
+        cert_mount = "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro"
+        key_mount = "/etc/letsencrypt/live/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro"
+        nginx_cert_mount = (
+            "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem:"
+            "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem:ro"
+        )
+        nginx_key_mount = (
+            "/etc/letsencrypt/live/${DOMAIN}/privkey.pem:"
+            "/etc/letsencrypt/live/${DOMAIN}/privkey.pem:ro"
+        )
+
+        self.assertIn(cert_mount, self.compose)
+        self.assertIn(key_mount, self.compose)
+        self.assertIn(nginx_cert_mount, self.monitoring_compose)
+        self.assertIn(nginx_key_mount, self.monitoring_compose)
 
 
 if __name__ == "__main__":

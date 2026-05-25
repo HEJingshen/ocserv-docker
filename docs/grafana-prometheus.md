@@ -24,16 +24,16 @@ sudo certbot certonly --standalone -d your.domain.com \
   --agree-tos --email your@email.com
 ```
 
-证书默认保存在 `/etc/letsencrypt/live/your.domain.com/`，已自动挂载到 Nginx 容器。
+证书默认保存在 `/etc/letsencrypt/live/your.domain.com/`，会挂载到 ocserv 和 Nginx 容器。
 
 ### 2. 配置环境变量
 
 ```bash
-# 准备目录、密码文件并打开 vi .env 编辑环境变量
-./scripts/prepare-ocserv-config.sh
+# 准备 ocserv 基础配置、监控目录并打开 vi .env 编辑环境变量
+./scripts/prepare-monitoring-config.sh
 ```
 
-脚本默认打开 `vi .env`。如果你更习惯其他编辑器，可以使用 `EDITOR=vim ./scripts/prepare-ocserv-config.sh`。
+脚本默认打开 `vi .env`。如果你更习惯其他编辑器，可以使用 `EDITOR=vim ./scripts/prepare-monitoring-config.sh`。
 
 **必须修改的变量**：
 
@@ -41,9 +41,8 @@ sudo certbot certonly --standalone -d your.domain.com \
 |:--|:--|:--|
 | `DOMAIN` | 你的域名 | `vpn.example.com` |
 | `GF_ADMIN_PASSWORD` | Grafana 管理员密码（必须设置，否则 Compose 配置阶段失败） | `your_secure_password` |
-| `SSL_CERT_DIR` | SSL 证书目录（如果非默认路径） | `/etc/letsencrypt` |
 
-> **注意**：域名配置现在集中在 `.env` 文件中，无需手动修改 `docker-compose.monitoring.yml` 或 `nginx/conf.d/` 中的硬编码域名。Nginx 配置会在容器启动时通过 `envsubst` 自动生成。
+> **注意**：域名配置现在集中在 `.env` 文件中，无需手动修改 `docker-compose.monitoring.yml` 或 `nginx/conf.d/` 中的硬编码域名。Nginx 和 ocserv 使用同一套 `/etc/letsencrypt/live/${DOMAIN}` 证书，Nginx 配置会在容器启动时通过 `envsubst` 自动生成。
 
 ## 启动监控栈
 

@@ -99,7 +99,7 @@ services:
       - ocserv-socket:/var/run
 ```
 
-自签名证书通常会触发客户端证书警告，需要在客户端手动信任。监控栈的 Nginx 默认仍使用 `/etc/letsencrypt/live/${DOMAIN}`；如果监控也要使用自签证书，请将自签证书按 `live/${DOMAIN}/fullchain.pem` 和 `live/${DOMAIN}/privkey.pem` 的结构放到某个目录，并在 `.env` 中将 `SSL_CERT_DIR` 指向该目录。
+自签名证书通常会触发客户端证书警告，需要在客户端手动信任。监控栈的 Nginx 与 ocserv 默认使用同一套 `/etc/letsencrypt/live/${DOMAIN}` 证书路径；如果监控也要使用自签证书，请使用 `docker-compose.override.yml` 同时覆盖 ocserv 和 Nginx 的证书挂载。
 
 ---
 
@@ -194,15 +194,15 @@ ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
 - **Grafana**：预置 Overview 与 Sessions 两块看板，默认总览不查询高基数会话明细
 - **Nginx**：HTTPS 反向代理，仅对外暴露 Grafana；Prometheus 保持在 Docker 网络内部
 
-### 3.2 配置环境变量并准备基础配置
+### 3.2 配置环境变量并准备监控配置
 
-即使直接部署完整监控栈，也需要先准备 ocserv 的日志目录、密码目录和渲染后的主配置：
+直接部署完整监控栈时，建议使用监控准备脚本一次性准备 ocserv 基础配置、Nginx 生成目录和日志目录，并检查监控必需变量：
 
 ```bash
-./scripts/prepare-ocserv-config.sh
+./scripts/prepare-monitoring-config.sh
 ```
 
-脚本默认使用 `vi .env` 编辑环境变量；如需使用其他编辑器，可执行 `EDITOR=vim ./scripts/prepare-ocserv-config.sh`。
+脚本默认使用 `vi .env` 编辑环境变量；如需使用其他编辑器，可执行 `EDITOR=vim ./scripts/prepare-monitoring-config.sh`。
 
 `.env.example` 已按部署方式分为两部分：
 
@@ -220,19 +220,17 @@ ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
 | 变量 | 说明 | 示例 |
 |:--|:--|:--|
 | `GF_ADMIN_PASSWORD` | Grafana 密码；必须设置，否则 Compose 配置阶段失败 | `YourStrongPassword123!` |
-| `SSL_CERT_DIR` | SSL 证书目录（Nginx 使用） | `/etc/letsencrypt` |
 
-Nginx 启动时会严格校验 `DOMAIN`、`MONITORING_PORT`、TLS 证书和生成后的配置；任一项不合法都会阻止容器启动。
+Nginx 与 ocserv 使用同一套 `/etc/letsencrypt/live/${DOMAIN}` 证书。Nginx 启动时会严格校验 `DOMAIN`、`MONITORING_PORT`、TLS 证书和生成后的配置；任一项不合法都会阻止容器启动。
 
-启动前检查 Compose 配置、Nginx 生成目录和证书目录：
+准备脚本会执行以下检查；也可以手动复核：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config
 mkdir -p nginx/conf.d
 test -w nginx/conf.d
 DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-SSL_CERT_DIR=$(awk -F= '/^SSL_CERT_DIR=/{print $2}' .env)
-sudo ls -l "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}/fullchain.pem" "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}/privkey.pem"
+sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 ```
 
 ### 3.3 启动完整栈
@@ -459,7 +457,6 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos，并自动探测 RADIUS 与
 | `EXPORTER_INTERVAL_SECONDS` | exporter 采集间隔；实时优先 5s，均衡生产 10s，资源优先 15s | `10` |
 | `OCCTL_TIMEOUT_SECONDS` | 单次 `occtl` 调用超时；建议小于 Prometheus `scrape_timeout` | `2` |
 | `EXPORTER_ENABLE_SESSION_DETAIL_METRICS` | 是否导出 `ocserv_user_*` 高基数会话明细指标 | `false` |
-| `SSL_CERT_DIR` | SSL 证书目录 | `/etc/letsencrypt` |
 
 ### 5.5 最小可用配置
 
@@ -626,8 +623,7 @@ docker logs nginx-proxy
 mkdir -p nginx/conf.d
 test -w nginx/conf.d
 DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-SSL_CERT_DIR=$(awk -F= '/^SSL_CERT_DIR=/{print $2}' .env)
-sudo ls -ld "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}"
+sudo ls -ld "/etc/letsencrypt/live/${DOMAIN}"
 ```
 
 | 原因 | 解决 |
@@ -635,7 +631,7 @@ sudo ls -ld "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}"
 | `DOMAIN` 未配置 | 在 `.env` 中设置 |
 | `MONITORING_PORT` 非法 | 设置为 `1-65535` 范围内的数字 |
 | `nginx/conf.d` 不可写 | 确认 `nginx/conf.d` 是目录且当前用户或 Docker 可写 |
-| 证书路径错误 | 确认 `SSL_CERT_DIR/live/${DOMAIN}` 目录存在，且包含 `fullchain.pem` 和 `privkey.pem` |
+| 证书路径错误 | 确认 `/etc/letsencrypt/live/${DOMAIN}` 目录存在，且包含 `fullchain.pem` 和 `privkey.pem` |
 | Nginx 配置生成失败 | 检查 `docker logs nginx-proxy` 中的 entrypoint 错误，并修正 `.env`、证书或模板 |
 
 ### 6.6 Exporter 采集异常
