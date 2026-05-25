@@ -291,34 +291,26 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml down -v
 
 ### 4.1 准备构建素材
 
-默认 `Dockerfile` 和 `exporter/Dockerfile` 均使用 Alpine minirootfs。构建前需要准备 ocserv 源码、s6-overlay tarball，以及对应架构的 Alpine minirootfs tarball。
+默认 `Dockerfile` 和 `exporter/Dockerfile` 均使用官方 Alpine 基础镜像。构建前只需要准备 ocserv 源码；s6-overlay 由 Alpine apk 仓库安装，不再需要准备本地 tarball。
 
 ```bash
 mkdir -p src
 wget -O src/ocserv-1.4.2.tar.xz https://www.infradead.org/ocserv/ocserv-1.4.2.tar.xz
-wget -O src/s6-overlay-noarch.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-noarch.tar.xz
-wget -O src/s6-overlay-x86_64.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-x86_64.tar.xz
-wget -O src/s6-overlay-aarch64.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-aarch64.tar.xz
-ALPINE_ARCH=x86_64 ./scripts/download-alpine-minirootfs.sh
 ```
 
-主镜像 `Dockerfile` 只复制 `s6-overlay-noarch.tar.xz` 和当前 `ALPINE_ARCH` 对应的 tarball。单架构构建只需要准备目标架构文件；多架构构建仍需同时准备 `x86_64` 和 `aarch64`。
+多架构构建由 Buildx 按 `--platform` 解析官方 Alpine manifest；本地构建默认使用 `alpine:3.23.4`，发布构建会按平台传入固定 digest。
 
 ### 4.2 构建 ocserv 镜像
 
 ```bash
 # full 变体，对应发布标签 kingsonho/ocserv:1.4.2；latest 作为该版本标签别名
 docker buildx build \
-  --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
-  --build-arg S6_SOURCE=apk \
   -t ocserv:1.4.2 .
 
 # slim 变体，对应发布标签 kingsonho/ocserv:1.4.2-slim；latest-slim 作为该版本标签别名
 docker buildx build \
-  --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=slim \
-  --build-arg S6_SOURCE=apk \
   -t ocserv:1.4.2-slim .
 ```
 
@@ -329,29 +321,21 @@ docker buildx build \
 | ARG | 默认值 | 说明 |
 |:--|:--|:--|
 | `OCSERV_VERSION` | `1.4.2` | ocserv 版本 |
-| `S6_OVERLAY_VERSION` | `3.2.3.0` | s6-overlay 版本 |
-| `ALPINE_VERSION` | `3.23` | Alpine 分支 |
-| `ALPINE_PATCH_VERSION` | `3.23.4` | minirootfs patch 版本 |
-| `ALPINE_ARCH` | `x86_64` | minirootfs 架构，`x86_64` 或 `aarch64` |
-| `ALPINE_MINIROOTFS_SHA256` | 内置 3.23.4 校验值 | minirootfs tarball 校验值 |
+| `ALPINE_IMAGE` | `alpine:3.23.4` | 官方 Alpine 基础镜像；发布构建按平台传入 digest |
+| `ALPINE_VERSION` | `3.23.4` | Alpine 版本 label |
 | `ALPINE_FLAVOR` | `slim` | `slim` 或 `full` |
-| `S6_SOURCE` | `auto` | `auto`、`apk` 或 `tarball` |
 | `APK_MIRROR` | `https://mirrors.tuna.tsinghua.edu.cn/alpine` | Alpine apk 源 |
 
 **多架构构建**：
 
-基于 4.1 已准备的通用素材，再补齐另一个目标架构的 Alpine minirootfs：
+基于 4.1 已准备的通用素材，直接按目标平台构建：
 
 ```bash
-ALPINE_ARCH=aarch64 ./scripts/download-alpine-minirootfs.sh
-
 docker buildx build --platform linux/amd64 \
-  --build-arg ALPINE_ARCH=x86_64 \
   --build-arg ALPINE_FLAVOR=full \
   -t registry.example.com/ocserv:1.4.2-amd64 .
 
 docker buildx build --platform linux/arm64 \
-  --build-arg ALPINE_ARCH=aarch64 \
   --build-arg ALPINE_FLAVOR=full \
   -t registry.example.com/ocserv:1.4.2-arm64 .
 ```
@@ -363,7 +347,6 @@ docker buildx build --platform linux/arm64 \
 ```bash
 docker buildx build \
   -f exporter/Dockerfile \
-  --build-arg ALPINE_ARCH=x86_64 \
   -t ocserv-exporter:1.4.2 .
 ```
 
@@ -371,9 +354,7 @@ docker buildx build \
 
 **验证**：`docker run --rm --entrypoint occtl ocserv-exporter:1.4.2 --version`
 
-`S6_SOURCE=auto` 会优先尝试 Alpine 仓库中的 `s6-overlay` 包，若 `/init` 不可用则回退到 `src/` 中的 s6-overlay tarball。`S6_SOURCE=apk` 用于强制验证 Alpine 仓库包；`S6_SOURCE=tarball` 用于和 Alpine 仓库包来源对照。
-
-GitHub Actions 中会显式设置 `APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine`，发布构建继续使用 Alpine 官方源。
+GitHub Actions 中会显式设置 `APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine`，并为 amd64/arm64 分别传入官方 Alpine digest；发布构建继续使用 Alpine 官方源。
 
 Dockerfile 使用 BuildKit cache mount 加速 `apk` 安装，最终镜像层不保留 apk 索引缓存。`exporter` 镜像使用 Alpine 内置 `nobody` 非 root 用户运行，以匹配默认 `run-as-user = nobody` 生成的 `occtl.socket` 所有者；主 `ocserv` 镜像因需要 s6 init、`NET_ADMIN`、TUN 设备和 iptables，仍保留 root 运行。
 
@@ -383,7 +364,7 @@ Alpine `slim` 会禁用 utmp 编译能力，渲染配置时需要同步关闭 `u
 OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh
 ```
 
-Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS 与 OTP/liboath。若 Alpine 稳定仓库缺少对应开发包，构建不会补源码依赖，相关能力需要在可行性报告中标记为未等价。
+Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos，并自动探测 RADIUS 与 OTP/liboath。`full` 与 `slim` 均禁用 ocserv 的 seccomp 编译能力；Docker 运行时仍使用默认 seccomp profile。若 Alpine 稳定仓库缺少对应开发包，构建不会补源码依赖，相关能力需要在可行性报告中标记为未等价。
 
 ---
 
@@ -408,7 +389,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos、seccomp，并自动探测 
 | `session-timeout` | 单次会话最长连接时间（秒） | `86400` |
 | `persistent-cookies` | 断开后保持 cookie 可用 | `false` |
 | `try-mtu-discovery` | MTU 自动发现 | `true` |
-| `isolate-workers` | 隔离工作进程 | `true` |
+| `isolate-workers` | 隔离工作进程 | `false` |
 | `run-as-user` | 运行用户 | `nobody` |
 
 完整配置模板见 `config/ocserv.conf.template`，运行时配置由 `scripts/render-ocserv-conf.sh` 生成到 `config/ocserv.conf`。
@@ -674,6 +655,8 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prome
 
 ### 6.7 ocserv 内存增长排查
 
+详细故障表现、根因分析和修复策略见 [ocserv Docker 内存增长问题说明](ocserv-docker-memory-issue.md)。
+
 先区分 Docker 统计、监控栈和单个 `ocserv-worker` 进程内存：
 
 ```bash
@@ -693,7 +676,14 @@ done
 '
 ```
 
-如果单个 `ocserv-worker` 的 `RssAnon` 在有持续流量时单调增长，且用户断开后对应 worker 不退出或匿名内存不释放，按疑似 worker 内存泄漏处理。先确认正在使用固定版本 `kingsonho/ocserv:1.4.2`，并保持默认的 `compression = false`、`persistent-cookies = false`、`session-timeout = 86400`、`OCSERV_MEM_LIMIT=512m`。若 30-60 分钟压测后仍快速增长，保留两次 `/proc/*/status`、`ocserv --version`、`occtl show users/status` 输出，再升级到上游版本对照或内存剖析。
+如果单个 `ocserv-worker` 的 `RssAnon` 在有持续流量时单调增长，先确认模板和生成配置中均为 `isolate-workers = false`。本项目在 `full` 与 `slim` 镜像中均禁用 ocserv 的 seccomp 编译能力，并默认关闭 worker 隔离，避免 Docker 容器内嵌套 namespace/seccomp 隔离引发内存增长。修正配置后执行：
+
+```bash
+./scripts/render-ocserv-conf.sh
+docker compose restart ocserv
+```
+
+若使用默认配置重启后 30-60 分钟压测仍快速增长，保留两次 `/proc/*/status`、`ocserv --version`、`occtl show users/status` 输出，再升级到上游版本对照或内存剖析。
 
 ### 6.8 证书续期后处理
 
@@ -793,7 +783,7 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 | push `v*` 标签 | 先发布 `ocserv:1.4.2`、`ocserv:1.4.2-slim`、`ocserv-exporter:1.4.2`；再让 `ocserv:latest`、`ocserv:latest-slim`、`ocserv-exporter:latest` 指向对应版本标签 |
 | PR | 仅构建测试，不推送标签 |
 
-流程：下载源码和 minirootfs → Dockerfile 静态检查 → QEMU + Buildx → 分架构构建 → 生成 SBOM/provenance attestation → 创建版本标签多架构 manifest → 从版本标签创建 latest 别名 → 推送。
+流程：下载 ocserv 源码 → Dockerfile 静态检查 → QEMU + Buildx → 分架构构建 → 生成 SBOM/provenance attestation → 创建版本标签多架构 manifest → 从版本标签创建 latest 别名 → 推送。
 
 生产部署可将 `.env` 中镜像值改为 digest 形式，例如 `kingsonho/ocserv@sha256:<digest>`，以获得完全可复现的拉取结果。
 
@@ -817,7 +807,7 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 - 智能配置 `daemon.json`（保留已有配置）
 
 ```bash
-sudo bash install-docker.sh [-y] [--force] [--no-mirror] [--skip-cloud]
+sudo bash install-docker.sh [--force] [--no-mirror] [--skip-cloud]
 ```
 
 ---

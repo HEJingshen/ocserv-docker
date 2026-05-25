@@ -203,17 +203,13 @@ server-key = /etc/ocserv/privkey.pem
 ### failures during the reloading time.
 
 
-# Whether to enable seccomp/Linux namespaces worker isolation. That restricts the number of
-# system calls allowed to a worker process, in order to reduce damage from a
-# bug in the worker process. It is available on Linux systems at a performance cost.
-# The performance cost is roughly 2% overhead at transfer time (tested on a Linux 3.17.8).
-# Note however, that process isolation is restricted to the specific libc versions
-# the isolation was tested at. If you get random failures on worker processes, try
-# disabling that option and report the failures you, along with system and debugging
-# information at: https://gitlab.com/openconnect/ocserv/issues
+# Whether to enable seccomp/Linux namespaces worker isolation.
+# This Docker image builds ocserv with seccomp support disabled, and Docker already
+# provides container-level namespace/seccomp isolation at runtime. Keep worker
+# isolation disabled in containers to avoid nested isolation issues and memory growth.
 # This option is global and cannot be set at vhost level.
 # [scope: global]
-isolate-workers = true
+isolate-workers = false
 
 # A banner to be displayed on clients after connection
 # [scope: vhost]

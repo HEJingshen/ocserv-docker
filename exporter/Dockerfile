@@ -1,17 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
-ARG ALPINE_VERSION=3.23
-ARG ALPINE_PATCH_VERSION=3.23.4
-ARG ALPINE_ARCH=x86_64
+ARG ALPINE_IMAGE=alpine:3.23.4
 
-FROM scratch AS alpine-rootfs
-ARG ALPINE_VERSION
-ARG ALPINE_PATCH_VERSION
-ARG ALPINE_ARCH
-ADD src/alpine-minirootfs-${ALPINE_PATCH_VERSION}-${ALPINE_ARCH}.tar.gz /
-CMD ["/bin/sh"]
-
-FROM alpine-rootfs AS builder
+FROM ${ALPINE_IMAGE} AS builder
 
 ARG OCSERV_VERSION=1.4.2
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
@@ -70,24 +61,20 @@ RUN set -eux; \
     install -Dm755 build/src/occtl/occtl /out/usr/bin/occtl; \
     rm -rf /tmp/ocserv-*
 
-FROM alpine-rootfs
+FROM ${ALPINE_IMAGE}
 
 ARG OCSERV_VERSION=1.4.2
-ARG ALPINE_VERSION=3.23
-ARG ALPINE_PATCH_VERSION=3.23.4
-ARG ALPINE_ARCH=x86_64
-ARG ALPINE_MINIROOTFS_SHA256
+ARG ALPINE_IMAGE=alpine:3.23.4
+ARG ALPINE_VERSION=3.23.4
 ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
-      org.opencontainers.image.title="ocserv-exporter-alpine-minirootfs" \
-      org.opencontainers.image.description="ocserv Prometheus Exporter Alpine minirootfs feasibility image" \
+      org.opencontainers.image.title="ocserv-exporter-alpine" \
+      org.opencontainers.image.description="ocserv Prometheus Exporter Alpine image" \
       org.opencontainers.image.version="${OCSERV_VERSION}" \
       org.opencontainers.image.alpine-version="${ALPINE_VERSION}" \
-      org.opencontainers.image.alpine-minirootfs-version="${ALPINE_PATCH_VERSION}" \
-      org.opencontainers.image.alpine-minirootfs-arch="${ALPINE_ARCH}" \
-      org.opencontainers.image.alpine-minirootfs-sha256="${ALPINE_MINIROOTFS_SHA256}" \
+      org.opencontainers.image.base.name="${ALPINE_IMAGE}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
 COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories

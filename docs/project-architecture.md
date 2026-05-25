@@ -16,7 +16,7 @@
 │  │   ocserv     │───▶│ ocserv-exporter   │          │
 │  │  s6-overlay  │    │  (Unix socket)    │          │
 │  └──────────────┘    └────────┬──────────┘          │
-│                                │ :9100              │
+│                               │ :9100               │
 │  ┌──────────────┐    ┌────────▼───────────┐         │
 │  │  Prometheus  │◄───│  scrape /metrics   │         │
 │  │  :9090       │    └────────┬───────────┘         │
@@ -39,13 +39,13 @@
 
 ## 一、镜像构建（Dockerfile）
 
-采用 Alpine minirootfs 多阶段构建，将 **编译** 和 **运行** 分离，并固定 rootfs tarball 与 sha256 校验值。
+采用官方 Alpine 多阶段构建，将 **编译** 和 **运行** 分离。发布构建按平台传入官方 Alpine digest，以固定基础镜像输入。
 
 ### 阶段一：Builder
 
 | 项目 | 说明 |
 |:--|:--|
-| 基础镜像 | 已校验的 `alpine-minirootfs-3.23.4-{arch}.tar.gz` |
+| 基础镜像 | 官方 `alpine:3.23.4`；CI 按平台传入 digest |
 | 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需 Alpine 依赖 |
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
@@ -56,19 +56,19 @@
 
 | 项目 | 说明 |
 |:--|:--|
-| 基础镜像 | 与 builder 相同的已校验 Alpine minirootfs |
+| 基础镜像 | 与 builder 相同的官方 Alpine 基础镜像 |
 | 运行依赖 | 通过 `scanelf` 解析 ocserv 二进制所需共享库，并用 `apk add --virtual .ocserv-rundeps so:*` 安装 |
 | 产物复制 | `COPY --from=builder /out/ /` |
-| s6-overlay | `S6_SOURCE=auto|apk|tarball` 控制来源，发布构建使用 `apk` |
+| s6-overlay | 通过 Alpine apk 仓库安装 `s6-overlay` |
 | PATH | `/command` 加入 PATH，使 `docker exec` 可用 s6-overlay v3 工具 |
 
-### Minirootfs 基线
+### Alpine 基线
 
-`Dockerfile` 和 `exporter/Dockerfile` 均从 `scratch` 创建 `alpine-rootfs` stage，再让 builder 与 runtime 从同一 rootfs 派生。minirootfs tarball 由 `scripts/download-alpine-minirootfs.sh` 下载到 `src/`，不提交到 Git。
+`Dockerfile` 和 `exporter/Dockerfile` 均通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签。
 
 | 变体 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `full` | 默认生产标签 `kingsonho/ocserv:1.4.2`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos、seccomp，并自动探测 RADIUS、OTP/liboath |
+| `full` | 默认生产标签 `kingsonho/ocserv:1.4.2`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath |
 | `slim` | 精简生产标签 `kingsonho/ocserv:1.4.2-slim`，`latest-slim` 指向该版本标签 | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
 | `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:1.4.2`，`latest` 指向该版本标签 | Python exporter + `occtl` |
 
@@ -122,7 +122,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ss -tln | grep -q ':443' || exit 1
 ```
 
-通过 `ss` 检查 TCP 443 端口监听状态，比 `pgrep` 更可靠。ocserv 启用 `isolate-workers` + `run-as-user` 后，进程名可能不再精确匹配 "ocserv"，导致 `pgrep -x` 误判；而端口监听直接验证服务可用性。
+通过 `ss` 检查 TCP 443 端口监听状态，比 `pgrep` 更可靠。ocserv 运行用户、前台模式或子进程状态变化都可能让进程名检查产生误判；而端口监听直接验证服务可用性。
 
 ---
 
@@ -242,7 +242,7 @@ healthcheck:
   test: ["CMD-SHELL", "ss -tln | grep -q ':443' || exit 1"]
 ```
 
-通过 `ss` 检查 TCP 443 端口是否处于监听状态，直接验证服务可用性。相比 `pgrep` 更可靠，因为 ocserv 启用 `isolate-workers` + `run-as-user` 后，进程名可能不再精确匹配 "ocserv"，导致 `pgrep -x` 误判。
+通过 `ss` 检查 TCP 443 端口是否处于监听状态，直接验证服务可用性。相比 `pgrep` 更可靠，因为 ocserv 运行用户、前台模式或子进程状态变化都可能让进程名检查产生误判。
 
 每 30 秒执行一次，3 次失败标记为 `unhealthy`。
 
@@ -256,7 +256,7 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 基础镜像 | 已校验的 `alpine-minirootfs-3.23.4-{arch}.tar.gz` |
+| 基础镜像 | 官方 `alpine:3.23.4`；CI 按平台传入 digest |
 | 构建方式 | 多阶段构建，builder 从 ocserv 源码只编译 `occtl`，runtime 复制该二进制 |
 | 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`，以 `nobody` 非 root 用户执行 `python3 -m ocserv_exporter` |
 | 数据采集 | 通过 `occtl -j show status` 和 `occtl -j show users`（JSON 格式）调用 ocserv 的 Unix socket 接口 |
@@ -458,14 +458,14 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
        │
 3. 设置 Buildx → 多架构构建引擎
        │
-4. 下载 ocserv、s6-overlay 和 Alpine minirootfs
+4. 下载 ocserv 源码
        │
 5. 登录 Docker Hub（非 PR 时）
        │
 6. 构建 + 推送
        ├─ 分平台构建: linux/amd64, linux/arm64
        ├─ 缓存: GitHub Actions 缓存（gha）
-       ├─ 参数: OCSERV_VERSION, S6_OVERLAY_VERSION, ALPINE_ARCH, ALPINE_FLAVOR
+       ├─ 参数: OCSERV_VERSION, ALPINE_IMAGE, ALPINE_FLAVOR
        └─ 产物: digest-only image + SBOM/provenance attestation
        │
 7. 创建 multi-arch manifest
@@ -493,7 +493,6 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ├── docker/
 │   └── ocserv/s6-init.sh               # ocserv 容器启动前初始化脚本
 ├── scripts/
-│   ├── download-alpine-minirootfs.sh   # 下载并校验 Alpine minirootfs tarball
 │   ├── prepare-ocserv-config.sh        # 交互式准备 .env、目录权限并渲染 ocserv.conf
 │   ├── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
 │   └── setup-fail2ban.sh               # Fail2Ban 部署脚本
@@ -501,11 +500,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ├── .env                                # 实际环境变量（不提交，包含敏感配置）
 │
 ├── src/                                # 本地构建素材（不提交到 Git）
-│   ├── ocserv-1.4.2.tar.xz             # ocserv 源码
-│   ├── alpine-minirootfs-*.tar.gz      # Alpine minirootfs 构建输入
-│   ├── s6-overlay-noarch.tar.xz        # s6-overlay 通用组件
-│   ├── s6-overlay-x86_64.tar.xz        # s6-overlay amd64 二进制
-│   └── s6-overlay-aarch64.tar.xz       # s6-overlay arm64 二进制
+│   └── ocserv-1.4.2.tar.xz             # ocserv 源码
 │
 ├── config/                             # 配置文件目录
 │   ├── ocserv.conf.template            # ocserv 完整配置模板
@@ -513,7 +508,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   └── auth/ocpasswd                   # 用户密码文件
 │
 ├── exporter/
-│   ├── Dockerfile                      # exporter Alpine minirootfs 多阶段构建
+│   ├── Dockerfile                      # exporter Alpine 多阶段构建
 │   ├── ocserv_exporter.py              # Prometheus 指标采集器模块
 │   └── test_ocserv_exporter.py         # exporter 单元测试
 │

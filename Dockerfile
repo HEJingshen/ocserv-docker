@@ -1,17 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
-ARG ALPINE_VERSION=3.23
-ARG ALPINE_PATCH_VERSION=3.23.4
-ARG ALPINE_ARCH=x86_64
+ARG ALPINE_IMAGE=alpine:3.23.4
 
-FROM scratch AS alpine-rootfs
-ARG ALPINE_VERSION
-ARG ALPINE_PATCH_VERSION
-ARG ALPINE_ARCH
-ADD src/alpine-minirootfs-${ALPINE_PATCH_VERSION}-${ALPINE_ARCH}.tar.gz /
-CMD ["/bin/sh"]
-
-FROM alpine-rootfs AS builder
+FROM ${ALPINE_IMAGE} AS builder
 
 ARG OCSERV_VERSION=1.4.2
 ARG ALPINE_FLAVOR=slim
@@ -54,7 +45,6 @@ RUN --mount=type=cache,target=/var/cache/apk \
         full) \
             apk add --update-cache \
                 krb5-dev \
-                libseccomp-dev \
                 libtasn1-dev \
                 linux-pam-dev \
                 talloc-dev; \
@@ -79,7 +69,7 @@ RUN set -eux; \
             MESON_FEATURES="-Dpam=disabled -Dradius=disabled -Dgssapi=disabled -Dliboath=disabled -Dsystemd=disabled -Dutmp=disabled -Dlibwrap=disabled -Dseccomp=disabled -Dlz4=enabled -Dlibnl=enabled"; \
             ;; \
         full) \
-            MESON_FEATURES="-Dpam=enabled -Dradius=auto -Dgssapi=enabled -Dliboath=auto -Dsystemd=disabled -Dutmp=auto -Dlibwrap=auto -Dseccomp=enabled -Dlz4=enabled -Dlibnl=enabled"; \
+            MESON_FEATURES="-Dpam=enabled -Dradius=auto -Dgssapi=enabled -Dliboath=auto -Dsystemd=disabled -Dutmp=auto -Dlibwrap=auto -Dseccomp=disabled -Dlz4=enabled -Dlibnl=enabled"; \
             ;; \
     esac; \
     meson setup build \
@@ -94,30 +84,22 @@ RUN set -eux; \
     DESTDIR=/out ninja -C build install; \
     rm -rf /tmp/ocserv-*
 
-FROM alpine-rootfs
+FROM ${ALPINE_IMAGE}
 
 ARG OCSERV_VERSION=1.4.2
-ARG S6_OVERLAY_VERSION=3.2.3.0
-ARG ALPINE_VERSION=3.23
-ARG ALPINE_PATCH_VERSION=3.23.4
-ARG ALPINE_ARCH=x86_64
-ARG ALPINE_MINIROOTFS_SHA256
+ARG ALPINE_IMAGE=alpine:3.23.4
+ARG ALPINE_VERSION=3.23.4
 ARG ALPINE_FLAVOR=slim
-ARG S6_SOURCE=auto
 ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
-      org.opencontainers.image.title="ocserv-alpine-minirootfs" \
-      org.opencontainers.image.description="OpenConnect VPN Server Alpine minirootfs feasibility image" \
+      org.opencontainers.image.title="ocserv-alpine" \
+      org.opencontainers.image.description="OpenConnect VPN Server Alpine image" \
       org.opencontainers.image.version="${OCSERV_VERSION}" \
       org.opencontainers.image.alpine-version="${ALPINE_VERSION}" \
-      org.opencontainers.image.alpine-minirootfs-version="${ALPINE_PATCH_VERSION}" \
-      org.opencontainers.image.alpine-minirootfs-arch="${ALPINE_ARCH}" \
-      org.opencontainers.image.alpine-minirootfs-sha256="${ALPINE_MINIROOTFS_SHA256}" \
-      org.opencontainers.image.s6-overlay-version="${S6_OVERLAY_VERSION}" \
       org.opencontainers.image.alpine-flavor="${ALPINE_FLAVOR}" \
-      org.opencontainers.image.s6-source="${S6_SOURCE}" \
+      org.opencontainers.image.base.name="${ALPINE_IMAGE}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/GentleKingson/ocserv-docker"
 
@@ -128,7 +110,6 @@ RUN set -eux; \
     configure-alpine-repositories "${APK_MIRROR}"
 
 COPY --from=builder /out/ /
-COPY src/s6-overlay-noarch.tar.xz src/s6-overlay-${ALPINE_ARCH}.tar.xz /tmp/
 
 RUN --mount=type=cache,target=/var/cache/apk \
     set -eux; \
@@ -139,38 +120,15 @@ RUN --mount=type=cache,target=/var/cache/apk \
         iptables \
         pax-utils \
         sed \
-        tzdata \
-        xz; \
+        tzdata; \
     runDeps="$(scanelf --needed --nobanner --format '%n#p' \
             /usr/bin/occtl /usr/bin/ocpasswd /usr/sbin/ocserv /usr/sbin/ocserv-worker \
         | tr ',' '\n' \
         | sort -u \
         | awk 'NF { print "so:" $1 }')"; \
     apk add --update-cache --virtual .ocserv-rundeps ${runDeps}; \
-    case "${S6_SOURCE}" in \
-        apk) \
-            apk add --update-cache s6-overlay; \
-            [ -x /init ]; \
-            ;; \
-        tarball) \
-            tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /; \
-            tar -Jxpf "/tmp/s6-overlay-${ALPINE_ARCH}.tar.xz" -C /; \
-            ;; \
-        auto) \
-            if apk add --update-cache s6-overlay && [ -x /init ]; then \
-                echo "Using Alpine s6-overlay package"; \
-            else \
-                echo "Falling back to bundled s6-overlay tarballs"; \
-                tar -Jxpf /tmp/s6-overlay-noarch.tar.xz -C /; \
-                tar -Jxpf "/tmp/s6-overlay-${ALPINE_ARCH}.tar.xz" -C /; \
-            fi; \
-            ;; \
-        *) \
-            echo "Unsupported S6_SOURCE=${S6_SOURCE}; expected auto, apk, or tarball"; \
-            exit 1; \
-            ;; \
-    esac; \
-    rm -f /tmp/s6-overlay-*.tar.xz
+    apk add --update-cache s6-overlay; \
+    [ -x /init ]
 
 ENV PATH="/command:${PATH}"
 
