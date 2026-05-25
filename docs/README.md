@@ -43,7 +43,7 @@ cd ocserv-docker
 ### 1.3 安装 Docker
 
 ```bash
-sudo bash install-docker.sh -y
+sudo bash install-docker.sh
 ```
 
 脚本自动检测发行版、选择最快镜像源、安装 Docker CE + Compose。
@@ -52,7 +52,7 @@ sudo bash install-docker.sh -y
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GentleKingson/ocserv-docker/main/install-docker.sh -o install-docker.sh
-sudo bash install-docker.sh -y
+sudo bash install-docker.sh
 ```
 
 ### 1.4 准备 SSL 证书
@@ -105,7 +105,7 @@ services:
 
 ## 二、单独部署 ocserv
 
-### 2.1 配置环境变量
+### 2.1 配置环境变量并准备配置
 
 即使是单独部署 ocserv（不启用监控），也需要配置 `.env` 文件：
 
@@ -129,12 +129,6 @@ services:
 
 **至少需修改**：将 `DOMAIN` 替换为实际域名，如需更改端口则修改 `OCSERV_PORT`。
 
-### 2.2 准备配置
-
-```bash
-./scripts/prepare-ocserv-config.sh
-```
-
 仓库已提供 `config/ocserv.conf.template` 作为完整配置模板。准备脚本会设置日志目录和密码文件权限，并根据 `.env` 生成 `config/ocserv.conf`。如需之后调整环境变量，先修改 `.env`，再重新运行 `./scripts/render-ocserv-conf.sh` 或重新执行准备脚本。
 
 启动前可先检查 Compose 配置和证书挂载路径：
@@ -145,7 +139,7 @@ DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
 sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 ```
 
-### 2.3 启动服务
+### 2.2 启动服务
 
 ```bash
 docker compose up -d
@@ -153,7 +147,7 @@ docker compose up -d
 
 容器启动时 s6-overlay 自动完成：基础文件检查 → iptables NAT/转发规则 → 启动 ocserv。配置语法错误会通过容器日志暴露。
 
-### 2.4 创建用户
+### 2.3 创建用户
 
 ```bash
 docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
@@ -161,7 +155,7 @@ docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 
 `config/auth` 目录以读写方式挂载到容器内 `/etc/ocserv/auth`。`ocpasswd` 会通过临时文件和原子替换更新密码文件，因此需要挂载整个可写目录，而不是只挂载单个 `ocpasswd` 文件。建议显式使用 `-u 0` 以 root 身份执行，避免容器默认用户或 user namespace 配置导致无法写入。
 
-### 2.5 验证服务
+### 2.4 验证服务
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' ocserv   # 预期: healthy
@@ -169,29 +163,7 @@ docker compose logs -f ocserv
 docker exec ocserv occtl show users
 ```
 
-### 2.6 客户端连接
-
-连接地址：
-
-- 默认 443 端口：`https://your.domain.com`
-- 如果 `.env` 中 `OCSERV_PORT` 不是 `443`：`https://your.domain.com:${OCSERV_PORT}`
-
-| 平台 | 客户端 |
-|:--|:--|
-| Windows / macOS | [Cisco AnyConnect](https://www.cisco.com/c/en/us/products/security/anyconnect-secure-mobility-client/) |
-| macOS | `brew install openconnect-gui` |
-| Linux | `apt install openconnect` |
-| iOS / Android | App Store / Google Play 搜索 "AnyConnect" |
-
-**Linux 命令行**：
-
-```bash
-sudo openconnect -b https://your.domain.com --user=username
-# 非 443 端口:
-sudo openconnect -b "https://your.domain.com:${OCSERV_PORT}" --user=username
-```
-
-### 2.7 常用命令
+### 2.5 常用命令
 
 | 操作 | 命令 |
 |:--|:--|
@@ -222,7 +194,9 @@ ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
 - **Grafana**：预置 Overview 与 Sessions 两块看板，默认总览不查询高基数会话明细
 - **Nginx**：HTTPS 反向代理，仅对外暴露 Grafana；Prometheus 保持在 Docker 网络内部
 
-### 3.2 配置环境变量
+### 3.2 配置环境变量并准备基础配置
+
+即使直接部署完整监控栈，也需要先准备 ocserv 的日志目录、密码目录和渲染后的主配置：
 
 ```bash
 ./scripts/prepare-ocserv-config.sh
@@ -250,14 +224,6 @@ ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
 
 Nginx 启动时会严格校验 `DOMAIN`、`MONITORING_PORT`、TLS 证书和生成后的配置；任一项不合法都会阻止容器启动。
 
-### 3.3 准备基础配置
-
-即使直接部署完整监控栈，也需要先准备 ocserv 的日志目录、密码目录和渲染后的主配置：
-
-```bash
-./scripts/prepare-ocserv-config.sh
-```
-
 启动前检查 Compose 配置、Nginx 生成目录和证书目录：
 
 ```bash
@@ -269,7 +235,7 @@ SSL_CERT_DIR=$(awk -F= '/^SSL_CERT_DIR=/{print $2}' .env)
 sudo ls -l "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}/fullchain.pem" "${SSL_CERT_DIR:-/etc/letsencrypt}/live/${DOMAIN}/privkey.pem"
 ```
 
-### 3.4 启动完整栈
+### 3.3 启动完整栈
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
@@ -282,7 +248,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml ps
 docker exec nginx-proxy nginx -t
 ```
 
-### 3.5 访问监控
+### 3.4 访问监控
 
 | 服务 | 地址 | 认证 |
 |:--|:--|:--|
@@ -301,7 +267,7 @@ ocserv_bytes_rx_rate_bytes_per_second      # 当前接收速率（字节/秒）
 ocserv_up                                  # 服务是否在线
 ```
 
-### 3.6 部署 Fail2Ban
+### 3.5 部署 Fail2Ban
 
 保护监控端点免受暴力破解（10 分钟内 5 次失败 → 封禁 1 小时）：
 
@@ -311,7 +277,7 @@ sudo fail2ban-client status nginx-auth      # 查看状态
 sudo fail2ban-client set nginx-auth unbanip <IP>   # 手动解封
 ```
 
-### 3.7 数据持久化
+### 3.6 数据持久化
 
 Prometheus 和 Grafana 数据通过 Docker 卷持久化，容器重建不丢失。彻底清理：
 
@@ -374,13 +340,9 @@ docker buildx build \
 
 **多架构构建**：
 
+基于 4.1 已准备的通用素材，再补齐另一个目标架构的 Alpine minirootfs：
+
 ```bash
-mkdir -p src
-wget -O src/ocserv-1.4.2.tar.xz https://www.infradead.org/ocserv/ocserv-1.4.2.tar.xz
-wget -O src/s6-overlay-noarch.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-noarch.tar.xz
-wget -O src/s6-overlay-x86_64.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-x86_64.tar.xz
-wget -O src/s6-overlay-aarch64.tar.xz https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-aarch64.tar.xz
-ALPINE_ARCH=x86_64 ./scripts/download-alpine-minirootfs.sh
 ALPINE_ARCH=aarch64 ./scripts/download-alpine-minirootfs.sh
 
 docker buildx build --platform linux/amd64 \
