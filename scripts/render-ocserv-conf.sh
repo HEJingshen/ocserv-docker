@@ -42,6 +42,10 @@ if [ -z "${DOMAIN}" ]; then
 fi
 OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-$(env_value OCSERV_DISABLE_UTMP)}
 OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-false}
+OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-$(env_value OCSERV_ENABLE_CERT_AUTH)}
+OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-false}
+OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-$(env_value OCSERV_ENABLE_COMPRESSION)}
+OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-false}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_value OCSERV_MAX_CLIENTS)}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}
 
@@ -52,6 +56,22 @@ case "${OCSERV_DISABLE_UTMP}" in
         ;;
     *)
         fail "OCSERV_DISABLE_UTMP must be true or false: ${OCSERV_DISABLE_UTMP}"
+        ;;
+esac
+
+case "${OCSERV_ENABLE_CERT_AUTH}" in
+    true|false)
+        ;;
+    *)
+        fail "OCSERV_ENABLE_CERT_AUTH must be true or false: ${OCSERV_ENABLE_CERT_AUTH}"
+        ;;
+esac
+
+case "${OCSERV_ENABLE_COMPRESSION}" in
+    true|false)
+        ;;
+    *)
+        fail "OCSERV_ENABLE_COMPRESSION must be true or false: ${OCSERV_ENABLE_COMPRESSION}"
         ;;
 esac
 
@@ -100,9 +120,27 @@ trap 'rm -f "${TMP_FILE}"' EXIT HUP INT TERM
 
 awk -v domain="${DOMAIN}" \
     -v disable_utmp="${OCSERV_DISABLE_UTMP}" \
+    -v enable_cert_auth="${OCSERV_ENABLE_CERT_AUTH}" \
+    -v enable_compression="${OCSERV_ENABLE_COMPRESSION}" \
     -v max_clients="${OCSERV_MAX_CLIENTS}" '
     {
         gsub(/\$\{DOMAIN\}/, domain)
+        if ($0 ~ /^[[:space:]]*#?[[:space:]]*enable-auth[[:space:]]*=[[:space:]]*"certificate"[[:space:]]*$/) {
+            print (enable_cert_auth == "true" ? "enable-auth = \"certificate\"" : "#enable-auth = \"certificate\"")
+            next
+        }
+        if ($0 ~ /^[[:space:]]*#?[[:space:]]*ca-cert[[:space:]]*=[[:space:]]*\/etc\/ocserv\/ca\/ca-cert\.pem[[:space:]]*$/) {
+            print (enable_cert_auth == "true" ? "ca-cert = /etc/ocserv/ca/ca-cert.pem" : "#ca-cert = /etc/ocserv/ca/ca-cert.pem")
+            next
+        }
+        if ($0 ~ /^[[:space:]]*#?[[:space:]]*crl[[:space:]]*=[[:space:]]*\/etc\/ocserv\/ca\/crl\.pem[[:space:]]*$/) {
+            print (enable_cert_auth == "true" ? "crl = /etc/ocserv/ca/crl.pem" : "#crl = /etc/ocserv/ca/crl.pem")
+            next
+        }
+        if ($0 ~ /^[[:space:]]*#?[[:space:]]*compression[[:space:]]*=/) {
+            print "compression = " enable_compression
+            next
+        }
         if ($0 ~ /^[[:space:]]*max-clients[[:space:]]*=/) {
             sub(/=.*/, "= " max_clients)
         }
@@ -121,5 +159,5 @@ chmod 0644 "${TMP_FILE}"
 mv "${TMP_FILE}" "${OUTPUT_FILE}"
 trap - EXIT HUP INT TERM
 
-printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s\n' \
-    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}"
+printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s OCSERV_ENABLE_CERT_AUTH=%s OCSERV_ENABLE_COMPRESSION=%s\n' \
+    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}" "${OCSERV_ENABLE_CERT_AUTH}" "${OCSERV_ENABLE_COMPRESSION}"

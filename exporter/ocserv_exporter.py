@@ -9,7 +9,7 @@ import sys
 import re
 from prometheus_client import start_http_server, Gauge, Info
 
-SOCKET_PATH = os.getenv("OCSERV_SOCKET", "/var/run/occtl.socket")
+SOCKET_PATH = os.getenv("OCSERV_SOCKET", "/run/ocserv/occtl.socket")
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9100"))
 METRICS_HOST = os.getenv("METRICS_HOST", "0.0.0.0")
 OCSERV_VERSION = "unknown"

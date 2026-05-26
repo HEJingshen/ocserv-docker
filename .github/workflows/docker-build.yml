@@ -8,18 +8,29 @@ on:
       - 'Dockerfile'
       - '**/Dockerfile'
       - '.github/workflows/**'
+      - 'auth/**'
+      - 'config/**'
+      - 'docker-compose*.yml'
+      - 'scripts/**'
+      - 'tests/**'
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
       - '**/Dockerfile'
       - '.github/workflows/**'
+      - 'auth/**'
+      - 'config/**'
+      - 'docker-compose*.yml'
+      - 'scripts/**'
+      - 'tests/**'
 
 env:
   REGISTRY: docker.io
   OCSERV_IMAGE_NAME: kingsonho/ocserv
   EXPORTER_IMAGE_NAME: kingsonho/ocserv-exporter
   OCSERV_VERSION: "1.4.2"
+  OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
   ALPINE_VERSION: "3.23.4"
   ALPINE_IMAGE_AMD64: alpine:3.23.4@sha256:4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b
   ALPINE_IMAGE_ARM64: alpine:3.23.4@sha256:378c4c5418f7493bd500ad21ffb43818d0689daaad43e3261859fb417d1481a0
@@ -30,6 +41,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnutls-bin
 
       - name: Run unit tests
         run: |
@@ -43,12 +59,18 @@ jobs:
           sh -n scripts/prepare-monitoring-config.sh
           sh -n nginx/docker-entrypoint.sh
           sh -n docker/ocserv/s6-init.sh
+          bash -n scripts/ocserv-cert-auth.sh
           bash -n scripts/setup-fail2ban.sh
           sh tests/test_nginx_entrypoint.sh
+          sh tests/test_ocserv_cert_auth.sh
 
       - name: Lint Dockerfiles
         run: |
-          docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile exporter/Dockerfile
+          docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile exporter/Dockerfile auth/Dockerfile
+
+      - name: Build auth tool image
+        run: |
+          docker build --pull -f auth/Dockerfile -t ocserv-auth:ci .
 
       - name: Validate Compose files
         env:
@@ -73,6 +95,7 @@ jobs:
           mkdir -p src
           curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
             https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
+          echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz" | sha256sum -c -
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -205,6 +228,7 @@ jobs:
           mkdir -p src
           curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
             https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
+          echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz" | sha256sum -c -
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0

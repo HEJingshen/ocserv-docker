@@ -179,6 +179,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
 | `OCSERV_IMAGE` | `kingsonho/ocserv:1.4.2` | ocserv 服务镜像 |
+| `OCSERV_AUTH_IMAGE` | `ocserv-auth:local` | 按需客户端证书管理工具镜像 |
 | `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
 | `TZ` | `Asia/Shanghai` | 时区设置 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
@@ -221,7 +222,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` | `/etc/ocserv/fullchain.pem` | `ro`（只读） | TLS 证书（公钥） |
 | `/etc/letsencrypt/live/${DOMAIN}/privkey.pem` | `/etc/ocserv/privkey.pem` | `ro`（只读） | TLS 私钥 |
 | `./config/auth` | `/etc/ocserv/auth` | 读写 | 用户密码目录，支持 `ocpasswd` 原子替换密码文件 |
+| `./config/client-ca/public` | `/etc/ocserv/ca` | `ro`（只读） | 客户端证书 CA 与 CRL |
+| `./config/config-per-user` | `/etc/ocserv/config-per-user` | `ro`（只读） | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
+
+`ocserv-auth` 工具容器通过 `tools` profile 按需运行，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、吊销记录、禁用标记和用户证书。吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。
 
 ### 日志轮转
 
@@ -506,7 +511,11 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ├── config/                             # 配置文件目录
 │   ├── ocserv.conf.template            # ocserv 完整配置模板
 │   ├── ocserv.conf                     # 渲染后的 ocserv 主配置
-│   └── auth/ocpasswd                   # 用户密码文件
+│   ├── auth/ocpasswd                   # 用户密码文件
+│   ├── client-ca/public/               # 客户端证书 CA 与 CRL
+│   ├── client-ca/private/              # CA 私钥和吊销记录（仅工具容器挂载）
+│   ├── user-certs/                     # 用户证书与 p12 文件
+│   └── config-per-user/                # 每用户配置
 │
 ├── exporter/
 │   ├── Dockerfile                      # exporter Alpine 多阶段构建

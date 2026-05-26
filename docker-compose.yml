@@ -28,10 +28,12 @@ services:
     volumes:
       - ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro
       - ./config/auth:/etc/ocserv/auth:rw
+      - ./config/client-ca/public:/etc/ocserv/ca:ro
+      - ./config/config-per-user:/etc/ocserv/config-per-user:ro
       - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro
       - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro
       - ./logs:/var/log/ocserv  # 持久化日志目录
-      - ocserv-socket:/var/run  # occtl socket 共享（监控栈使用）
+      - ocserv-socket:/run/ocserv  # occtl socket 共享（监控栈使用）
 
     # 容器日志轮转（防止 stdout/stderr 撑爆磁盘）
     logging:
@@ -55,6 +57,28 @@ services:
     # 加入监控网络（与 exporter/prometheus/grafana 同网络）
     networks:
       - ${NETWORK_NAME:-monitor-net}
+
+  ocserv-auth:
+    image: ${OCSERV_AUTH_IMAGE:-ocserv-auth:local}
+    build:
+      context: .
+      dockerfile: auth/Dockerfile
+    profiles:
+      - tools
+    network_mode: none
+    stdin_open: true
+    tty: true
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - ALLOW_EMPTY_P12_PASSWORD=${ALLOW_EMPTY_P12_PASSWORD:-true}
+      - P12_EXPORT_PASSWORD=${P12_EXPORT_PASSWORD:-}
+      - P12_EXPORT_PASSWORD_FILE=${P12_EXPORT_PASSWORD_FILE:-}
+    volumes:
+      - ./config/auth:/etc/ocserv/auth:ro
+      - ./config/client-ca/public:/etc/ocserv/ca:rw
+      - ./config/client-ca/private:/var/lib/ocserv-auth/private-ca:rw
+      - ./config/user-certs:/var/lib/ocserv-auth/user-certs:rw
+      - ./config/config-per-user:/etc/ocserv/config-per-user:rw
 
 volumes:
   ocserv-socket:

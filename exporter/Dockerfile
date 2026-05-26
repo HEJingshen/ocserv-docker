@@ -102,7 +102,7 @@ WORKDIR /app
 
 COPY --chown=nobody:nobody exporter/ocserv_exporter.py .
 
-ENV OCSERV_SOCKET=/var/run/occtl.socket
+ENV OCSERV_SOCKET=/run/ocserv/occtl.socket
 ENV METRICS_PORT=9100
 ENV EXPORTER_INTERVAL_SECONDS=10
 ENV OCCTL_TIMEOUT_SECONDS=5

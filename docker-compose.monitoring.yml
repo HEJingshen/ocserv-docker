@@ -5,9 +5,9 @@ services:
     restart: unless-stopped
     network_mode: "service:ocserv"
     volumes:
-      - ocserv-socket:/var/run:ro
+      - ocserv-socket:/run/ocserv:ro
     environment:
-      - OCSERV_SOCKET=/var/run/occtl.socket
+      - OCSERV_SOCKET=/run/ocserv/occtl.socket
       - METRICS_PORT=${METRICS_PORT:-9100}
       - EXPORTER_INTERVAL_SECONDS=${EXPORTER_INTERVAL_SECONDS:-10}
       - OCCTL_TIMEOUT_SECONDS=${OCCTL_TIMEOUT_SECONDS:-2}

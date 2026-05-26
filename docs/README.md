@@ -113,7 +113,7 @@ services:
 ./scripts/prepare-ocserv-config.sh
 ```
 
-脚本会在首次运行时从 `.env.example` 创建 `.env`，准备 `logs/` 和 `config/auth/ocpasswd`，然后自动打开 `vi .env`。至少需要将 `DOMAIN` 修改为实际域名；启用监控时还需要修改 `GF_ADMIN_PASSWORD`。保存并退出 `vi` 后，脚本会自动生成 `config/ocserv.conf`。
+脚本会在首次运行时从 `.env.example` 创建 `.env`，准备 `logs/`、`config/auth/ocpasswd`、客户端 CA 目录和用户证书目录，然后自动打开 `vi .env`。至少需要将 `DOMAIN` 修改为实际域名；启用监控时还需要修改 `GF_ADMIN_PASSWORD`。保存并退出 `vi` 后，脚本会自动生成 `config/ocserv.conf`。
 
 `.env.example` 中的变量已按部署方式分为两部分，单独部署只需关注 **「基础部署配置」**：
 
@@ -122,6 +122,7 @@ services:
 | `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
 | `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
 | `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
+| `OCSERV_AUTH_IMAGE` | 按需证书管理工具镜像 | `ocserv-auth:local` |
 | `OCSERV_MAX_CLIENTS` | 最大客户端数，渲染到 `max-clients` | `32` |
 | `OCSERV_MEM_LIMIT` / `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存与内存+swap 上限 | `512m` / `512m` |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
@@ -137,6 +138,12 @@ services:
 docker compose config
 DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
 sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+```
+
+首次启动 `ocserv` 前需要初始化客户端证书 CA 和空 CRL，因为默认配置已启用证书登录入口：
+
+```bash
+docker compose --profile tools run --rm ocserv-auth init-ca
 ```
 
 ### 2.2 启动服务
@@ -155,7 +162,44 @@ docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 
 `config/auth` 目录以读写方式挂载到容器内 `/etc/ocserv/auth`。`ocpasswd` 会通过临时文件和原子替换更新密码文件，因此需要挂载整个可写目录，而不是只挂载单个 `ocpasswd` 文件。建议显式使用 `-u 0` 以 root 身份执行，避免容器默认用户或 user namespace 配置导致无法写入。
 
-### 2.4 验证服务
+### 2.4 客户端证书认证（可选登录方式）
+
+默认配置启用 optional 认证：用户可以继续使用 `ocpasswd` 密码登录，也可以使用客户端证书登录。首次生成用户证书前，必须先至少创建一个密码用户，因为证书工具会从 `config/auth/ocpasswd` 读取用户名列表。
+
+生成或续期所有用户证书：
+
+```bash
+docker compose --profile tools run --rm ocserv-auth manage
+docker compose restart ocserv
+```
+
+查看证书状态（只读，不会初始化 CA/CRL 或生成任何证书文件）：
+
+```bash
+docker compose --profile tools run --rm ocserv-auth status
+```
+
+吊销指定用户证书。吊销会写入持久禁用标记，后续 `manage` 不会自动为该用户重发证书：
+
+```bash
+docker compose --profile tools run --rm ocserv-auth revoke username
+docker compose restart ocserv
+```
+
+重新签发已吊销用户证书必须显式执行：
+
+```bash
+docker compose --profile tools run --rm ocserv-auth reissue username
+docker compose restart ocserv
+```
+
+`reissue` 只接受已经被 `revoke` 标记为吊销的用户。未吊销用户如需轮换证书，应先执行 `revoke username`，再执行 `reissue username`；如果 `reissue` 生成证书失败，吊销禁用标记会保留，`manage` 仍不会自动重发该用户证书。
+
+证书文件会持久化到 `config/user-certs/<username>/`，其中 `<username>.p12` 适用于常见客户端，`ios-<username>.p12` 使用 iOS 兼容格式。`.p12` 文件按当前项目策略导出为空导入密码，必须通过文件权限、加密传输和及时删除临时副本来控制泄露风险。
+
+客户端证书认证依赖 `config/client-ca/public/ca-cert.pem` 和 `config/client-ca/public/crl.pem`。CA 私钥只保存在 `config/client-ca/private/`，不会挂载到长期运行的 `ocserv` 容器。
+
+### 2.5 验证服务
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' ocserv   # 预期: healthy
@@ -163,7 +207,7 @@ docker compose logs -f ocserv
 docker exec ocserv occtl show users
 ```
 
-### 2.5 常用命令
+### 2.6 常用命令
 
 | 操作 | 命令 |
 |:--|:--|
@@ -292,9 +336,15 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml down -v
 默认 `Dockerfile` 和 `exporter/Dockerfile` 均使用官方 Alpine 基础镜像。构建前只需要准备 ocserv 源码；s6-overlay 由 Alpine apk 仓库安装，不再需要准备本地 tarball。
 
 ```bash
+OCSERV_VERSION=1.4.2
+OCSERV_TARBALL_SHA256=e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5
 mkdir -p src
-wget -O src/ocserv-1.4.2.tar.xz https://www.infradead.org/ocserv/ocserv-1.4.2.tar.xz
+curl -L -o "src/ocserv-${OCSERV_VERSION}.tar.xz" \
+  "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz"
+echo "${OCSERV_TARBALL_SHA256}  src/ocserv-${OCSERV_VERSION}.tar.xz" | sha256sum -c -
 ```
+
+默认 `.env.example` 使用固定镜像版本，并禁用客户端证书认证和压缩。若要启用客户端证书认证，设置 `OCSERV_ENABLE_CERT_AUTH=true` 后重新运行 `./scripts/render-ocserv-conf.sh`，再使用 `docker compose --profile tools run --rm ocserv-auth init-ca` 和 `manage` 生成 CA/用户证书。
 
 多架构构建由 Buildx 按 `--platform` 解析官方 Alpine manifest；本地构建默认使用 `alpine:3.23.4`，发布构建会按平台传入固定 digest。
 
@@ -400,7 +450,11 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos，并自动探测 RADIUS 与
 | `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` | `/etc/ocserv/fullchain.pem` | ro | 证书 |
 | `/etc/letsencrypt/live/${DOMAIN}/privkey.pem` | `/etc/ocserv/privkey.pem` | ro | 私钥 |
 | `./config/auth` | `/etc/ocserv/auth` | rw | 用户密码目录 |
+| `./config/client-ca/public` | `/etc/ocserv/ca` | ro | 客户端证书 CA 与 CRL |
+| `./config/config-per-user` | `/etc/ocserv/config-per-user` | ro | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | rw | 日志 |
+
+按需运行的 `ocserv-auth` 工具容器额外挂载 `./config/client-ca/private` 和 `./config/user-certs`，用于保存 CA 私钥、吊销记录和用户证书文件；这些目录不会进入 `ocserv` 运行容器。
 
 ### 5.3 容器权限
 
