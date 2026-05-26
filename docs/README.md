@@ -440,8 +440,8 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos，并自动探测 RADIUS 与
 | `NETWORK_NAME` | Docker 网络名称 | `monitor-net` |
 | `EXPORTER_IMAGE` | ocserv-exporter 镜像 | `kingsonho/ocserv-exporter:1.4.2` |
 | `PROMETHEUS_IMAGE` | Prometheus 镜像 | `prom/prometheus:v3.11.3` |
-| `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:13.0.1` |
-| `NGINX_IMAGE` | Nginx 镜像 | `nginx:1.28.3-alpine3.23-slim` |
+| `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:13.0.1-security-01` |
+| `NGINX_IMAGE` | Nginx 镜像 | `nginx:1.30.2-alpine3.23-slim` |
 | `GF_ADMIN_PASSWORD` | Grafana 管理员密码；必须在 `.env` 中显式设置 | 无默认值 |
 | `GF_ALLOW_SIGN_UP` | 允许用户注册 | `false` |
 | `GF_DASHBOARDS_MIN_REFRESH_INTERVAL` | Grafana 看板最小刷新间隔，生产默认防止低于 30s | `30s` |

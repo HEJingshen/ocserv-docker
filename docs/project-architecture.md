@@ -306,7 +306,7 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 镜像 | `grafana/grafana:13.0.1` |
+| 镜像 | `grafana/grafana:13.0.1-security-01` |
 | 子路径 | `GF_SERVER_SERVE_FROM_SUB_PATH=true` + `GF_SERVER_ROOT_URL=https://your.domain.com:8443/grafana/` |
 | 数据存储 | `grafana_data` Docker 卷 |
 | 自动配置 | 通过 `monitoring/datasources/` 和 `monitoring/dashboards/` 自动注入数据源和看板 |
@@ -323,7 +323,7 @@ healthcheck:
 
 | 项目 | 说明 |
 |:--|:--|
-| 镜像 | `nginx:1.28.3-alpine3.23-slim` |
+| 镜像 | `nginx:1.30.2-alpine3.23-slim` |
 | 端口 | `${MONITORING_PORT:-8443}`（HTTPS） |
 | TLS | Let's Encrypt 证书，挂载 `/etc/letsencrypt/live/${DOMAIN}` 下的证书文件 |
 | 子路径路由 | `/grafana/` → Grafana |

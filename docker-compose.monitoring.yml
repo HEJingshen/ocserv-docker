@@ -36,7 +36,7 @@ services:
       - monitor-net
 
   grafana:
-    image: ${GRAFANA_IMAGE:-grafana/grafana:13.0.1}
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.0.1-security-01}
     container_name: grafana
     restart: unless-stopped
     mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
@@ -66,7 +66,7 @@ services:
         condition: service_started
 
   nginx:
-    image: ${NGINX_IMAGE:-nginx:1.28.3-alpine3.23-slim}
+    image: ${NGINX_IMAGE:-nginx:1.30.2-alpine3.23-slim}
     container_name: nginx-proxy
     restart: unless-stopped
     ports:
