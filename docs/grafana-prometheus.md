@@ -108,6 +108,15 @@ docker exec nginx-proxy nginx -T | grep -A5 "location /grafana"
 docker exec grafana wget -qO- http://prometheus:9090/prometheus/api/v1/status/config
 ```
 
+如果 Prometheus 能访问 `http://ocserv:9100/metrics`，但 `ocserv_up` 一直为 `0`，说明故障在 exporter 到 ocserv socket 之间。先在 exporter 容器内确认运行用户和 `occtl` 输出：
+
+```bash
+docker exec ocserv-exporter id
+docker exec ocserv-exporter occtl -s /run/ocserv/occtl.socket -j show status
+```
+
+`recvmsg: Connection reset by peer` 或 `Status: offline` 通常表示 exporter 没有按监控 Compose 以 root 运行。确认 `docker-compose.monitoring.yml` 中 `ocserv-exporter` 保留 `user: "0:0"`，然后重建 exporter。
+
 ### Grafana 偶发 502 排查
 
 `/grafana/` 偶发 502 通常表示 Nginx 当时无法正常连接 Grafana 上游。优先确认 Grafana 是否因内存限制被 OOM kill：

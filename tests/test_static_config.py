@@ -111,11 +111,15 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn("OCSERV_ENABLE_COMPRESSION", self.render_script)
 
     def test_occtl_socket_uses_dedicated_runtime_volume(self):
+        exporter_service = self.monitoring_compose.split("\n  prometheus:", 1)[0]
+
         self.assertIn("occtl-socket-file = /run/ocserv/occtl.socket", self.ocserv_template)
         self.assertIn("ocserv-socket:/run/ocserv", self.compose)
         self.assertIn("ocserv-socket:/run/ocserv:ro", self.monitoring_compose)
         self.assertIn("OCSERV_SOCKET=/run/ocserv/occtl.socket", self.monitoring_compose)
         self.assertIn('OCSERV_SOCKET=/run/ocserv/occtl.socket', self.exporter_dockerfile)
+        self.assertIn('user: "0:0"', exporter_service)
+        self.assertIn("occtl socket queries require root peer credentials", exporter_service)
         self.assertIn("/run/ocserv/occtl.socket", self.docs_readme)
         self.assertIn("/run/ocserv/occtl.socket", self.docs_memory_issue)
         self.assertNotIn("ocserv-socket:/var/run", self.compose)

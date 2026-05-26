@@ -263,7 +263,7 @@ healthcheck:
 |:--|:--|
 | 基础镜像 | 官方 `alpine:3.23.4`；CI 按平台传入 digest |
 | 构建方式 | 多阶段构建，builder 从 ocserv 源码只编译 `occtl`，runtime 复制该二进制 |
-| 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`，以 `nobody` 非 root 用户执行 `python3 -m ocserv_exporter` |
+| 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`；镜像默认用户为 `nobody`，监控 Compose 显式设置 `user: "0:0"`，因为 Docker 部署中 `occtl` 查询 socket 需要 root peer credentials |
 | 数据采集 | 通过 `occtl -j show status` 和 `occtl -j show users`（JSON 格式）调用 ocserv 的 Unix socket 接口 |
 | 暴露端口 | `9100` |
 | 采集周期 | 镜像和监控编排默认 10 秒；生产均衡低压配置 |

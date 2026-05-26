@@ -404,7 +404,7 @@ docker buildx build \
 
 GitHub Actions 中会显式设置 `APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine`，并为 amd64/arm64 分别传入官方 Alpine digest；发布构建继续使用 Alpine 官方源。
 
-Dockerfile 使用 BuildKit cache mount 加速 `apk` 安装，最终镜像层不保留 apk 索引缓存。`exporter` 镜像使用 Alpine 内置 `nobody` 非 root 用户运行，以匹配默认 `run-as-user = nobody` 生成的 `occtl.socket` 所有者；主 `ocserv` 镜像因需要 s6 init、`NET_ADMIN`、TUN 设备和 iptables，仍保留 root 运行。
+Dockerfile 使用 BuildKit cache mount 加速 `apk` 安装，最终镜像层不保留 apk 索引缓存。`exporter` 镜像默认使用 Alpine 内置 `nobody` 非 root 用户；本项目的监控 Compose 会显式以 root 运行 exporter，因为 Docker 部署中 `occtl` 查询 socket 需要 root peer credentials。exporter 只挂载只读的 ocserv runtime socket，不挂载证书、认证文件或 CA 私钥；主 `ocserv` 镜像因需要 s6 init、`NET_ADMIN`、TUN 设备和 iptables，也保留 root 运行。
 
 Alpine `slim` 会禁用 utmp 编译能力，渲染配置时需要同步关闭 `use-utmp`：
 
@@ -694,12 +694,16 @@ sudo ls -ld "/etc/letsencrypt/live/${DOMAIN}"
 docker logs ocserv-exporter
 docker exec ocserv ls -la /run/ocserv/occtl.socket
 docker exec ocserv occtl -s /run/ocserv/occtl.socket -j show status
+docker exec ocserv-exporter id
+docker exec ocserv-exporter occtl -s /run/ocserv/occtl.socket -j show status
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prometheus wget -qO- http://ocserv:9100/metrics
 ```
 
 | 原因 | 解决 |
 |:--|:--|
 | socket 不存在 | 重启 ocserv 容器 |
+| `/metrics` 可访问但 `ocserv_up=0` | 在 exporter 容器中执行 `occtl`；确认 `docker-compose.monitoring.yml` 中 `ocserv-exporter` 配置了 `user: "0:0"` 并重建 exporter |
+| exporter 中 `occtl` 返回 `recvmsg: Connection reset by peer` 或 `Status: offline` | 通常是 exporter 未以 root 运行；执行 `docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --force-recreate ocserv-exporter` |
 | 版本不匹配 | 确保 exporter 与 ocserv 版本一致 |
 | Prometheus 无法访问指标 | exporter 使用 `network_mode: service:ocserv` 与 ocserv 共用网络命名空间，因此 Prometheus 目标是 `ocserv:9100`，不需要也不应额外映射 exporter 端口 |
 
