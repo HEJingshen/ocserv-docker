@@ -90,8 +90,8 @@ docker stats --no-stream ocserv
 再查看 ocserv 当前状态和用户连接：
 
 ```bash
-docker exec ocserv occtl -s /var/run/occtl.socket show status
-docker exec ocserv occtl -s /var/run/occtl.socket show users
+docker exec ocserv occtl -s /run/ocserv/occtl.socket show status
+docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
 ```
 
 如需定位到具体进程，观察 `VmRSS`、`VmHWM` 和 `RssAnon`：
@@ -130,4 +130,3 @@ python3 -m unittest tests/test_static_config.py
 关闭 ocserv worker 隔离会减少 ocserv 内部对 worker 进程的 syscall 约束，理论上降低了一层应用内部防护。但在本项目的 Docker 部署模型中，容器运行时仍保留默认 seccomp profile，并通过 namespace、cgroup、capabilities 和只读配置挂载限制容器边界。
 
 当前取舍是生产稳定性优先：避免 Docker 内嵌套 namespace/seccomp 组合引发内存增长，同时保留 Docker 运行时提供的隔离能力。除非明确需要在非 Docker 环境中验证 ocserv worker 隔离，否则不建议在本项目默认容器部署中重新启用 `isolate-workers`。
-

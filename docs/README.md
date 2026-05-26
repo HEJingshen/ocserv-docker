@@ -692,8 +692,8 @@ sudo ls -ld "/etc/letsencrypt/live/${DOMAIN}"
 
 ```bash
 docker logs ocserv-exporter
-docker exec ocserv ls -la /var/run/occtl.socket
-docker exec ocserv occtl -s /var/run/occtl.socket -j show status
+docker exec ocserv ls -la /run/ocserv/occtl.socket
+docker exec ocserv occtl -s /run/ocserv/occtl.socket -j show status
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prometheus wget -qO- http://ocserv:9100/metrics
 ```
 
@@ -711,8 +711,8 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prome
 
 ```bash
 docker stats --no-stream ocserv ocserv-exporter prometheus grafana nginx-proxy
-docker exec ocserv occtl -s /var/run/occtl.socket show status
-docker exec ocserv occtl -s /var/run/occtl.socket show users
+docker exec ocserv occtl -s /run/ocserv/occtl.socket show status
+docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
 docker exec ocserv sh -c '
 for p in /proc/[0-9]*; do
   comm=$(cat "$p/comm" 2>/dev/null || true)
@@ -813,7 +813,7 @@ docker exec ocserv occtl reload        # 不重启容器重载配置
 | `ocserv_build_info` | 低中 | 版本定位有用，维护成本低 |
 | `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | 低中 | 当前明细诊断有价值，仅 Sessions 看板使用 |
 
-**环境变量**：`OCSERV_SOCKET`（默认 `/var/run/occtl.socket`）、`METRICS_PORT`（默认 `9100`）、`EXPORTER_INTERVAL_SECONDS`（镜像和监控编排默认 `10`，最小 `5`）、`OCCTL_TIMEOUT_SECONDS`（镜像默认 `5`，监控编排默认 `2`）、`EXPORTER_ENABLE_SESSION_DETAIL_METRICS`（默认 `false`）。
+**环境变量**：`OCSERV_SOCKET`（默认 `/run/ocserv/occtl.socket`）、`METRICS_PORT`（默认 `9100`）、`EXPORTER_INTERVAL_SECONDS`（镜像和监控编排默认 `10`，最小 `5`）、`OCCTL_TIMEOUT_SECONDS`（镜像默认 `5`，监控编排默认 `2`）、`EXPORTER_ENABLE_SESSION_DETAIL_METRICS`（默认 `false`）。
 
 ### 7.3 Nginx 反向代理
 

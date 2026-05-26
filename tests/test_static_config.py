@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -18,6 +21,8 @@ class StaticConfigTest(unittest.TestCase):
         cls.workflow = (ROOT_DIR / ".github" / "workflows" / "docker-build.yml").read_text(encoding="utf-8")
         cls.compose = (ROOT_DIR / "docker-compose.yml").read_text(encoding="utf-8")
         cls.monitoring_compose = (ROOT_DIR / "docker-compose.monitoring.yml").read_text(encoding="utf-8")
+        cls.docs_readme = (ROOT_DIR / "docs" / "README.md").read_text(encoding="utf-8")
+        cls.docs_memory_issue = (ROOT_DIR / "docs" / "ocserv-docker-memory-issue.md").read_text(encoding="utf-8")
         cls.cert_auth_script = (ROOT_DIR / "scripts" / "ocserv-cert-auth.sh").read_text(encoding="utf-8")
         cls.render_script = (ROOT_DIR / "scripts" / "render-ocserv-conf.sh").read_text(encoding="utf-8")
         cls.fail2ban_setup = (ROOT_DIR / "scripts" / "setup-fail2ban.sh").read_text(encoding="utf-8")
@@ -111,8 +116,38 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn("ocserv-socket:/run/ocserv:ro", self.monitoring_compose)
         self.assertIn("OCSERV_SOCKET=/run/ocserv/occtl.socket", self.monitoring_compose)
         self.assertIn('OCSERV_SOCKET=/run/ocserv/occtl.socket', self.exporter_dockerfile)
+        self.assertIn("/run/ocserv/occtl.socket", self.docs_readme)
+        self.assertIn("/run/ocserv/occtl.socket", self.docs_memory_issue)
         self.assertNotIn("ocserv-socket:/var/run", self.compose)
         self.assertNotIn("ocserv-socket:/var/run:ro", self.monitoring_compose)
+        self.assertNotIn("/var/run/occtl.socket", self.docs_readme)
+        self.assertNotIn("/var/run/occtl.socket", self.docs_memory_issue)
+
+    def test_rendered_ocserv_config_uses_dedicated_runtime_volume(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = Path(tmpdir) / "ocserv.conf"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "DOMAIN": "vpn.example.com",
+                    "ENV_FILE": str(ROOT_DIR / ".env.example"),
+                    "OCSERV_CONF_OUTPUT": str(output_file),
+                }
+            )
+
+            subprocess.run(
+                [str(ROOT_DIR / "scripts" / "render-ocserv-conf.sh")],
+                cwd=ROOT_DIR,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            rendered_config = output_file.read_text(encoding="utf-8")
+
+        self.assertIn("occtl-socket-file = /run/ocserv/occtl.socket", rendered_config)
+        self.assertNotIn("occtl-socket-file = /var/run/occtl.socket", rendered_config)
 
     def test_auth_docker_build_context_and_ci_are_validated(self):
         self.assertIn("!scripts/ocserv-cert-auth.sh", self.dockerignore)
