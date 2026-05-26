@@ -2,7 +2,7 @@
 # ============================================================
 # 生产级 Docker 一键安装与优化脚本 (v3.0)
 # 特性: 严格模式 / 智能配置比对 / 并发探测 / 多云适配 / 幂等执行 / CI 友好
-# 兼容: Ubuntu/Debian/CentOS/Rocky/Alma/Fedora/openEuler/HCE/Alinux/TencentOS/OpenCloudOS
+# 兼容: Ubuntu/Debian/CentOS/Rocky/Alma/Fedora/openEuler/HCE/Alinux/TencentOS/OpenCloudOS/OracleLinux
 # ============================================================
 set -euo pipefail
 
@@ -14,7 +14,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_step()  { echo -e "${BLUE}[STEP]${NC} $*" >&2; }
 
 # --- 全局配置 ---
-readonly SUPPORTED_DISTROS="ubuntu|debian|centos|fedora|rocky|almalinux|tencentos|opencloudos|alinux|hce|openeuler"
+readonly SUPPORTED_DISTROS="ubuntu|debian|centos|fedora|rocky|almalinux|tencentos|opencloudos|alinux|hce|openeuler|ol"
 declare -A MIRRORS=(
   [aliyun]="mirrors.cloud.aliyuncs.com"
   [tencent]="mirrors.cloud.tencent.com"
@@ -158,7 +158,7 @@ init_os_vars() {
   [[ "$distro" =~ ^($SUPPORTED_DISTROS)$ ]] || { log_error "不支持的发行版: $distro"; return 1; }
 
   OS_TYPE="$distro"
-  if [[ "$distro" =~ ^(opencloudos|centos|tencentos|openeuler|alinux|rocky|almalinux|fedora)$ && -n "${VERSION_ID:-}" ]]; then
+  if [[ "$distro" =~ ^(opencloudos|centos|tencentos|openeuler|alinux|rocky|almalinux|fedora|ol)$ && -n "${VERSION_ID:-}" ]]; then
     OS_VERSION="${VERSION_ID%%.*}"
   fi
   log_info "🖥️  检测到系统: $OS_TYPE ${OS_VERSION:-}"
@@ -399,6 +399,23 @@ EOF
 
       $pkg_mgr install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
       $pkg_mgr install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+      ;;
+    ol)
+      if ! command -v dnf &>/dev/null; then
+        log_error "❌ Oracle Linux 需要 dnf，但未找到"
+        return 1
+      fi
+      dnf install -y dnf-plugins-core >/dev/null 2>&1 || true
+      local docker_repo="/etc/yum.repos.d/docker-ce.repo"
+      if [[ -f "$docker_repo" ]] && grep -q "docker-ce" "$docker_repo" 2>/dev/null; then
+        log_info "📦 Docker repo 已存在，跳过创建"
+      else
+        [[ -f "$docker_repo" ]] && cp -f "$docker_repo" "${docker_repo}.bak.$(date +%s)" 2>/dev/null || true
+        dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo >/dev/null 2>&1 || \
+          { log_error "❌ 添加 Docker 仓库失败"; return 1; }
+      fi
+      dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
+      dnf install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
       ;;
     tencentos)
       if command -v docker &>/dev/null; then
