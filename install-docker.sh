@@ -623,9 +623,10 @@ detect_cloud() {
     "http://169.254.169.254/metadata/instance?api-version=2021-02-01|Azure"
     "http://169.254.169.254/computeMetadata/v1/instance/id|GCP"
     "http://169.254.169.254/openstack/latest/meta_data.json|Huawei"
+    "http://169.254.169.254/opc/v1/instance/|OracleCloud"
   )
 
-  local max_jobs=6 job_count=0
+  local max_jobs=7 job_count=0
   for ep in "${endpoints[@]}"; do
     IFS='|' read -r url cloud <<< "$ep"
     (
@@ -642,6 +643,7 @@ detect_cloud() {
         Azure)   [[ "$resp" == *azure* ]] && echo "$cloud" > "$result_file" ;;
         GCP)     [[ "$resp" =~ ^[0-9]+$ ]] && echo "$cloud" > "$result_file" ;;
         Huawei)  [[ "$resp" == *huawei* ]] && echo "$cloud" > "$result_file" ;;
+        OracleCloud) [[ "$resp" == *oracle* || "$resp" == *availabilityDomain* || "$resp" == *compartmentId* ]] && echo "$cloud" > "$result_file" ;;
       esac
     ) &
     # 🔧 修复: 同 probe_latency，((job_count++)) 在 job_count=0 时触发 set -e 退出
@@ -674,6 +676,7 @@ detect_cloud() {
     *openstack*|*huawei*)  log_info "✅ DMI 识别: 华为云"; return 0 ;;
     *microsoft*|*azure*)   log_info "✅ DMI 识别: Azure"; return 0 ;;
     *google*|*gce*)        log_info "✅ DMI 识别: GCP"; return 0 ;;
+    *oracle*)              log_info "✅ DMI 识别: Oracle Cloud"; return 0 ;;
   esac
   log_warn "⚠️  未识别到主流云厂商 (可能为物理机/本地VM/容器)"
 }
