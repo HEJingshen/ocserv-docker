@@ -9,6 +9,50 @@ fail() {
     exit 1
 }
 
+normalize_serial() {
+    serial=${1-}
+    serial=$(printf '%s' "$serial" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]:')
+    case "$serial" in
+        0X*) serial=${serial#0X} ;;
+    esac
+    serial=$(printf '%s' "$serial" | sed 's/^0*//')
+    [ -n "$serial" ] || serial=0
+    printf '%s\n' "$serial"
+}
+
+crl_serials() {
+    crl_file=$1
+    openssl crl -in "$crl_file" -noout -text |
+        awk '/Revoked Certificates:/,/Signature Algorithm:/ {
+            if ($0 ~ /Serial Number:/) {
+                print $NF
+            }
+        }' |
+        while IFS= read -r serial; do
+            normalize_serial "$serial"
+        done
+}
+
+crl_contains_serial() {
+    crl_file=$1
+    serial=$2
+    target=$(normalize_serial "$serial")
+    parsed=$(crl_serials "$crl_file" || true)
+    printf '%s\n' "$parsed" | grep -qx "$target"
+}
+
+assert_crl_contains_serial() {
+    crl_file=$1
+    serial=$2
+    message=$3
+    target=$(normalize_serial "$serial")
+    parsed=$(crl_serials "$crl_file" || true)
+    if ! printf '%s\n' "$parsed" | grep -qx "$target"; then
+        parsed_list=$(printf '%s' "$parsed" | tr '\n' ',' | sed 's/,$//')
+        fail "$message (target serial=$target, parsed serials=${parsed_list:-<empty>})"
+    fi
+}
+
 command -v certtool >/dev/null 2>&1 || {
     printf 'certtool not found; skipping ocserv certificate auth integration test\n'
     exit 0
@@ -113,12 +157,12 @@ run_tool manage >/dev/null
 
 status_output=$(run_tool status 2>&1)
 echo "$status_output" | grep -q '^alice[[:space:]]*valid' || fail "alice status is not valid"
-bob_serial=$(openssl x509 -in "${ISSUED_CERT_DIR}/bob.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
+bob_serial=$(normalize_serial "$(openssl x509 -in "${ISSUED_CERT_DIR}/bob.pem" -noout -serial | sed 's/^serial=//')")
 if run_tool reissue bob >/dev/null 2>&1; then
     fail "reissue unexpectedly succeeded for non-revoked bob"
 fi
 [ -s "${ISSUED_CERT_DIR}/bob.pem" ] || fail "bob issued certificate was removed by failed reissue"
-bob_serial_after=$(openssl x509 -in "${ISSUED_CERT_DIR}/bob.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
+bob_serial_after=$(normalize_serial "$(openssl x509 -in "${ISSUED_CERT_DIR}/bob.pem" -noout -serial | sed 's/^serial=//')")
 [ "${bob_serial}" = "${bob_serial_after}" ] || fail "failed bob reissue changed certificate serial"
 
 mv "${ISSUED_CERT_DIR}/bob.pem" "${USER_CERT_DIR}/bob/bob-cert.pem"
@@ -137,13 +181,13 @@ echo "$status_output" | grep -q '^bob[[:space:]]*artifact-missing' || fail "bob 
 run_tool manage >/dev/null
 [ ! -e "${USER_CERT_DIR}/bob/ios-bob.p12" ] || fail "manage unexpectedly regenerated missing bob p12 artifact"
 
-old_serial=$(openssl x509 -in "${ISSUED_CERT_DIR}/alice.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
+old_serial=$(normalize_serial "$(openssl x509 -in "${ISSUED_CERT_DIR}/alice.pem" -noout -serial | sed 's/^serial=//')")
 if printf 'wrong-user\n' | run_tool revoke alice >/dev/null 2>&1; then
     fail "revoke unexpectedly succeeded with incorrect confirmation"
 fi
 [ -s "${ISSUED_CERT_DIR}/alice.pem" ] || fail "alice issued certificate was removed after cancelled revoke"
 [ ! -e "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was written after cancelled revoke"
-if openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${old_serial}"; then
+if crl_contains_serial "${CA_PUBLIC_DIR}/crl.pem" "${old_serial}"; then
     fail "cancelled revoke added alice serial to CRL"
 fi
 
@@ -152,7 +196,7 @@ printf 'bob\n' | run_tool revoke bob >/dev/null
 [ ! -e "${USER_CERT_DIR}/bob/bob.p12" ] || fail "bob p12 was not removed after confirmed revoke"
 [ -s "${CA_PRIVATE_DIR}/disabled-users/bob" ] || fail "bob disabled marker was not written"
 [ -s "${REVOKED_METADATA_DIR}/bob-${bob_serial}.env" ] || fail "bob revoked metadata was not written"
-openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${bob_serial}" || fail "bob serial is not listed in CRL after confirmed revoke"
+assert_crl_contains_serial "${CA_PUBLIC_DIR}/crl.pem" "${bob_serial}" "bob serial is not listed in CRL after confirmed revoke"
 
 run_tool revoke --yes alice >/dev/null
 
@@ -161,7 +205,7 @@ run_tool revoke --yes alice >/dev/null
 [ -s "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was not written"
 [ -s "${REVOKED_METADATA_DIR}/alice-${old_serial}.env" ] || fail "alice revoked metadata was not written"
 openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -q 'Revoked Certificates' || fail "CRL does not contain revoked certificates"
-openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${old_serial}" || fail "old serial is not listed in CRL"
+assert_crl_contains_serial "${CA_PUBLIC_DIR}/crl.pem" "${old_serial}" "old serial is not listed in CRL"
 
 status_output=$(run_tool status 2>&1)
 echo "$status_output" | grep -q '^alice[[:space:]]*revoked' || fail "alice status is not revoked"
@@ -232,8 +276,8 @@ run_tool reissue alice >/dev/null
 [ ! -e "${USER_CERT_DIR}/alice/alice-key.pem" ] || fail "alice private key pem was left in user directory after reissue"
 [ -s "${ISSUED_CERT_DIR}/alice.pem" ] || fail "alice issued certificate was not reissued"
 [ ! -e "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was not cleared by reissue"
-new_serial=$(openssl x509 -in "${ISSUED_CERT_DIR}/alice.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
+new_serial=$(normalize_serial "$(openssl x509 -in "${ISSUED_CERT_DIR}/alice.pem" -noout -serial | sed 's/^serial=//')")
 [ "${old_serial}" != "${new_serial}" ] || fail "reissue reused old certificate serial"
-openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${old_serial}" || fail "old serial disappeared from CRL after reissue"
+assert_crl_contains_serial "${CA_PUBLIC_DIR}/crl.pem" "${old_serial}" "old serial disappeared from CRL after reissue"
 
 printf 'ocserv certificate auth tests passed\n'

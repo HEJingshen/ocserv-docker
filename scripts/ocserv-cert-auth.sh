@@ -96,6 +96,15 @@ p12_uses_empty_password() {
     [[ -z "${P12_EXPORT_PASSWORD}" && "${ALLOW_EMPTY_P12_PASSWORD}" == "true" ]]
 }
 
+normalize_serial() {
+    local serial="${1:-}"
+    serial=$(printf '%s' "${serial}" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]:')
+    serial=${serial#0X}
+    serial=$(printf '%s' "${serial}" | sed 's/^0*//')
+    [[ -n "${serial}" ]] || serial="0"
+    printf '%s\n' "${serial}"
+}
+
 prepare_dirs() {
     mkdir -p \
         "${CA_PUBLIC_DIR}" \
@@ -200,7 +209,10 @@ cert_days_left() {
 }
 
 cert_serial() {
-    openssl x509 -in "$1" -noout -serial 2>/dev/null | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]'
+    local raw_serial
+    raw_serial=$(openssl x509 -in "$1" -noout -serial 2>/dev/null) || return 1
+    raw_serial=${raw_serial#serial=}
+    normalize_serial "${raw_serial}"
 }
 
 is_cert_revoked() {
@@ -215,7 +227,9 @@ is_cert_revoked() {
             if ($0 ~ /Serial Number:/) {
                 print $NF
             }
-        }' | tr -d ' :' | tr '[:lower:]' '[:upper:]')
+        }' | while IFS= read -r revoked_serial; do
+            normalize_serial "${revoked_serial}"
+        done)
 
     grep -qx "${serial}" <<< "${revoked_serials}"
 }
