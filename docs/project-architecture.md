@@ -448,41 +448,47 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 | 事件 | 行为 |
 |:--|:--|
-| push 到 `main`/`master` | 构建 + 推送 |
-| push `v*` 标签 | 构建 + 推送 |
-| pull request | 仅构建（不推送） |
+| `push` 到 `main`/`master` | 校验 + 构建 + 推送 |
+| `pull_request` 到 `main`/`master` | 校验 + 构建（不推送） |
+| `workflow_dispatch` | 手动执行校验 + 构建；仅当当前 ref 是 `main`/`master` 时推送 |
 
 ### 构建流程
 
 ```
-1. Checkout 代码
+1. validate job
+       ├─ checkout
+       ├─ Python 单元测试
+       ├─ shell 语法检查
+       ├─ hadolint
+       ├─ auth/Dockerfile 构建校验
+       └─ docker compose 配置展开校验
        │
-2. 设置 QEMU → 模拟 arm64 架构
+2. build-images matrix job（2 x 2 并行）
+       ├─ image_type: ocserv, exporter
+       ├─ platform: amd64, arm64
+       ├─ checkout + 下载 ocserv 源码
+       ├─ 仅 arm64 初始化 QEMU
+       ├─ Buildx 单平台构建
+       ├─ 缓存: GitHub Actions 缓存（按 image/platform 分 scope）
+       ├─ 标签: `:<version>-amd64` / `:<version>-arm64`
+       └─ 仅在 `main`/`master` 非 PR 场景推送单架构镜像并生成 SBOM/provenance
        │
-3. 设置 Buildx → 多架构构建引擎
+3. merge-manifests matrix job
+       ├─ image_type: ocserv, exporter
+       ├─ 合并 `:<version>-amd64` + `:<version>-arm64`
+       └─ 发布多架构 `:<version>` 和 `:latest`
        │
-4. 下载 ocserv 源码
-       │
-5. 登录 Docker Hub（非 PR 时）
-       │
-6. 构建 + 推送
-       ├─ 分平台构建: linux/amd64, linux/arm64
-       ├─ 缓存: GitHub Actions 缓存（gha）
-       ├─ 参数: OCSERV_VERSION, ALPINE_IMAGE
-       └─ 产物: digest-only image + SBOM/provenance attestation
-       │
-7. 创建 multi-arch manifest
-       ├─ 先创建版本标签: kingsonho/ocserv:1.4.2, kingsonho/ocserv-exporter:1.4.2
-       └─ 再从版本标签创建 latest 别名: latest, ocserv-exporter:latest
+4. concurrency 控制
+       └─ 同一 workflow + ref 只保留最新一次运行，自动取消旧任务
 ```
 
 ### 标签策略
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| push main/master | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `ocserv-exporter:latest` 指向对应版本标签 |
-| push v* 标签 | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `ocserv-exporter:latest` 指向对应版本标签 |
-| PR | 仅构建测试，不推送镜像 |
+| `push` 到 `main`/`master` | 先发布 `kingsonho/ocserv:1.4.2-amd64`、`kingsonho/ocserv:1.4.2-arm64`、`kingsonho/ocserv-exporter:1.4.2-amd64`、`kingsonho/ocserv-exporter:1.4.2-arm64`；再合并生成 `:1.4.2` 与 `:latest` |
+| `workflow_dispatch` on `main`/`master` | 与 `push main/master` 相同 |
+| `pull_request` 或非主分支手动执行 | 仅构建测试，不推送镜像 |
 
 ---
 

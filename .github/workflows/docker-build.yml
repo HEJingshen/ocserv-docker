@@ -25,6 +25,13 @@ on:
       - 'scripts/**'
       - 'tests/**'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: docker.io
   OCSERV_IMAGE_NAME: kingsonho/ocserv
@@ -38,6 +45,7 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -83,9 +91,16 @@ jobs:
           docker compose config >/tmp/docker-compose.yml
           docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config >/tmp/docker-compose.monitoring.yml
 
-  build-ocserv:
+  build-images:
     needs: validate
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    name: Build ${{ matrix.image_type }} (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        image_type: [ocserv, exporter]
+        platform: [amd64, arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -98,13 +113,14 @@ jobs:
           echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz" | sha256sum -c -
 
       - name: Set up QEMU
+        if: matrix.platform == 'arm64'
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Login to Registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -114,135 +130,49 @@ jobs:
         id: date
         run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
-      - name: Build ocserv amd64
-        id: ocserv_amd64
+      - name: Build and optionally push single-platform image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          file: ${{ matrix.image_type == 'ocserv' && 'Dockerfile' || 'exporter/Dockerfile' }}
+          platforms: linux/${{ matrix.platform }}
+          tags: ${{ env.REGISTRY }}/${{ matrix.image_type == 'ocserv' && env.OCSERV_IMAGE_NAME || env.EXPORTER_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}-${{ matrix.platform }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          cache-from: type=gha,scope=${{ matrix.image_type }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image_type }}-${{ matrix.platform }}
           build-args: |
             OCSERV_VERSION=${{ env.OCSERV_VERSION }}
-            ALPINE_IMAGE=${{ env.ALPINE_IMAGE_AMD64 }}
+            ALPINE_IMAGE=${{ matrix.platform == 'amd64' && env.ALPINE_IMAGE_AMD64 || env.ALPINE_IMAGE_ARM64 }}
             ALPINE_VERSION=${{ env.ALPINE_VERSION }}
             APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
-          sbom: ${{ github.event_name != 'pull_request' }}
-          provenance: ${{ github.event_name != 'pull_request' }}
+          sbom: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          provenance: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
 
-      - name: Build ocserv arm64
-        id: ocserv_arm64
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/arm64
-          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
-            ALPINE_IMAGE=${{ env.ALPINE_IMAGE_ARM64 }}
-            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
-            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
-          sbom: ${{ github.event_name != 'pull_request' }}
-          provenance: ${{ github.event_name != 'pull_request' }}
-
-      - name: Push ocserv manifests
-        if: github.event_name != 'pull_request'
-        run: |
-          docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }} \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_amd64.outputs.digest }} \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_arm64.outputs.digest }}
-          docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}
-
-  build-exporter:
-    needs: validate
+  merge-manifests:
+    needs: build-images
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    name: Merge manifests (${{ matrix.image_type }})
+    strategy:
+      matrix:
+        image_type: [ocserv, exporter]
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Download source files
-        run: |
-          mkdir -p src
-          curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
-            https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
-          echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz" | sha256sum -c -
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Login to Registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set build date
-        id: date
-        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
-
-      - name: Build exporter amd64
-        id: exporter_amd64
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: .
-          file: exporter/Dockerfile
-          platforms: linux/amd64
-          tags: ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
-            ALPINE_IMAGE=${{ env.ALPINE_IMAGE_AMD64 }}
-            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
-            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
-          sbom: ${{ github.event_name != 'pull_request' }}
-          provenance: ${{ github.event_name != 'pull_request' }}
-
-      - name: Build exporter arm64
-        id: exporter_arm64
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: .
-          file: exporter/Dockerfile
-          platforms: linux/arm64
-          tags: ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
-            ALPINE_IMAGE=${{ env.ALPINE_IMAGE_ARM64 }}
-            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
-            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
-          sbom: ${{ github.event_name != 'pull_request' }}
-          provenance: ${{ github.event_name != 'pull_request' }}
-
-      - name: Push exporter manifest
-        if: github.event_name != 'pull_request'
+      - name: Publish multi-arch manifests
         run: |
+          IMAGE_NAME="${{ matrix.image_type == 'ocserv' && env.OCSERV_IMAGE_NAME || env.EXPORTER_IMAGE_NAME }}"
           docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:${{ env.OCSERV_VERSION }} \
-            ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}@${{ steps.exporter_amd64.outputs.digest }} \
-            ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}@${{ steps.exporter_arm64.outputs.digest }}
-          docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.EXPORTER_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}
+            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ env.OCSERV_VERSION }} \
+            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:latest \
+            ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ env.OCSERV_VERSION }}-amd64 \
+            ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ env.OCSERV_VERSION }}-arm64

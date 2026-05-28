@@ -25,4 +25,4 @@ rg -n '@(master|main|latest|v[0-9]+)(\s|$)' .github/workflows
 
 最后一条命令不应返回任何匹配结果。
 
-对于 pull request，还需要确认两个镜像构建 workflow 都通过，Docker metadata 输出的 tag 没有意外变化，build 和 push 参数保持不变，并且 Trivy 继续保持 `exit-code: '0'`，除非发布策略被有意调整。
+对于 pull request，还需要确认 `docker-build.yml` 的 `validate` job 和 `build-images` 4 个矩阵任务全部通过；如果调整了发布逻辑，还要额外确认 `merge-manifests` 仍然只在 `main`/`master` 的非 PR 场景执行，并继续生成 `:<version>` 与 `:latest` 两类多架构标签。
