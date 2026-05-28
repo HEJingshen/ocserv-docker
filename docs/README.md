@@ -3,7 +3,9 @@
 [![Build & Pull](https://github.com/GentleKingson/ocserv-docker/actions/workflows/docker-build.yml/badge.svg)](https://github.com/GentleKingson/ocserv-docker/actions/workflows/docker-build.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
-基于 Docker 的 OpenConnect Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **s6-overlay 进程管理**，可选 **Prometheus + Grafana 监控栈**。
+基于 Docker 的 OpenConnect Server（ocserv），支持 **amd64 / arm64**，可选 **Prometheus + Grafana** 监控栈。
+
+这份文档只负责**部署命令指导**。变量细节、监控面板说明、实现原理和专项问题，请跳转到对应专题文档。
 
 ---
 
@@ -28,8 +30,8 @@
 | 操作系统 | Linux（Debian / Ubuntu / CentOS / Rocky / Alma 等） |
 | CPU 架构 | x86_64 或 ARM64 |
 | 内核模块 | `tun`（`/dev/net/tun` 存在） |
-| 内存 | 仅主服务 ≥ 64MB；主服务 + 监控 ≥ 512MB |
-| 端口 | TCP 443 + UDP 443（ocserv）；8443（监控，可选） |
+| 内存 | 仅主服务建议 ≥ 64MB；带监控建议 ≥ 512MB |
+| 端口 | `443/tcp`、`443/udp`；监控默认额外使用 `8443/tcp` |
 
 ### 1.2 克隆项目
 
@@ -42,13 +44,13 @@ cd ocserv-docker
 
 ### 1.3 安装 Docker
 
+宿主机未安装 Docker 时，直接执行：
+
 ```bash
 sudo bash install-docker.sh
 ```
 
-脚本自动检测发行版、选择最快镜像源、安装 Docker CE + Compose。
-
-如果还没有克隆项目，也可以先远程下载安装脚本后执行：
+如果还没有克隆仓库，也可以先远程下载安装脚本：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GentleKingson/ocserv-docker/main/install-docker.sh -o install-docker.sh
@@ -57,49 +59,21 @@ sudo bash install-docker.sh
 
 ### 1.4 准备 SSL 证书
 
-生产环境推荐使用 Let's Encrypt。申请前请确认：
-
-- 域名 `your.domain.com` 的 A/AAAA 记录已指向当前服务器
-- 服务器 TCP 80 端口已放通
-- 申请证书时没有其他服务占用 80 端口；`certbot --standalone` 会临时监听 80 端口
+生产环境推荐使用 Let's Encrypt。申请证书前确认域名已解析到当前服务器，且 TCP 80 端口可用。
 
 ```bash
 sudo apt install certbot
 sudo certbot certonly --standalone -d your.domain.com
 ```
 
-证书路径：`/etc/letsencrypt/live/your.domain.com/fullchain.pem` 和 `privkey.pem`
+默认证书路径：
 
-CentOS / Rocky / Alma 等发行版请使用对应包管理器安装 `certbot`。
-
-**自签名证书（仅测试）**
-
-默认生产部署会从 `/etc/letsencrypt/live/${DOMAIN}` 挂载证书。如果只做本地或内网测试，可以在仓库内生成自签证书，并用 `docker-compose.override.yml` 覆盖 ocserv 的证书挂载：
-
-```bash
-DOMAIN=your.domain.com
-mkdir -p "config/certs/${DOMAIN}"
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout "config/certs/${DOMAIN}/privkey.pem" \
-  -out "config/certs/${DOMAIN}/fullchain.pem" \
-  -subj "/CN=${DOMAIN}"
+```text
+/etc/letsencrypt/live/your.domain.com/fullchain.pem
+/etc/letsencrypt/live/your.domain.com/privkey.pem
 ```
 
-创建 `docker-compose.override.yml`：
-
-```yaml
-services:
-  ocserv:
-    volumes:
-      - ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro
-      - ./config/auth:/etc/ocserv/auth:rw
-      - ./config/certs/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro
-      - ./config/certs/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro
-      - ./logs:/var/log/ocserv
-      - ocserv-socket:/var/run
-```
-
-自签名证书通常会触发客户端证书警告，需要在客户端手动信任。监控栈的 Nginx 与 ocserv 默认使用同一套 `/etc/letsencrypt/live/${DOMAIN}` 证书路径；如果监控也要使用自签证书，请使用 `docker-compose.override.yml` 同时覆盖 ocserv 和 Nginx 的证书挂载。
+仅测试时可用自签名证书，但客户端通常会弹出证书警告。需要时可用 `docker-compose.override.yml` 覆盖证书挂载。
 
 ---
 
@@ -107,43 +81,25 @@ services:
 
 ### 2.1 配置环境变量并准备配置
 
-即使是单独部署 ocserv（不启用监控），也需要配置 `.env` 文件：
+执行准备脚本，首次会从 `.env.example` 生成 `.env`，并自动打开编辑器：
 
 ```bash
 ./scripts/prepare-ocserv-config.sh
 ```
 
-脚本会在首次运行时从 `.env.example` 创建 `.env`，准备 `logs/`、`config/auth/ocpasswd`、客户端 CA 目录和用户证书目录，然后自动打开 `vi .env`。至少需要将 `DOMAIN` 修改为实际域名；启用监控时还需要修改 `GF_ADMIN_PASSWORD`。保存并退出 `vi` 后，脚本会自动生成 `config/ocserv.conf`。
+至少修改：
 
-`.env.example` 中的变量已按部署方式分为两部分，单独部署只需关注 **「基础部署配置」**：
+- `DOMAIN`：你的服务器域名
+- `OCSERV_PORT`：仅在不想使用默认 `443` 时修改
 
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
-| `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
-| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
-| `OCSERV_AUTH_IMAGE` | 按需证书管理工具镜像 | `ocserv-auth:local` |
-| `OCSERV_MAX_CLIENTS` | 最大客户端数，渲染到 `max-clients` | `32` |
-| `OCSERV_MEM_LIMIT` / `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存与内存+swap 上限 | `512m` / `512m` |
-| `LOG_MAX_SIZE` / `LOG_MAX_FILE` | 日志轮转配置 | `10m` / `3` |
-| `HEALTH_*` | 健康检查参数 | 30s / 5s / 3 / 15s |
+脚本会自动创建必需目录并生成 `config/ocserv.conf`。基础部署变量以 [../.env.example](../.env.example) 为准。
 
-**至少需修改**：将 `DOMAIN` 替换为实际域名，如需更改端口则修改 `OCSERV_PORT`。
-
-仓库已提供 `config/ocserv.conf.template` 作为完整配置模板。准备脚本会设置日志目录和密码文件权限，并根据 `.env` 生成 `config/ocserv.conf`。如需之后调整环境变量，先修改 `.env`，再重新运行 `./scripts/render-ocserv-conf.sh` 或重新执行准备脚本。
-
-启动前可先检查 Compose 配置和证书挂载路径：
+启动前建议做一次快速检查：
 
 ```bash
 docker compose config
 DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
 sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
-```
-
-首次启动 `ocserv` 前需要初始化客户端证书 CA 和空 CRL，因为默认配置已启用证书登录入口：
-
-```bash
-docker compose --profile tools run --rm ocserv-auth init-ca
 ```
 
 ### 2.2 启动服务
@@ -152,62 +108,91 @@ docker compose --profile tools run --rm ocserv-auth init-ca
 docker compose up -d
 ```
 
-容器启动时 s6-overlay 自动完成：基础文件检查 → iptables NAT/转发规则 → 启动 ocserv。配置语法错误会通过容器日志暴露。
-
 ### 2.3 创建用户
 
 ```bash
 docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 ```
 
-`config/auth` 目录以读写方式挂载到容器内 `/etc/ocserv/auth`。`ocpasswd` 会通过临时文件和原子替换更新密码文件，因此需要挂载整个可写目录，而不是只挂载单个 `ocpasswd` 文件。建议显式使用 `-u 0` 以 root 身份执行，避免容器默认用户或 user namespace 配置导致无法写入。
+首次使用证书工具前，建议至少先创建一个密码用户。
 
 ### 2.4 客户端证书认证（可选登录方式）
 
-默认配置启用 optional 认证：用户可以继续使用 `ocpasswd` 密码登录，也可以使用客户端证书登录。首次生成用户证书前，必须先至少创建一个密码用户，因为证书工具会从 `config/auth/ocpasswd` 读取用户名列表。
+启用客户端证书登录前，先初始化 CA：
 
-生成或续期所有用户证书：
+```bash
+docker compose --profile tools run --rm ocserv-auth init-ca
+```
+
+生成或续期全部用户证书：
 
 ```bash
 docker compose --profile tools run --rm ocserv-auth manage
-docker compose restart ocserv
 ```
 
-查看证书状态（只读，不会初始化 CA/CRL 或生成任何证书文件）：
+通常无需重启 `ocserv`；生成或续期的主要是客户端证书与 P12 交付物。
+
+查看证书状态：
 
 ```bash
 docker compose --profile tools run --rm ocserv-auth status
 ```
 
-吊销指定用户证书。吊销会写入持久禁用标记，后续 `manage` 不会自动为该用户重发证书：
+吊销指定用户证书：
 
 ```bash
 docker compose --profile tools run --rm ocserv-auth revoke username
-docker compose restart ocserv
 ```
 
-执行 `revoke` 时需要输入目标用户名确认。自动化场景可显式传入 `--yes` 或 `-y` 跳过确认，例如 `revoke --yes username`。
+如需立即让吊销列表生效，执行：
 
-重新签发已吊销用户证书必须显式执行：
+```bash
+docker exec ocserv occtl reload
+```
+
+如果不急，也可以等待 `ocserv` 自动检测 `crl.pem` 变化。
+
+重新签发已吊销用户证书：
 
 ```bash
 docker compose --profile tools run --rm ocserv-auth reissue username
-docker compose restart ocserv
 ```
 
-`reissue` 只接受已经被 `revoke` 标记为吊销的用户。未吊销用户如需轮换证书，应先执行 `revoke username`，再执行 `reissue username`；如果 `reissue` 生成证书失败，吊销禁用标记会保留，`manage` 仍不会自动重发该用户证书。
+通常无需重启 `ocserv`；新证书会在后续客户端连接时使用。
 
-用户交付文件会持久化到 `config/user-certs/<username>/`，其中 `<username>.p12` 适用于常见客户端，`ios-<username>.p12` 使用 iOS 兼容格式。用户目录不会长期保存 `*-key.pem` 或 `*-cert.pem`；当前有效证书索引保存在 `config/client-ca/private/issued-certs/`，吊销证书和吊销元数据保存在 `config/client-ca/private/revoked/` 与 `config/client-ca/private/revoked-metadata/`。如果 P12 交付文件丢失，`status` 会显示 `artifact-missing`，应先吊销再重新签发。
+从旧 `ocserv-auth` 迁移：
 
-客户端证书认证依赖 `config/client-ca/public/ca-cert.pem` 和 `config/client-ca/public/crl.pem`。CA 私钥只保存在 `config/client-ca/private/`，不会挂载到长期运行的 `ocserv` 容器。
+```bash
+./scripts/migrate-legacy-cert-auth.sh --legacy-root /path/to/old/ocserv-auth
+./scripts/migrate-legacy-cert-auth.sh --legacy-root /path/to/old/ocserv-auth --apply
+./scripts/migrate-legacy-cert-auth.sh --legacy-root /path/to/old/ocserv-auth --apply --backup-dir /path/to/backup
+```
+
+默认先 dry-run，不加 `--apply` 不会修改文件。执行迁移时会自动备份当前证书相关目录，并自动开启 `OCSERV_ENABLE_CERT_AUTH=true`、重新渲染配置和执行 `ocserv-auth manage`。
+
+用户证书与 P12 交付物变化通常不需要重启服务；CRL 变化优先使用 `occtl reload`。只有首次启用证书认证，或迁移后首次切换到 `OCSERV_ENABLE_CERT_AUTH=true` 时，才需要重建或重启 `ocserv` 以加载新的认证配置。
+
+迁移后可用以下命令验证：
+
+迁移会启用证书认证配置，因此需要重建或重启 `ocserv` 以加载新的认证配置：
+
+```bash
+docker compose --profile tools run --rm ocserv-auth status
+docker compose up -d --force-recreate ocserv
+docker inspect --format='{{.State.Health.Status}}' ocserv
+```
+
+更多证书管理细节建议结合脚本帮助和实际输出操作。
 
 ### 2.5 验证服务
 
 ```bash
-docker inspect --format='{{.State.Health.Status}}' ocserv   # 预期: healthy
+docker inspect --format='{{.State.Health.Status}}' ocserv
 docker compose logs -f ocserv
 docker exec ocserv occtl show users
 ```
+
+预期健康状态为 `healthy`。
 
 ### 2.6 常用命令
 
@@ -228,56 +213,29 @@ docker exec ocserv occtl show users
 
 ### 3.1 架构概览
 
-```
-ocserv → exporter (Unix socket) → Prometheus (scrape) → Grafana (展示)
-                                                          ↑
-                                                    Nginx (HTTPS :8443)
-                                                    /grafana/
+```text
+ocserv -> ocserv-exporter -> Prometheus -> Grafana
+                                         ^
+                                         |
+                                      Nginx
 ```
 
-- **exporter**：通过 `occtl` 采集会话数、账号数、流量、运行时长
-- **Prometheus**：监控编排默认每 10 秒拉取指标
-- **Grafana**：预置 Overview 与 Sessions 两块看板，默认总览不查询高基数会话明细
-- **Nginx**：HTTPS 反向代理，仅对外暴露 Grafana；Prometheus 保持在 Docker 网络内部
+监控部署会额外启动 `ocserv-exporter`、`prometheus`、`grafana` 和 `nginx`。
 
 ### 3.2 配置环境变量并准备监控配置
 
-直接部署完整监控栈时，建议使用监控准备脚本一次性准备 ocserv 基础配置、Nginx 生成目录和日志目录，并检查监控必需变量：
+直接执行监控准备脚本：
 
 ```bash
 ./scripts/prepare-monitoring-config.sh
 ```
 
-脚本默认使用 `vi .env` 编辑环境变量；如需使用其他编辑器，可执行 `EDITOR=vim ./scripts/prepare-monitoring-config.sh`。
+至少修改：
 
-`.env.example` 已按部署方式分为两部分：
+- `DOMAIN`：你的服务器域名
+- `GF_ADMIN_PASSWORD`：Grafana 管理员密码，不能为空
 
-- **「基础部署配置」** — 单独部署 ocserv 时的变量（与 Section 二共享）
-- **「附加监控配置」** — 仅在启用监控栈时需关注的变量
-
-**基础部署中必须修改**：
-
-| 变量 | 说明 | 示例 |
-|:--|:--|:--|
-| `DOMAIN` | 服务器域名 | `vpn.example.com` |
-
-**附加监控中必须修改**：
-
-| 变量 | 说明 | 示例 |
-|:--|:--|:--|
-| `GF_ADMIN_PASSWORD` | Grafana 密码；必须设置，否则 Compose 配置阶段失败 | `YourStrongPassword123!` |
-
-Nginx 与 ocserv 使用同一套 `/etc/letsencrypt/live/${DOMAIN}` 证书。Nginx 启动时会严格校验 `DOMAIN`、`MONITORING_PORT`、TLS 证书和生成后的配置；任一项不合法都会阻止容器启动。
-
-准备脚本会执行以下检查；也可以手动复核：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config
-mkdir -p nginx/conf.d
-test -w nginx/conf.d
-DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
-```
+脚本会自动校验证书路径、渲染 ocserv 配置，并检查监控 Compose 配置可用性。监控变量与面板细节见 [grafana-prometheus.md](./grafana-prometheus.md)。
 
 ### 3.3 启动完整栈
 
@@ -294,36 +252,31 @@ docker exec nginx-proxy nginx -t
 
 ### 3.4 访问监控
 
-| 服务 | 地址 | 认证 |
-|:--|:--|:--|
-| Grafana | `https://your.domain.com:8443/grafana/` | admin / `${GF_ADMIN_PASSWORD}` |
+Grafana 默认地址：
 
-如果 `.env` 中 `MONITORING_PORT` 不是 `8443`，请将地址中的端口替换为实际值。
-
-**内置仪表盘面板**：活跃会话数、活跃账号数、服务状态、运行时长、版本信息、流量速率（RX/TX）、每会话流量、用户排行、连接时长。
-
-**Prometheus 常用查询**：Prometheus 默认不通过 Nginx 对外暴露；需要排查时在宿主机上使用 `docker exec prometheus` 或临时端口转发访问。
-
+```text
+https://your.domain.com:8443/grafana/
 ```
-ocserv_active_sessions                     # 当前在线会话数
-ocserv_active_accounts                     # 当前唯一账号数
-ocserv_bytes_rx_rate_bytes_per_second      # 当前接收速率（字节/秒）
-ocserv_up                                  # 服务是否在线
-```
+
+登录账号固定为 `admin`，密码为 `.env` 中的 `GF_ADMIN_PASSWORD`。如果修改了 `MONITORING_PORT`，请按实际端口访问。
+
+详细监控使用说明、Prometheus 查询和面板说明见 [grafana-prometheus.md](./grafana-prometheus.md)。
 
 ### 3.5 部署 Fail2Ban
 
-保护监控端点免受暴力破解（10 分钟内 5 次失败 → 封禁 1 小时）：
+如需保护监控登录入口，可在宿主机执行：
 
 ```bash
 ./scripts/setup-fail2ban.sh
-sudo fail2ban-client status nginx-auth      # 查看状态
-sudo fail2ban-client set nginx-auth unbanip <IP>   # 手动解封
+sudo fail2ban-client status nginx-auth
+sudo fail2ban-client set nginx-auth unbanip <IP>
 ```
+
+详细说明见 [fail2ban.md](./fail2ban.md)。
 
 ### 3.6 数据持久化
 
-Prometheus 和 Grafana 数据通过 Docker 卷持久化，容器重建不丢失。彻底清理：
+Grafana 和 Prometheus 数据使用 Docker 卷持久化。需要彻底清理时执行：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml down -v
@@ -335,7 +288,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml down -v
 
 ### 4.1 准备构建素材
 
-默认 `Dockerfile` 和 `exporter/Dockerfile` 均使用官方 Alpine 基础镜像。构建前只需要准备 ocserv 源码；s6-overlay 由 Alpine apk 仓库安装，不再需要准备本地 tarball。
+构建前至少准备 ocserv 源码包：
 
 ```bash
 OCSERV_VERSION=1.4.2
@@ -346,183 +299,50 @@ curl -L -o "src/ocserv-${OCSERV_VERSION}.tar.xz" \
 echo "${OCSERV_TARBALL_SHA256}  src/ocserv-${OCSERV_VERSION}.tar.xz" | sha256sum -c -
 ```
 
-默认 `.env.example` 使用固定镜像版本，并禁用客户端证书认证和压缩。若要启用客户端证书认证，设置 `OCSERV_ENABLE_CERT_AUTH=true` 后重新运行 `./scripts/render-ocserv-conf.sh`，再使用 `docker compose --profile tools run --rm ocserv-auth init-ca` 和 `manage` 生成 CA/用户证书。
-
-多架构构建由 Buildx 按 `--platform` 解析官方 Alpine manifest；本地构建默认使用 `alpine:3.23.4`，发布构建会按平台传入固定 digest。
-
 ### 4.2 构建 ocserv 镜像
 
 ```bash
-# full 变体，对应发布标签 kingsonho/ocserv:1.4.2；latest 作为该版本标签别名
-docker buildx build \
-  --build-arg ALPINE_FLAVOR=full \
-  -t ocserv:1.4.2 .
-
-# slim 变体，对应发布标签 kingsonho/ocserv:1.4.2-slim；latest-slim 作为该版本标签别名
-docker buildx build \
-  --build-arg ALPINE_FLAVOR=slim \
-  -t ocserv:1.4.2-slim .
+docker buildx build -t ocserv:1.4.2 .
 ```
 
-构建后在 `.env` 中设置 `OCSERV_IMAGE=ocserv:1.4.2` 或 `OCSERV_IMAGE=ocserv:1.4.2-slim`。生产部署建议使用版本标签或 digest，`latest` 只适合快速试用。
-
-**构建参数**：
-
-| ARG | 默认值 | 说明 |
-|:--|:--|:--|
-| `OCSERV_VERSION` | `1.4.2` | ocserv 版本 |
-| `ALPINE_IMAGE` | `alpine:3.23.4` | 官方 Alpine 基础镜像；发布构建按平台传入 digest |
-| `ALPINE_VERSION` | `3.23.4` | Alpine 版本 label |
-| `ALPINE_FLAVOR` | `slim` | `slim` 或 `full` |
-| `APK_MIRROR` | `https://mirrors.tuna.tsinghua.edu.cn/alpine` | Alpine apk 源 |
-
-**多架构构建**：
-
-基于 4.1 已准备的通用素材，直接按目标平台构建：
+如需多架构构建：
 
 ```bash
-docker buildx build --platform linux/amd64 \
-  --build-arg ALPINE_FLAVOR=full \
-  -t registry.example.com/ocserv:1.4.2-amd64 .
-
-docker buildx build --platform linux/arm64 \
-  --build-arg ALPINE_FLAVOR=full \
-  -t registry.example.com/ocserv:1.4.2-arm64 .
+docker buildx build --platform linux/amd64 -t registry.example.com/ocserv:1.4.2-amd64 .
+docker buildx build --platform linux/arm64 -t registry.example.com/ocserv:1.4.2-arm64 .
 ```
-
-**验证**：`docker run --rm --entrypoint ocserv ocserv:1.4.2 --version`
 
 ### 4.3 构建 Exporter 镜像
 
 ```bash
-docker buildx build \
-  -f exporter/Dockerfile \
-  -t ocserv-exporter:1.4.2 .
+docker buildx build -f exporter/Dockerfile -t ocserv-exporter:1.4.2 .
 ```
 
-构建后在 `.env` 中设置 `EXPORTER_IMAGE=ocserv-exporter:1.4.2`。
-
-**验证**：`docker run --rm --entrypoint occtl ocserv-exporter:1.4.2 --version`
-
-GitHub Actions 中会显式设置 `APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine`，并为 amd64/arm64 分别传入官方 Alpine digest；发布构建继续使用 Alpine 官方源。
-
-Dockerfile 使用 BuildKit cache mount 加速 `apk` 安装，最终镜像层不保留 apk 索引缓存。`exporter` 镜像默认使用 Alpine 内置 `nobody` 非 root 用户；本项目的监控 Compose 会显式以 root 运行 exporter，因为 Docker 部署中 `occtl` 查询 socket 需要 root peer credentials。exporter 只挂载只读的 ocserv runtime socket，不挂载证书、认证文件或 CA 私钥；主 `ocserv` 镜像因需要 s6 init、`NET_ADMIN`、TUN 设备和 iptables，也保留 root 运行。
-
-Alpine `slim` 会禁用 utmp 编译能力，渲染配置时需要同步关闭 `use-utmp`：
+### 4.4 构建证书工具镜像
 
 ```bash
-OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh
+docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
 ```
 
-Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos，并自动探测 RADIUS 与 OTP/liboath。`full` 与 `slim` 均禁用 ocserv 的 seccomp 编译能力；Docker 运行时仍使用默认 seccomp profile。若 Alpine 稳定仓库缺少对应开发包，构建不会补源码依赖，相关能力需要在可行性报告中标记为未等价。
+构建后把镜像名写入 `.env`，再按第二章或第三章启动。更多构建和镜像实现细节见 [project-architecture.md](./project-architecture.md)。
 
 ---
 
 ## 五、配置参考
 
-### 5.1 核心配置项
+### 5.1 必须知道
 
-| 配置项 | 说明 | 默认值 |
-|:--|:--|:--|
-| `tcp-port` | TCP 端口 | `443` |
-| `udp-port` | UDP 端口（DTLS） | `443` |
-| `auth` | 认证方式 | `plain[passwd=/etc/ocserv/auth/ocpasswd]` |
-| `server-cert` | TLS 证书 | `/etc/ocserv/fullchain.pem` |
-| `server-key` | TLS 私钥 | `/etc/ocserv/privkey.pem` |
-| `ipv4-network` | 客户端 IP 段 | `10.10.10.0` |
-| `ipv4-netmask` | 子网掩码 | `255.255.255.0` |
-| `dns` | 推送 DNS | `8.8.8.8` |
-| `max-clients` | 最大客户端 | `32` |
-| `keepalive` | 心跳间隔（秒） | `30` |
-| `dpd` | 死连接检测（秒） | `90` |
-| `compression` | 启用压缩 | `false` |
-| `session-timeout` | 单次会话最长连接时间（秒） | `86400` |
-| `persistent-cookies` | 断开后保持 cookie 可用 | `false` |
-| `try-mtu-discovery` | MTU 自动发现 | `true` |
-| `isolate-workers` | 隔离工作进程 | `false` |
-| `run-as-user` | 运行用户 | `nobody` |
+- 基础部署至少要改 `DOMAIN`
+- 带监控部署还必须设置 `GF_ADMIN_PASSWORD`
+- 如果改过 `.env`，需要重新执行 `./scripts/render-ocserv-conf.sh`
+- `ocserv` 默认对外端口由 `OCSERV_PORT` 控制，Grafana 默认对外端口由 `MONITORING_PORT` 控制
 
-完整配置模板见 `config/ocserv.conf.template`，运行时配置由 `scripts/render-ocserv-conf.sh` 生成到 `config/ocserv.conf`。
+### 5.2 变量与配置入口
 
-### 5.2 卷挂载
-
-| 宿主机路径 | 容器路径 | 模式 | 说明 |
-|:--|:--|:--|:--|
-| `./config/ocserv.conf` | `/etc/ocserv/ocserv.conf` | ro | 渲染后的主配置 |
-| `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` | `/etc/ocserv/fullchain.pem` | ro | 证书 |
-| `/etc/letsencrypt/live/${DOMAIN}/privkey.pem` | `/etc/ocserv/privkey.pem` | ro | 私钥 |
-| `./config/auth` | `/etc/ocserv/auth` | rw | 用户密码目录 |
-| `./config/client-ca/public` | `/etc/ocserv/ca` | ro | 客户端证书 CA 与 CRL |
-| `./config/config-per-user` | `/etc/ocserv/config-per-user` | ro | 每用户配置 |
-| `./logs` | `/var/log/ocserv` | rw | 日志 |
-
-按需运行的 `ocserv-auth` 工具容器额外挂载 `./config/client-ca/private` 和 `./config/user-certs`，用于保存 CA 私钥、证书管理索引、吊销记录和用户 P12 交付文件；这些目录不会进入 `ocserv` 运行容器。
-
-### 5.3 容器权限
-
-| 配置 | 作用 |
-|:--|:--|
-| `cap_add: NET_ADMIN` | 操作网络栈（iptables NAT） |
-| `devices: /dev/net/tun` | TUN 隧道设备 |
-| `sysctls: net.ipv4.ip_forward=1` | 启用 IP 转发 |
-
-### 5.4 环境变量
-
-完整列表见 `.env.example`。变量已按部署方式分为两组：
-
-**基础部署配置（docker-compose.yml）**
-
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `TZ` | 时区设置 | `Asia/Shanghai` |
-| `DOMAIN` | 服务器域名，也会渲染为 ocserv `default-domain` | `your.domain.com` |
-| `OCSERV_PORT` | ocserv 对外端口（宿主机） | `443` |
-| `OCSERV_IMAGE` | ocserv 镜像及版本 | `kingsonho/ocserv:1.4.2` |
-| `OCSERV_MAX_CLIENTS` | 最大客户端数，渲染到 `max-clients` | `32` |
-| `OCSERV_MEM_LIMIT` | ocserv 容器内存上限 | `512m` |
-| `OCSERV_MEMSWAP_LIMIT` | ocserv 容器内存+swap 上限 | `512m` |
-| `LOG_MAX_SIZE` | 日志文件最大大小 | `10m` |
-| `LOG_MAX_FILE` | 日志文件保留数量 | `3` |
-| `HEALTH_INTERVAL` | 健康检查间隔 | `30s` |
-| `HEALTH_TIMEOUT` | 健康检查超时 | `5s` |
-| `HEALTH_RETRIES` | 健康检查重试次数 | `3` |
-| `HEALTH_START_PERIOD` | 健康检查启动宽限期 | `15s` |
-
-**附加监控配置（docker-compose.monitoring.yml，可选）**
-
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `MONITORING_PORT` | 监控面板对外端口（HTTPS） | `8443` |
-| `NETWORK_NAME` | Docker 网络名称 | `monitor-net` |
-| `EXPORTER_IMAGE` | ocserv-exporter 镜像 | `kingsonho/ocserv-exporter:1.4.2` |
-| `PROMETHEUS_IMAGE` | Prometheus 镜像 | `prom/prometheus:v3.11.3` |
-| `GRAFANA_IMAGE` | Grafana 镜像 | `grafana/grafana:13.0.1-security-01` |
-| `NGINX_IMAGE` | Nginx 镜像 | `nginx:1.30.2-alpine3.23-slim` |
-| `GF_ADMIN_PASSWORD` | Grafana 管理员密码；必须在 `.env` 中显式设置 | 无默认值 |
-| `GF_ALLOW_SIGN_UP` | 允许用户注册 | `false` |
-| `GF_DASHBOARDS_MIN_REFRESH_INTERVAL` | Grafana 看板最小刷新间隔，生产默认防止低于 30s | `30s` |
-| `GF_ANALYTICS_REPORTING_ENABLED` | Grafana 匿名统计上报 | `false` |
-| `GF_ANALYTICS_CHECK_FOR_UPDATES` | Grafana 版本更新检查 | `false` |
-| `GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES` | Grafana 插件更新检查 | `false` |
-| `GF_UNIFIED_ALERTING_EXECUTE_ALERTS` | Grafana 内置告警执行；不使用 Grafana 告警时建议关闭 | `false` |
-| `GF_DATAPROXY_RESPONSE_LIMIT` | Grafana data proxy 单次响应大小限制（字节） | `10485760` |
-| `GRAFANA_MEM_LIMIT` | Grafana 容器内存上限；低于 512m 时偶发 502/OOM 风险更高 | `512m` |
-| `GRAFANA_MEMSWAP_LIMIT` | Grafana 容器内存+swap 上限 | `512m` |
-| `GRAFANA_CPUS` | Grafana 容器 CPU 上限 | `1.00` |
-| `METRICS_PORT` | 指标导出端口 | `9100` |
-| `EXPORTER_INTERVAL_SECONDS` | exporter 采集间隔；实时优先 5s，均衡生产 10s，资源优先 15s | `10` |
-| `OCCTL_TIMEOUT_SECONDS` | 单次 `occtl` 调用超时；建议小于 Prometheus `scrape_timeout` | `2` |
-| `EXPORTER_ENABLE_SESSION_DETAIL_METRICS` | 是否导出 `ocserv_user_*` 高基数会话明细指标 | `false` |
-
-### 5.5 最小可用配置
-
-修改以下 3 项即可启动：
-
-```ini
-auth = "plain[passwd=/etc/ocserv/auth/ocpasswd]"
-server-cert = /etc/ocserv/fullchain.pem
-server-key = /etc/ocserv/privkey.pem
-```
+- 基础部署变量：见 [../.env.example](../.env.example)
+- 监控变量和面板说明：见 [grafana-prometheus.md](./grafana-prometheus.md)
+- Compose、配置渲染、挂载和实现原理：见 [project-architecture.md](./project-architecture.md)
+- ocserv 主配置模板：见 [../config/ocserv.conf.template](../config/ocserv.conf.template)
 
 ---
 
@@ -530,230 +350,48 @@ server-key = /etc/ocserv/privkey.pem
 
 ### 6.1 服务无法启动
 
+先检查日志、证书和端口占用：
+
 ```bash
 docker compose logs ocserv
+docker compose config
 DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-sudo ls -la "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
 sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
 ```
 
-| 原因 | 解决 |
-|:--|:--|
-| 证书缺失 | 确认证书文件存在且路径正确 |
-| 配置语法错误 | 先修正 `config/ocserv.conf.template`，再运行 `./scripts/render-ocserv-conf.sh` |
-| TUN 设备不存在 | `sudo modprobe tun` |
-| 端口被占用 | 修改 `.env` 中 `OCSERV_PORT` |
-
-也可以先检查 Compose 最终渲染结果，确认 `.env`、证书挂载和端口映射符合预期：
-
-```bash
-docker compose config
-DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
-```
-
 ### 6.2 客户端无法连接
+
+重点检查健康状态、防火墙和监听端口：
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' ocserv
 OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
 sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
 sudo ss -ulnp | grep ":${OCSERV_PORT:-443}"
-sudo ufw allow "${OCSERV_PORT:-443}/tcp"
-sudo ufw allow "${OCSERV_PORT:-443}/udp"
 ```
 
-| 原因 | 解决 |
-|:--|:--|
-| 防火墙阻止 | 开放 TCP/UDP `${OCSERV_PORT:-443}` |
-| 用户不存在 | 使用 `ocpasswd` 添加 |
-| 证书不匹配 | 证书 CN/SAN 需包含连接时的域名或 IP |
+### 6.3 监控面板异常
 
-### 6.3 `ocpasswd` 提示无法写入
-
-如果执行以下命令时返回 `Cannot write to '/etc/ocserv/ocpasswd'.`，通常说明旧版本使用了单文件 bind mount。`test -w /etc/ocserv/ocpasswd` 可能仍然成功，因为文件本身可写；但 `ocpasswd` 更新时会创建临时文件并原子替换目标文件，单文件挂载点无法被这种方式覆盖。
-
-```bash
-docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
-```
-
-删除用户时同样需要用 `-c/--passwd` 指定密码文件；`-d/--delete` 只是删除开关，不接收密码文件路径：
-
-```bash
-docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username
-```
-
-先确认运行中的容器实际挂载的是密码目录，并且为可写：
-
-```bash
-docker inspect ocserv \
-  --format '{{range .Mounts}}{{if eq .Destination "/etc/ocserv/auth"}}Source={{.Source}} Destination={{.Destination}} RW={{.RW}}{{end}}{{end}}'
-```
-
-预期输出包含 `Destination=/etc/ocserv/auth RW=true`。如果仍显示 `/etc/ocserv/ocpasswd`，请切换到目录挂载：
-
-```yaml
-- ./config/auth:/etc/ocserv/auth:rw
-```
-
-并确认 `config/ocserv.conf.template` 和 `config/ocserv.conf` 使用同一路径：
-
-```ini
-auth = "plain[passwd=/etc/ocserv/auth/ocpasswd]"
-```
-
-检查容器内目录和密码文件是否存在且可写：
-
-```bash
-docker exec -u 0 ocserv ls -ld /etc/ocserv/auth
-docker exec -u 0 ocserv ls -l /etc/ocserv/auth/ocpasswd
-docker exec -u 0 ocserv test -d /etc/ocserv/auth
-docker exec -u 0 ocserv test -w /etc/ocserv/auth
-docker exec -u 0 ocserv test -w /etc/ocserv/auth/ocpasswd
-```
-
-检查宿主机目录和文件权限：
-
-```bash
-ls -ld config/auth
-ls -l config/auth/ocpasswd
-test -d config/auth
-test -f config/auth/ocpasswd
-chmod 700 config/auth
-chmod 600 config/auth/ocpasswd
-```
-
-从旧版 `config/ocpasswd` 迁移到目录挂载的最小恢复流程：
-
-```bash
-mkdir -p config/auth
-if [ -f config/ocpasswd ] && [ ! -f config/auth/ocpasswd ]; then cp config/ocpasswd config/auth/ocpasswd; fi
-touch config/auth/ocpasswd
-chmod 700 config/auth
-chmod 600 config/auth/ocpasswd
-./scripts/render-ocserv-conf.sh
-docker compose up -d --force-recreate ocserv
-docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
-```
-
-如果暂时不方便重建容器，可先用以下临时方式在旧单文件挂载上创建用户：先在容器内可写目录生成新密码文件，再把内容写回挂载文件。
-
-```bash
-docker exec -it -u 0 ocserv sh -c '
-  cp /etc/ocserv/ocpasswd /tmp/ocpasswd &&
-  ocpasswd -c /tmp/ocpasswd username &&
-  cat /tmp/ocpasswd > /etc/ocserv/ocpasswd
-'
-```
-
-常见原因：
-
-| 原因 | 解决 |
-|:--|:--|
-| 旧版单文件挂载 `/etc/ocserv/ocpasswd` | 改为挂载 `./config/auth:/etc/ocserv/auth:rw` 并重建容器 |
-| `config/auth/ocpasswd` 不存在或 `config/auth` 被创建成文件 | 修正为目录加文件：`mkdir -p config/auth && touch config/auth/ocpasswd` |
-| 宿主机权限过窄 | 执行 `chmod 700 config/auth && chmod 600 config/auth/ocpasswd` 后使用 `-u 0` 创建用户 |
-| rootless Docker 或 user namespace 映射限制 | 调整宿主机目录所有者映射，确保容器 root 对 `config/auth` 目录可写 |
-| SELinux 拦截绑定挂载写入 | 在启用 SELinux 的系统上为挂载添加合适标签，或按发行版策略放行该路径 |
-
-### 6.4 连接后无法上网
-
-```bash
-sysctl net.ipv4.ip_forward
-docker exec ocserv iptables -t nat -L POSTROUTING -n
-docker compose restart ocserv
-```
-
-| 原因 | 解决 |
-|:--|:--|
-| 内核转发未启用 | `sudo sysctl -w net.ipv4.ip_forward=1` |
-| NAT 规则异常 | 重启容器重新初始化 iptables |
-
-### 6.5 监控面板无法访问
+先看监控栈状态和 Nginx 日志：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml ps
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config
 docker logs nginx-proxy
-mkdir -p nginx/conf.d
-test -w nginx/conf.d
-DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-sudo ls -ld "/etc/letsencrypt/live/${DOMAIN}"
 ```
 
-| 原因 | 解决 |
-|:--|:--|
-| `DOMAIN` 未配置 | 在 `.env` 中设置 |
-| `MONITORING_PORT` 非法 | 设置为 `1-65535` 范围内的数字 |
-| `nginx/conf.d` 不可写 | 确认 `nginx/conf.d` 是目录且当前用户或 Docker 可写 |
-| 证书路径错误 | 确认 `/etc/letsencrypt/live/${DOMAIN}` 目录存在，且包含 `fullchain.pem` 和 `privkey.pem` |
-| Nginx 配置生成失败 | 检查 `docker logs nginx-proxy` 中的 entrypoint 错误，并修正 `.env`、证书或模板 |
+详细监控排查见 [grafana-prometheus.md](./grafana-prometheus.md)。
 
-### 6.6 Exporter 采集异常
+### 6.4 ocserv 内存增长问题
 
-```bash
-docker logs ocserv-exporter
-docker exec ocserv ls -la /run/ocserv/occtl.socket
-docker exec ocserv occtl -s /run/ocserv/occtl.socket -j show status
-docker exec ocserv-exporter id
-docker exec ocserv-exporter occtl -s /run/ocserv/occtl.socket -j show status
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml exec prometheus wget -qO- http://ocserv:9100/metrics
-```
-
-| 原因 | 解决 |
-|:--|:--|
-| socket 不存在 | 重启 ocserv 容器 |
-| `/metrics` 可访问但 `ocserv_up=0` | 在 exporter 容器中执行 `occtl`；确认 `docker-compose.monitoring.yml` 中 `ocserv-exporter` 配置了 `user: "0:0"` 并重建 exporter |
-| exporter 中 `occtl` 返回 `recvmsg: Connection reset by peer` 或 `Status: offline` | 通常是 exporter 未以 root 运行；执行 `docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --force-recreate ocserv-exporter` |
-| 版本不匹配 | 确保 exporter 与 ocserv 版本一致 |
-| Prometheus 无法访问指标 | exporter 使用 `network_mode: service:ocserv` 与 ocserv 共用网络命名空间，因此 Prometheus 目标是 `ocserv:9100`，不需要也不应额外映射 exporter 端口 |
-
-### 6.7 ocserv 内存增长排查
-
-详细故障表现、根因分析和修复策略见 [ocserv Docker 内存增长问题说明](ocserv-docker-memory-issue.md)。
-
-先区分 Docker 统计、监控栈和单个 `ocserv-worker` 进程内存：
+专项分析和修复背景见 [ocserv-docker-memory-issue.md](./ocserv-docker-memory-issue.md)。
 
 ```bash
 docker stats --no-stream ocserv ocserv-exporter prometheus grafana nginx-proxy
 docker exec ocserv occtl -s /run/ocserv/occtl.socket show status
 docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
-docker exec ocserv sh -c '
-for p in /proc/[0-9]*; do
-  comm=$(cat "$p/comm" 2>/dev/null || true)
-  case "$comm" in
-    ocserv*)
-      echo "--- pid ${p##*/} $comm ---"
-      grep -E "Name|State|VmRSS|VmHWM|VmSize|RssAnon|RssFile|Threads" "$p/status" 2>/dev/null || true
-      ;;
-  esac
-done
-'
-```
-
-如果单个 `ocserv-worker` 的 `RssAnon` 在有持续流量时单调增长，先确认模板和生成配置中均为 `isolate-workers = false`。本项目在 `full` 与 `slim` 镜像中均禁用 ocserv 的 seccomp 编译能力，并默认关闭 worker 隔离，避免 Docker 容器内嵌套 namespace/seccomp 隔离引发内存增长。修正配置后执行：
-
-```bash
-./scripts/render-ocserv-conf.sh
-docker compose restart ocserv
-```
-
-若使用默认配置重启后 30-60 分钟压测仍快速增长，保留两次 `/proc/*/status`、`ocserv --version`、`occtl show users/status` 输出，再升级到上游版本对照或内存剖析。
-
-### 6.8 证书续期后处理
-
-| 挂载方式 | 续期后操作 |
-|:--|:--|
-| 复制到 `config/` | 重新复制 + `docker compose restart ocserv` |
-| 直接挂载 `/etc/letsencrypt/live/` | `docker compose restart ocserv` |
-
-验证：
-
-```bash
-OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
-DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-echo | openssl s_client -connect "${DOMAIN}:${OCSERV_PORT:-443}" 2>/dev/null | openssl x509 -noout -dates
 ```
 
 ---
@@ -762,109 +400,27 @@ echo | openssl s_client -connect "${DOMAIN}:${OCSERV_PORT:-443}" 2>/dev/null | o
 
 ### 7.1 s6-overlay 进程管理
 
-**启动流程**：
-
-```
-容器启动 → s6-overlay → ocserv-init (oneshot: 基础文件检查 + iptables) → ocserv (longrun)
-```
-
-**优势**：启动阶段先检查主配置文件是否存在、可读，并自动配置 iptables；容器启动后即可让客户端上网；进程异常由 s6-overlay 管理。ocserv 配置语法错误会在 `docker compose logs ocserv` 中暴露。
-
-```bash
-docker exec ocserv s6-rc list          # 查看服务列表
-docker exec ocserv occtl reload        # 不重启容器重载配置
-```
+负责容器启动时的检查、iptables 初始化和 ocserv 主进程托管。实现细节见 [project-architecture.md](./project-architecture.md)。
 
 ### 7.2 Prometheus Exporter
 
-通过 `occtl -j` JSON 输出采集指标。exporter 镜像和监控编排默认每 10 秒采集一次，Grafana 默认最小刷新间隔为 30 秒，适合生产环境的均衡低压配置。
-
-| 指标 | 类型 | 说明 |
-|:--|:--|:--|
-| `ocserv_up` | Gauge | 1=正常, 0=异常 |
-| `ocserv_active_sessions` | Gauge | 活跃会话数 |
-| `ocserv_active_accounts` | Gauge | 活跃唯一账号数 |
-| `ocserv_uptime_seconds` | Gauge | 运行时长 |
-| `ocserv_start_time_seconds` | Gauge | 服务启动时间戳 |
-| `ocserv_sessions_total` | Gauge | 服务启动以来处理的总会话数 |
-| `ocserv_authentication_failures_total` | Gauge | 服务启动以来认证失败总数 |
-| `ocserv_banned_ips` | Gauge | 当前封禁 IP 数 |
-| `ocserv_stats_*` | Gauge | 上次 stats reset 以来的会话、超时、错误关闭、认证失败和流量统计 |
-| `ocserv_auth_time_*_seconds` | Gauge | 平均/最大认证耗时 |
-| `ocserv_session_time_*_seconds` | Gauge | 平均/最大会话时长 |
-| `ocserv_stats_bytes_rx/tx_total` | Gauge | `show status.raw_rx/raw_tx`，上次 stats reset 以来的累计流量，用于 Overview 的 Traffic Total 面板 |
-| `ocserv_bytes_rx/tx_total` | Gauge | 当前在线会话累计收发流量求和，固定来自 `show users` 的每会话 `RX/TX` |
-| `ocserv_bytes_rx/tx_rate_bytes_per_second` | Gauge | 实时收发速率（字节/秒） |
-| `ocserv_user_bytes_rx/tx` | Gauge | 每会话流量；需启用 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` |
-| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | Gauge | 每会话实时速率；需启用 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` |
-
-默认只导出服务级和聚合指标，不导出 `ocserv_user_*` 高基数会话明细。需要用户排行、每会话表格或连接时长诊断时，在 `.env` 中设置 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 并重建 exporter 容器。启用后会自动清理已断开用户的标签，防止指标泄漏。服务不可用时重置所有指标。
-
-同一账号多设备同时连接时，`ocserv_active_sessions` 会按连接会话计数，`ocserv_active_accounts` 会按唯一账号计数。每会话指标使用 `session_id` 区分连接，即使两台设备位于同一 NAT 公网 IP 后也不会互相覆盖。
-
-**指标重要性评估**：
-
-| 指标 | 重要性 | 评估 |
-|:--|:--|:--|
-| `ocserv_up` | 关键 | 服务可用性核心指标，应保留 |
-| `ocserv_active_sessions` | 关键 | 当前真实在线会话数 |
-| `ocserv_active_accounts` | 高 | 区分同账号多设备场景，排障价值高 |
-| `ocserv_bytes_rx/tx_rate_bytes_per_second` | 高 | 实时带宽面板核心指标 |
-| `ocserv_sessions_total` / `ocserv_authentication_failures_total` / `ocserv_banned_ips` | 高 | 固定服务级指标，成本低，适合默认开启 |
-| `ocserv_user_bytes_rx/tx` | 中高 | 每会话流量、排行、明细表依赖，标签基数随会话数增长，默认关闭 |
-| `ocserv_user_connected_seconds` | 中高 | 连接时长排障有用，默认关闭 |
-| `ocserv_scrape_duration_seconds` | 中 | 采集性能和 occtl 阻塞排查有用 |
-| `ocserv_bytes_rx/tx_total` | 中 | 当前在线会话流量求和，不适合作为严格单调 Counter 使用 |
-| `ocserv_uptime_seconds` | 中 | 服务运行时长辅助排障 |
-| `ocserv_build_info` | 低中 | 版本定位有用，维护成本低 |
-| `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | 低中 | 当前明细诊断有价值，仅 Sessions 看板使用 |
-
-**环境变量**：`OCSERV_SOCKET`（默认 `/run/ocserv/occtl.socket`）、`METRICS_PORT`（默认 `9100`）、`EXPORTER_INTERVAL_SECONDS`（镜像和监控编排默认 `10`，最小 `5`）、`OCCTL_TIMEOUT_SECONDS`（镜像默认 `5`，监控编排默认 `2`）、`EXPORTER_ENABLE_SESSION_DETAIL_METRICS`（默认 `false`）。
+负责通过 `occtl` 导出会话数、账号数、流量和运行状态指标。监控指标与面板说明见 [grafana-prometheus.md](./grafana-prometheus.md)。
 
 ### 7.3 Nginx 反向代理
 
-**模板机制**：`nginx/templates/*.conf.template` 中的 `${DOMAIN}` 在容器启动时通过 `envsubst` 替换，生成 `nginx/conf.d/` 下的实际配置。
-
-| 路径 | 目标 | 认证 |
-|:--|:--|:--|
-| `/grafana/` | Grafana | Grafana 登录 |
-
-**安全特性**：TLS 1.2+1.3、HSTS、OCSP Stapling、WebSocket 支持（Grafana Live）。
+负责为 Grafana 提供 HTTPS 入口与子路径代理。模板渲染机制见 [project-architecture.md](./project-architecture.md)。
 
 ### 7.4 CI/CD 自动构建
 
-| 触发事件 | 生成标签 |
-|:--|:--|
-| push main/master | 先发布 `ocserv:1.4.2`、`ocserv:1.4.2-slim`、`ocserv-exporter:1.4.2`；再让 `ocserv:latest`、`ocserv:latest-slim`、`ocserv-exporter:latest` 指向对应版本标签 |
-| push `v*` 标签 | 先发布 `ocserv:1.4.2`、`ocserv:1.4.2-slim`、`ocserv-exporter:1.4.2`；再让 `ocserv:latest`、`ocserv:latest-slim`、`ocserv-exporter:latest` 指向对应版本标签 |
-| PR | 仅构建测试，不推送标签 |
-
-流程：下载 ocserv 源码 → Dockerfile 静态检查 → QEMU + Buildx → 分架构构建 → 生成 SBOM/provenance attestation → 创建版本标签多架构 manifest → 从版本标签创建 latest 别名 → 推送。
-
-生产部署可将 `.env` 中镜像值改为 digest 形式，例如 `kingsonho/ocserv@sha256:<digest>`，以获得完全可复现的拉取结果。
+仓库通过 GitHub Actions 构建并发布多架构镜像。发布流程说明见 [project-architecture.md](./project-architecture.md)。
 
 ### 7.5 Fail2Ban 安全防护
 
-安装在宿主机上，监控 Nginx 访问日志。
-
-| 参数 | 值 | 说明 |
-|:--|:--|:--|
-| `maxretry` | 5 | 10 分钟内最大失败次数 |
-| `bantime` | 3600 | 封禁 1 小时 |
-| 匹配路径 | `/grafana/login` 和 `/grafana/api/login` (401/403) | - |
+用于保护 Grafana 登录入口，部署方法见 [fail2ban.md](./fail2ban.md)。
 
 ### 7.6 Docker 安装脚本
 
-`install-docker.sh` 特性：
-
-- 支持 12+ Linux 发行版
-- 并发探测多个镜像源，自动选最快
-- 幂等执行（已安装则跳过）
-- 智能配置 `daemon.json`（保留已有配置）
-
-```bash
-sudo bash install-docker.sh [--force] [--no-mirror] [--skip-cloud]
-```
+`install-docker.sh` 用于快速安装 Docker 与 Compose，支持多发行版和镜像源自动选择。
 
 ---
 

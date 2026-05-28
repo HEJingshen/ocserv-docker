@@ -21,7 +21,7 @@
 
 | 机制 | 控制位置 | 本项目策略 |
 |:--|:--|:--|
-| ocserv 编译期 seccomp 能力 | `Dockerfile` Meson 参数 `-Dseccomp` | `full` 与 `slim` 均禁用 |
+| ocserv 编译期 seccomp 能力 | `Dockerfile` Meson 参数 `-Dseccomp` | 当前 ocserv 镜像禁用 |
 | ocserv worker 隔离 | `ocserv.conf` 中 `isolate-workers` | 默认 `false` |
 | Docker 运行时 seccomp profile | Docker daemon / Compose 运行时 | 保留 Docker 默认值，不设置 `seccomp=unconfined` |
 
@@ -55,7 +55,7 @@ Docker 容器隔离
 
 项目采用以下默认策略规避该问题：
 
-1. `full` 与 `slim` 镜像均禁用 ocserv 的 seccomp 编译能力。
+1. 当前 ocserv 镜像禁用 ocserv 的 seccomp 编译能力。
 2. `config/ocserv.conf.template` 默认设置 `isolate-workers = false`。
 3. 不在 Compose 中设置 `security_opt: seccomp=unconfined`，保留 Docker 默认运行时 seccomp profile。
 
@@ -122,7 +122,7 @@ python3 -m unittest tests/test_static_config.py
 
 - `Dockerfile` 不再包含 `libseccomp-dev`
 - `Dockerfile` 不再包含 `-Dseccomp=enabled`
-- `full` 与 `slim` 均使用 `-Dseccomp=disabled`
+- 当前 ocserv 镜像使用 `-Dseccomp=disabled`
 - `config/ocserv.conf.template` 默认包含 `isolate-workers = false`
 
 ## 六、安全权衡

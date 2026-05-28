@@ -40,8 +40,6 @@ DOMAIN=${DOMAIN:-}
 if [ -z "${DOMAIN}" ]; then
     DOMAIN=$(env_value DOMAIN)
 fi
-OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-$(env_value OCSERV_DISABLE_UTMP)}
-OCSERV_DISABLE_UTMP=${OCSERV_DISABLE_UTMP:-false}
 OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-$(env_value OCSERV_ENABLE_CERT_AUTH)}
 OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-false}
 OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-$(env_value OCSERV_ENABLE_COMPRESSION)}
@@ -50,14 +48,6 @@ OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_value OCSERV_MAX_CLIENTS)}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}
 
 [ -n "${DOMAIN:-}" ] || fail "DOMAIN is empty in ${ENV_FILE}"
-
-case "${OCSERV_DISABLE_UTMP}" in
-    true|false)
-        ;;
-    *)
-        fail "OCSERV_DISABLE_UTMP must be true or false: ${OCSERV_DISABLE_UTMP}"
-        ;;
-esac
 
 case "${OCSERV_ENABLE_CERT_AUTH}" in
     true|false)
@@ -119,7 +109,6 @@ TMP_FILE=$(mktemp "${OUTPUT_DIR}/.ocserv.conf.XXXXXX") || fail "failed to create
 trap 'rm -f "${TMP_FILE}"' EXIT HUP INT TERM
 
 awk -v domain="${DOMAIN}" \
-    -v disable_utmp="${OCSERV_DISABLE_UTMP}" \
     -v enable_cert_auth="${OCSERV_ENABLE_CERT_AUTH}" \
     -v enable_compression="${OCSERV_ENABLE_COMPRESSION}" \
     -v max_clients="${OCSERV_MAX_CLIENTS}" '
@@ -143,9 +132,6 @@ awk -v domain="${DOMAIN}" \
         }
         if ($0 ~ /^[[:space:]]*max-clients[[:space:]]*=/) {
             sub(/=.*/, "= " max_clients)
-        }
-        if (disable_utmp == "true" && $0 ~ /^[[:space:]]*use-utmp[[:space:]]*=/) {
-            sub(/=.*/, "= false")
         }
         print
     }

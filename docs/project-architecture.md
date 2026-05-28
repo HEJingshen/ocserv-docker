@@ -49,7 +49,7 @@
 | 操作 | 安装完整编译工具链（meson、ninja、gcc 等）和当前启用功能所需 Alpine 依赖 |
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
-| 变体 | `ALPINE_FLAVOR=slim|full` 控制编译能力；生产默认使用版本号标签，`latest` 作为最新版本标签别名发布 |
+| 镜像 | 生产默认使用版本号标签，`latest` 作为最新版本标签别名发布 |
 | apk 源 | 默认配置 `mirrors.tuna.tsinghua.edu.cn`，CI 显式使用 Alpine 官方源 |
 
 ### 阶段二：Runtime
@@ -64,15 +64,13 @@
 
 ### Alpine 基线
 
-`Dockerfile` 和 `exporter/Dockerfile` 均通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签。
+`Dockerfile`、`exporter/Dockerfile` 和 `auth/Dockerfile` 均通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签；`auth` 镜像会通过仓库配置脚本启用 `main` 与 `community`，以安装交互式证书管理所需的 `fzf`。
 
-| 变体 | 用途 | 关键能力 |
+| 镜像 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `full` | 默认生产标签 `kingsonho/ocserv:1.4.2`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath |
-| `slim` | 精简生产标签 `kingsonho/ocserv:1.4.2-slim`，`latest-slim` 指向该版本标签 | plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
+| `ocserv` | 默认生产标签 `kingsonho/ocserv:1.4.2`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
 | `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:1.4.2`，`latest` 指向该版本标签 | Python exporter + `occtl` |
-
-`slim` 禁用 utmp 编译能力，生产验证时需要用 `OCSERV_DISABLE_UTMP=true ./scripts/render-ocserv-conf.sh` 渲染配置。
+| `ocserv-auth` | 按需工具标签 `ocserv-auth:local` | Bash 证书管理脚本、`certtool`/OpenSSL、`flock` 锁、`fzf` 交互菜单 |
 
 ### 镜像元数据（LABELs）
 
@@ -226,7 +224,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `./config/config-per-user` | `/etc/ocserv/config-per-user` | `ro`（只读） | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
-`ocserv-auth` 工具容器通过 `tools` profile 按需运行，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。
+`ocserv-auth` 工具容器通过 `tools` profile 按需运行，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。该工具镜像同样基于 Alpine，并通过仓库配置脚本启用 `community` 仓库，以保留 `fzf` 支持的交互式证书撤销菜单。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。
 
 ### 日志轮转
 
@@ -470,20 +468,20 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 6. 构建 + 推送
        ├─ 分平台构建: linux/amd64, linux/arm64
        ├─ 缓存: GitHub Actions 缓存（gha）
-       ├─ 参数: OCSERV_VERSION, ALPINE_IMAGE, ALPINE_FLAVOR
+       ├─ 参数: OCSERV_VERSION, ALPINE_IMAGE
        └─ 产物: digest-only image + SBOM/provenance attestation
        │
 7. 创建 multi-arch manifest
-       ├─ 先创建版本标签: kingsonho/ocserv:1.4.2, kingsonho/ocserv:1.4.2-slim, kingsonho/ocserv-exporter:1.4.2
-       └─ 再从版本标签创建 latest 别名: latest, latest-slim, ocserv-exporter:latest
+       ├─ 先创建版本标签: kingsonho/ocserv:1.4.2, kingsonho/ocserv-exporter:1.4.2
+       └─ 再从版本标签创建 latest 别名: latest, ocserv-exporter:latest
 ```
 
 ### 标签策略
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| push main/master | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `latest-slim`, `ocserv-exporter:latest` 指向对应版本标签 |
-| push v* 标签 | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv:1.4.2-slim`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `latest-slim`, `ocserv-exporter:latest` 指向对应版本标签 |
+| push main/master | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `ocserv-exporter:latest` 指向对应版本标签 |
+| push v* 标签 | 先发布 `kingsonho/ocserv:1.4.2`, `kingsonho/ocserv-exporter:1.4.2`；再让 `latest`, `ocserv-exporter:latest` 指向对应版本标签 |
 | PR | 仅构建测试，不推送镜像 |
 
 ---

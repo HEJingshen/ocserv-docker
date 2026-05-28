@@ -5,7 +5,6 @@ ARG ALPINE_IMAGE=alpine:3.23.4
 FROM ${ALPINE_IMAGE} AS builder
 
 ARG OCSERV_VERSION=1.4.2
-ARG ALPINE_FLAVOR=slim
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
@@ -38,25 +37,14 @@ RUN --mount=type=cache,target=/var/cache/apk \
         printf '#!/bin/sh\nexec busybox ipcalc "$@"\n' > /usr/local/bin/ipcalc; \
         chmod +x /usr/local/bin/ipcalc; \
     fi; \
-    case "${ALPINE_FLAVOR}" in \
-        slim) \
-            apk add --update-cache libxcrypt-dev || true; \
-            ;; \
-        full) \
-            apk add --update-cache \
-                krb5-dev \
-                libtasn1-dev \
-                linux-pam-dev \
-                talloc-dev; \
-            apk add --update-cache oath-toolkit-dev || echo "WARNING: oath-toolkit-dev unavailable; OTP/liboath will remain auto-detected"; \
-            apk add --update-cache radcli-dev || echo "WARNING: radcli-dev unavailable; RADIUS will remain auto-detected"; \
-            apk add --update-cache libxcrypt-dev || true; \
-            ;; \
-        *) \
-            echo "Unsupported ALPINE_FLAVOR=${ALPINE_FLAVOR}; expected slim or full"; \
-            exit 1; \
-            ;; \
-    esac
+    apk add --update-cache \
+        krb5-dev \
+        libtasn1-dev \
+        linux-pam-dev \
+        talloc-dev; \
+    apk add --update-cache oath-toolkit-dev || echo "WARNING: oath-toolkit-dev unavailable; OTP/liboath will remain auto-detected"; \
+    apk add --update-cache radcli-dev || echo "WARNING: radcli-dev unavailable; RADIUS will remain auto-detected"; \
+    apk add --update-cache libxcrypt-dev || true
 
 COPY src/ocserv-${OCSERV_VERSION}.tar.xz /tmp/ocserv-${OCSERV_VERSION}.tar.xz
 
@@ -64,14 +52,6 @@ RUN set -eux; \
     cd /tmp; \
     tar -xf ocserv-${OCSERV_VERSION}.tar.xz; \
     cd ocserv-${OCSERV_VERSION}; \
-    case "${ALPINE_FLAVOR}" in \
-        slim) \
-            MESON_FEATURES="-Dpam=disabled -Dradius=disabled -Dgssapi=disabled -Dliboath=disabled -Dsystemd=disabled -Dutmp=disabled -Dlibwrap=disabled -Dseccomp=disabled -Dlz4=enabled -Dlibnl=enabled"; \
-            ;; \
-        full) \
-            MESON_FEATURES="-Dpam=enabled -Dradius=auto -Dgssapi=enabled -Dliboath=auto -Dsystemd=disabled -Dutmp=auto -Dlibwrap=auto -Dseccomp=disabled -Dlz4=enabled -Dlibnl=enabled"; \
-            ;; \
-    esac; \
     meson setup build \
         --prefix /usr \
         --buildtype=release \
@@ -79,7 +59,16 @@ RUN set -eux; \
         -Dfirewall-script=iptables \
         -Dlocal-llhttp=true \
         -Dlocal-pcl=true \
-        ${MESON_FEATURES}; \
+        -Dpam=enabled \
+        -Dradius=auto \
+        -Dgssapi=enabled \
+        -Dliboath=auto \
+        -Dsystemd=disabled \
+        -Dutmp=auto \
+        -Dlibwrap=auto \
+        -Dseccomp=disabled \
+        -Dlz4=enabled \
+        -Dlibnl=enabled; \
     ninja -C build; \
     DESTDIR=/out ninja -C build install; \
     rm -rf /tmp/ocserv-*
@@ -89,7 +78,6 @@ FROM ${ALPINE_IMAGE}
 ARG OCSERV_VERSION=1.4.2
 ARG ALPINE_IMAGE=alpine:3.23.4
 ARG ALPINE_VERSION=3.23.4
-ARG ALPINE_FLAVOR=slim
 ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
@@ -98,7 +86,6 @@ LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.description="OpenConnect VPN Server Alpine image" \
       org.opencontainers.image.version="${OCSERV_VERSION}" \
       org.opencontainers.image.alpine-version="${ALPINE_VERSION}" \
-      org.opencontainers.image.alpine-flavor="${ALPINE_FLAVOR}" \
       org.opencontainers.image.base.name="${ALPINE_IMAGE}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/GentleKingson/ocserv-docker"

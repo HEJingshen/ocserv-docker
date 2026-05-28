@@ -1,18 +1,26 @@
 # syntax=docker/dockerfile:1.7
 
-FROM debian:13-slim
+ARG ALPINE_IMAGE=alpine:3.23.4
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+
+FROM ${ALPINE_IMAGE}
+
+COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
 
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
+    chmod +x /usr/local/bin/configure-alpine-repositories; \
+    configure-alpine-repositories "${APK_MIRROR}"
+
+RUN --mount=type=cache,target=/var/cache/apk \
+    set -eux; \
+    apk add --update-cache \
         bash \
         ca-certificates \
         coreutils \
+        flock \
         fzf \
-        gnutls-bin \
-        openssl \
-        util-linux; \
-    rm -rf /var/lib/apt/lists/*
+        gnutls-utils \
+        openssl
 
 COPY scripts/ocserv-cert-auth.sh /usr/local/bin/ocserv-cert-auth
 

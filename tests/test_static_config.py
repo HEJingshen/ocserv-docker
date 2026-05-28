@@ -15,6 +15,7 @@ class StaticConfigTest(unittest.TestCase):
     def setUpClass(cls):
         cls.dockerfile = (ROOT_DIR / "Dockerfile").read_text(encoding="utf-8")
         cls.exporter_dockerfile = (ROOT_DIR / "exporter" / "Dockerfile").read_text(encoding="utf-8")
+        cls.auth_dockerfile = (ROOT_DIR / "auth" / "Dockerfile").read_text(encoding="utf-8")
         cls.ocserv_template = (ROOT_DIR / "config" / "ocserv.conf.template").read_text(encoding="utf-8")
         cls.env_example = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
         cls.dockerignore = (ROOT_DIR / ".dockerignore").read_text(encoding="utf-8")
@@ -31,7 +32,7 @@ class StaticConfigTest(unittest.TestCase):
     def test_ocserv_seccomp_build_support_is_disabled(self):
         self.assertNotIn("libseccomp-dev", self.dockerfile)
         self.assertNotIn("-Dseccomp=enabled", self.dockerfile)
-        self.assertEqual(2, self.dockerfile.count("-Dseccomp=disabled"))
+        self.assertEqual(1, self.dockerfile.count("-Dseccomp=disabled"))
 
     def test_worker_isolation_defaults_to_disabled(self):
         enabled_pattern = re.compile(r"^[ \t]*isolate-workers[ \t]*=[ \t]*true[ \t]*$", re.MULTILINE)
@@ -41,10 +42,11 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIsNotNone(disabled_pattern.search(self.ocserv_template))
 
     def test_self_managed_alpine_rootfs_is_not_used(self):
-        combined = "\n".join([self.dockerfile, self.exporter_dockerfile])
+        combined = "\n".join([self.dockerfile, self.exporter_dockerfile, self.auth_dockerfile])
 
         self.assertIn("ARG ALPINE_IMAGE=alpine:3.23.4", self.dockerfile)
         self.assertIn("ARG ALPINE_IMAGE=alpine:3.23.4", self.exporter_dockerfile)
+        self.assertIn("ARG ALPINE_IMAGE=alpine:3.23.4", self.auth_dockerfile)
         for old_token in (
             "alpine-" + "rootfs",
             "ALPINE_" + "MINIROOTFS_SHA256",
@@ -53,6 +55,19 @@ class StaticConfigTest(unittest.TestCase):
             "alpine-" + "mini" + "rootfs",
         ):
             self.assertNotIn(old_token, combined)
+
+    def test_auth_tool_uses_alpine_runtime_and_required_packages(self):
+        self.assertIn("ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine", self.auth_dockerfile)
+        self.assertIn("COPY scripts/configure-alpine-repositories.sh", self.auth_dockerfile)
+        self.assertIn('configure-alpine-repositories "${APK_MIRROR}"', self.auth_dockerfile)
+        self.assertIn("apk add --update-cache", self.auth_dockerfile)
+        self.assertIn("coreutils", self.auth_dockerfile)
+        self.assertIn("flock", self.auth_dockerfile)
+        self.assertIn("fzf", self.auth_dockerfile)
+        self.assertIn("gnutls-utils", self.auth_dockerfile)
+        self.assertNotIn("apt-get", self.auth_dockerfile)
+        self.assertNotIn("gnutls-bin", self.auth_dockerfile)
+        self.assertNotIn("util-linux", self.auth_dockerfile)
 
     def test_monitoring_uses_same_letsencrypt_certificate_mounts(self):
         old_cert_dir_var = "SSL_" + "CERT_DIR"
@@ -155,9 +170,13 @@ class StaticConfigTest(unittest.TestCase):
 
     def test_auth_docker_build_context_and_ci_are_validated(self):
         self.assertIn("!scripts/ocserv-cert-auth.sh", self.dockerignore)
+        self.assertIn("!scripts/configure-alpine-repositories.sh", self.dockerignore)
         self.assertIn("docker build --pull -f auth/Dockerfile -t ocserv-auth:ci .", self.workflow)
         self.assertIn("OCSERV_TARBALL_SHA256", self.workflow)
         self.assertIn("sha256sum -c -", self.workflow)
+        self.assertNotIn("ALPINE_FLAVOR", self.workflow)
+        self.assertNotIn("latest-slim", self.workflow)
+        self.assertNotIn(f"{os.linesep}      - name: Build ocserv slim", self.workflow)
 
     def test_image_defaults_are_pinned_in_env_example(self):
         self.assertIn("OCSERV_IMAGE=kingsonho/ocserv:1.4.2", self.env_example)
@@ -166,6 +185,7 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn("NGINX_IMAGE=nginx:1.30.2-alpine3.23-slim", self.env_example)
         self.assertNotIn("OCSERV_IMAGE=kingsonho/ocserv:latest", self.env_example)
         self.assertNotIn("EXPORTER_IMAGE=kingsonho/ocserv-exporter:latest", self.env_example)
+        self.assertNotIn("OCSERV_DISABLE_UTMP", self.env_example)
 
     def test_p12_empty_password_is_explicitly_configured(self):
         removed_file_password_var = "P12_EXPORT_PASSWORD" + "_FILE"
@@ -188,6 +208,18 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn("port     = 8443", self.fail2ban_jail)
         self.assertNotIn("port     = http,https", self.fail2ban_setup)
         self.assertNotIn('port="http,https"', self.fail2ban_setup)
+
+    def test_ocserv_single_variant_docs_and_render_script_remove_slim_compat(self):
+        self.assertNotIn("ALPINE_FLAVOR", self.dockerfile)
+        self.assertNotIn("org.opencontainers.image.alpine-flavor", self.dockerfile)
+        self.assertNotIn("OCSERV_DISABLE_UTMP", self.render_script)
+        for removed_token in (
+            "ocserv:1.4.2-slim",
+            "latest-slim",
+            "ALPINE_FLAVOR=slim",
+            "OCSERV_DISABLE_UTMP",
+        ):
+            self.assertNotIn(removed_token, self.docs_readme)
 
     def test_cert_auth_status_is_read_only_and_reissue_is_explicit(self):
         show_status_match = re.search(

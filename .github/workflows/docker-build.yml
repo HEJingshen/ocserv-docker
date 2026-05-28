@@ -114,8 +114,8 @@ jobs:
         id: date
         run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
-      - name: Build ocserv full amd64
-        id: ocserv_full_amd64
+      - name: Build ocserv amd64
+        id: ocserv_amd64
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
@@ -129,14 +129,13 @@ jobs:
             OCSERV_VERSION=${{ env.OCSERV_VERSION }}
             ALPINE_IMAGE=${{ env.ALPINE_IMAGE_AMD64 }}
             ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            ALPINE_FLAVOR=full
             APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
           sbom: ${{ github.event_name != 'pull_request' }}
           provenance: ${{ github.event_name != 'pull_request' }}
 
-      - name: Build ocserv full arm64
-        id: ocserv_full_arm64
+      - name: Build ocserv arm64
+        id: ocserv_arm64
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
@@ -150,49 +149,6 @@ jobs:
             OCSERV_VERSION=${{ env.OCSERV_VERSION }}
             ALPINE_IMAGE=${{ env.ALPINE_IMAGE_ARM64 }}
             ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            ALPINE_FLAVOR=full
-            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
-            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
-          sbom: ${{ github.event_name != 'pull_request' }}
-          provenance: ${{ github.event_name != 'pull_request' }}
-
-      - name: Build ocserv slim amd64
-        id: ocserv_slim_amd64
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
-            ALPINE_IMAGE=${{ env.ALPINE_IMAGE_AMD64 }}
-            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            ALPINE_FLAVOR=slim
-            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
-            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
-          sbom: ${{ github.event_name != 'pull_request' }}
-          provenance: ${{ github.event_name != 'pull_request' }}
-
-      - name: Build ocserv slim arm64
-        id: ocserv_slim_arm64
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/arm64
-          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
-            ALPINE_IMAGE=${{ env.ALPINE_IMAGE_ARM64 }}
-            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            ALPINE_FLAVOR=slim
             APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
             BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
           sbom: ${{ github.event_name != 'pull_request' }}
@@ -203,18 +159,11 @@ jobs:
         run: |
           docker buildx imagetools create \
             -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }} \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_full_amd64.outputs.digest }} \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_full_arm64.outputs.digest }}
-          docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}-slim \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_slim_amd64.outputs.digest }} \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_slim_arm64.outputs.digest }}
+            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_amd64.outputs.digest }} \
+            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}@${{ steps.ocserv_arm64.outputs.digest }}
           docker buildx imagetools create \
             -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:latest \
             ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}
-          docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:latest-slim \
-            ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}-slim
 
   build-exporter:
     needs: validate
