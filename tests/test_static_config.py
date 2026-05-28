@@ -58,6 +58,7 @@ class StaticConfigTest(unittest.TestCase):
 
     def test_auth_tool_uses_alpine_runtime_and_required_packages(self):
         self.assertIn("ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine", self.auth_dockerfile)
+        self.assertIn("FROM ${ALPINE_IMAGE}\n\nARG APK_MIRROR=", self.auth_dockerfile)
         self.assertIn("COPY scripts/configure-alpine-repositories.sh", self.auth_dockerfile)
         self.assertIn('configure-alpine-repositories "${APK_MIRROR}"', self.auth_dockerfile)
         self.assertIn("apk add --update-cache", self.auth_dockerfile)

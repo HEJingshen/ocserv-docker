@@ -5,6 +5,8 @@ ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 FROM ${ALPINE_IMAGE}
 
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+
 COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
 
 RUN set -eux; \
