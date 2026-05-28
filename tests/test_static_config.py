@@ -320,6 +320,96 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn('revoke_users "${users[@]}"', interactive_revoke_body)
         self.assertNotIn("--skip-confirm", interactive_revoke_body)
 
+    def test_rebuild_crl_uses_single_revoked_certificate_bundle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            public_dir = tmp_path / "public"
+            private_dir = tmp_path / "private"
+            revoked_dir = private_dir / "revoked"
+            bin_dir = tmp_path / "bin"
+            record_dir = tmp_path / "record"
+
+            public_dir.mkdir()
+            revoked_dir.mkdir(parents=True)
+            bin_dir.mkdir()
+            record_dir.mkdir()
+
+            (public_dir / "ca-cert.pem").write_text("ca-cert\n", encoding="utf-8")
+            (private_dir / "ca-key.pem").write_text("ca-key\n", encoding="utf-8")
+            (revoked_dir / "bob-200.pem").write_text(
+                "-----BEGIN CERTIFICATE-----\nBOB\n-----END CERTIFICATE-----\n",
+                encoding="utf-8",
+            )
+            (revoked_dir / "alice-100.pem").write_text(
+                "-----BEGIN CERTIFICATE-----\nALICE\n-----END CERTIFICATE-----\n",
+                encoding="utf-8",
+            )
+
+            certtool_stub = bin_dir / "certtool"
+            certtool_stub.write_text(
+                f"""#!/bin/sh
+set -eu
+record_dir={record_dir!s}
+load_count=0
+bundle_path=""
+outfile=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --load-certificate)
+            load_count=$((load_count + 1))
+            bundle_path=$2
+            shift 2
+            ;;
+        --outfile)
+            outfile=$2
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+printf '%s\\n' "$load_count" > "$record_dir/load_count.txt"
+if [ -n "$bundle_path" ]; then
+    cp "$bundle_path" "$record_dir/revoked-bundle.pem"
+fi
+: > "$outfile"
+""",
+                encoding="utf-8",
+            )
+            certtool_stub.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+                    "CA_PUBLIC_DIR": str(public_dir),
+                    "CA_PRIVATE_DIR": str(private_dir),
+                }
+            )
+
+            subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"source {ROOT_DIR / 'scripts' / 'ocserv-cert-auth.sh'} && rebuild_crl_from_revoked_store",
+                ],
+                cwd=ROOT_DIR,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual("1", (record_dir / "load_count.txt").read_text(encoding="utf-8").strip())
+            self.assertEqual(
+                (
+                    "-----BEGIN CERTIFICATE-----\nALICE\n-----END CERTIFICATE-----\n\n"
+                    "-----BEGIN CERTIFICATE-----\nBOB\n-----END CERTIFICATE-----\n\n"
+                ),
+                (record_dir / "revoked-bundle.pem").read_text(encoding="utf-8"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

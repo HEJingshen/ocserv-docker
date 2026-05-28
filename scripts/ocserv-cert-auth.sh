@@ -496,7 +496,7 @@ manage_certs() {
 }
 
 rebuild_crl_from_revoked_store() {
-    local tmpl tmp_file certs=()
+    local tmpl tmp_file cert_bundle=""
     tmpl=$(mktemp "${CA_PRIVATE_DIR}/crl-template.XXXXXX")
     tmp_file=$(mktemp "${CA_PUBLIC_DIR}/.crl.XXXXXX")
     cat > "${tmpl}" <<EOF
@@ -504,19 +504,33 @@ crl_next_update = 3650
 crl_number = $(date +%s)
 EOF
 
-    while IFS= read -r -d '' cert; do
-        certs+=(--load-certificate "${cert}")
-    done < <(find "${REVOKED_DIR}" -type f -name '*.pem' -print0)
+    if find "${REVOKED_DIR}" -type f -name '*.pem' -print -quit | grep -q .; then
+        cert_bundle=$(mktemp "${CA_PRIVATE_DIR}/revoked-certs.XXXXXX.pem")
+        # GnuTLS certtool expects revoked certificates to be provided as a single PEM input.
+        find "${REVOKED_DIR}" -type f -name '*.pem' -print | LC_ALL=C sort |
+            while IFS= read -r cert; do
+                cat "${cert}"
+                printf '\n'
+            done > "${cert_bundle}"
+    fi
 
-    certtool --generate-crl \
-        --load-ca-certificate "${CA_CERT}" \
-        --load-ca-privkey "${CA_KEY}" \
-        "${certs[@]}" \
-        --template "${tmpl}" \
-        --outfile "${tmp_file}" >/dev/null 2>&1
+    if [[ -n "${cert_bundle}" ]]; then
+        certtool --generate-crl \
+            --load-ca-certificate "${CA_CERT}" \
+            --load-ca-privkey "${CA_KEY}" \
+            --load-certificate "${cert_bundle}" \
+            --template "${tmpl}" \
+            --outfile "${tmp_file}" >/dev/null 2>&1
+    else
+        certtool --generate-crl \
+            --load-ca-certificate "${CA_CERT}" \
+            --load-ca-privkey "${CA_KEY}" \
+            --template "${tmpl}" \
+            --outfile "${tmp_file}" >/dev/null 2>&1
+    fi
     chmod 644 "${tmp_file}"
     mv "${tmp_file}" "${CRL_FILE}"
-    rm -f "${tmpl}"
+    rm -f "${tmpl}" "${cert_bundle}"
 }
 
 join_usernames() {
@@ -814,4 +828,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
