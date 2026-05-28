@@ -35,6 +35,8 @@ AUTH_DIR="${BASE_DIR}/auth"
 CA_PUBLIC_DIR="${BASE_DIR}/client-ca/public"
 CA_PRIVATE_DIR="${BASE_DIR}/client-ca/private"
 USER_CERT_DIR="${BASE_DIR}/user-certs"
+ISSUED_CERT_DIR="${CA_PRIVATE_DIR}/issued-certs"
+REVOKED_METADATA_DIR="${CA_PRIVATE_DIR}/revoked-metadata"
 CONFIG_PER_USER_DIR="${BASE_DIR}/config-per-user"
 LOCK_FILE="${BASE_DIR}/lock/ocserv-cert-auth.lock"
 
@@ -68,6 +70,11 @@ assert_no_reissue_leftovers() {
             fail "reissue left a temporary directory behind: ${candidate}"
         fi
     done
+    for candidate in "${CA_PRIVATE_DIR}/.old-issued-${user}."*; do
+        if [ -e "${candidate}" ]; then
+            fail "reissue left an issued certificate backup behind: ${candidate}"
+        fi
+    done
 }
 
 if OCPASSWD="${AUTH_DIR}/empty" \
@@ -98,36 +105,71 @@ run_tool manage >/dev/null
 [ -s "${CA_PUBLIC_DIR}/ca-cert.pem" ] || fail "CA certificate was not generated"
 [ -s "${CA_PUBLIC_DIR}/crl.pem" ] || fail "CRL was not generated"
 [ -s "${CA_PRIVATE_DIR}/ca-key.pem" ] || fail "CA private key was not generated"
-[ -s "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "alice certificate was not generated"
 [ -s "${USER_CERT_DIR}/alice/alice.p12" ] || fail "alice p12 was not generated"
 [ -s "${USER_CERT_DIR}/alice/ios-alice.p12" ] || fail "alice iOS p12 was not generated"
+[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "alice certificate pem was left in user directory"
+[ ! -e "${USER_CERT_DIR}/alice/alice-key.pem" ] || fail "alice private key pem was left in user directory"
+[ -s "${ISSUED_CERT_DIR}/alice.pem" ] || fail "alice issued certificate was not indexed"
 
 status_output=$(run_tool status 2>&1)
 echo "$status_output" | grep -q '^alice[[:space:]]*valid' || fail "alice status is not valid"
-bob_serial=$(openssl x509 -in "${USER_CERT_DIR}/bob/bob-cert.pem" -noout -serial | sed 's/^serial=//')
+bob_serial=$(openssl x509 -in "${ISSUED_CERT_DIR}/bob.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
 if run_tool reissue bob >/dev/null 2>&1; then
     fail "reissue unexpectedly succeeded for non-revoked bob"
 fi
-[ -s "${USER_CERT_DIR}/bob/bob-cert.pem" ] || fail "bob certificate was removed by failed reissue"
-bob_serial_after=$(openssl x509 -in "${USER_CERT_DIR}/bob/bob-cert.pem" -noout -serial | sed 's/^serial=//')
+[ -s "${ISSUED_CERT_DIR}/bob.pem" ] || fail "bob issued certificate was removed by failed reissue"
+bob_serial_after=$(openssl x509 -in "${ISSUED_CERT_DIR}/bob.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
 [ "${bob_serial}" = "${bob_serial_after}" ] || fail "failed bob reissue changed certificate serial"
 
-old_serial=$(openssl x509 -in "${USER_CERT_DIR}/alice/alice-cert.pem" -noout -serial | sed 's/^serial=//')
-run_tool revoke alice >/dev/null
+mv "${ISSUED_CERT_DIR}/bob.pem" "${USER_CERT_DIR}/bob/bob-cert.pem"
+printf 'legacy-key\n' > "${USER_CERT_DIR}/bob/bob-key.pem"
+status_output=$(run_tool status 2>&1)
+echo "$status_output" | grep -q '^bob[[:space:]]*valid' || fail "legacy bob status is not valid"
+[ ! -e "${ISSUED_CERT_DIR}/bob.pem" ] || fail "status migrated legacy bob certificate unexpectedly"
+run_tool manage >/dev/null
+[ -s "${ISSUED_CERT_DIR}/bob.pem" ] || fail "manage did not migrate bob issued certificate"
+[ ! -e "${USER_CERT_DIR}/bob/bob-cert.pem" ] || fail "manage did not remove legacy bob certificate"
+[ ! -e "${USER_CERT_DIR}/bob/bob-key.pem" ] || fail "manage did not remove legacy bob private key"
 
-[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "revoked alice certificate was not removed"
+rm -f "${USER_CERT_DIR}/bob/ios-bob.p12"
+status_output=$(run_tool status 2>&1)
+echo "$status_output" | grep -q '^bob[[:space:]]*artifact-missing' || fail "bob status did not report missing p12 artifact"
+run_tool manage >/dev/null
+[ ! -e "${USER_CERT_DIR}/bob/ios-bob.p12" ] || fail "manage unexpectedly regenerated missing bob p12 artifact"
+
+old_serial=$(openssl x509 -in "${ISSUED_CERT_DIR}/alice.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
+if printf 'wrong-user\n' | run_tool revoke alice >/dev/null 2>&1; then
+    fail "revoke unexpectedly succeeded with incorrect confirmation"
+fi
+[ -s "${ISSUED_CERT_DIR}/alice.pem" ] || fail "alice issued certificate was removed after cancelled revoke"
+[ ! -e "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was written after cancelled revoke"
+if openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${old_serial}"; then
+    fail "cancelled revoke added alice serial to CRL"
+fi
+
+printf 'bob\n' | run_tool revoke bob >/dev/null
+[ ! -e "${ISSUED_CERT_DIR}/bob.pem" ] || fail "bob issued certificate was not removed after confirmed revoke"
+[ ! -e "${USER_CERT_DIR}/bob/bob.p12" ] || fail "bob p12 was not removed after confirmed revoke"
+[ -s "${CA_PRIVATE_DIR}/disabled-users/bob" ] || fail "bob disabled marker was not written"
+[ -s "${REVOKED_METADATA_DIR}/bob-${bob_serial}.env" ] || fail "bob revoked metadata was not written"
+openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${bob_serial}" || fail "bob serial is not listed in CRL after confirmed revoke"
+
+run_tool revoke --yes alice >/dev/null
+
+[ ! -e "${ISSUED_CERT_DIR}/alice.pem" ] || fail "revoked alice issued certificate was not removed"
+[ ! -e "${USER_CERT_DIR}/alice/alice.p12" ] || fail "revoked alice p12 was not removed"
 [ -s "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was not written"
-find "${USER_CERT_DIR}/revoked-archive" -type f -name 'alice-cert.pem' | grep -q . || fail "revoked alice certificate was not archived"
+[ -s "${REVOKED_METADATA_DIR}/alice-${old_serial}.env" ] || fail "alice revoked metadata was not written"
 openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -q 'Revoked Certificates' || fail "CRL does not contain revoked certificates"
 openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${old_serial}" || fail "old serial is not listed in CRL"
 
 status_output=$(run_tool status 2>&1)
 echo "$status_output" | grep -q '^alice[[:space:]]*revoked' || fail "alice status is not revoked"
 run_tool manage >/dev/null
-[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "manage reissued a revoked user unexpectedly"
+[ ! -e "${ISSUED_CERT_DIR}/alice.pem" ] || fail "manage reissued a revoked user unexpectedly"
 
-run_tool revoke alice >/dev/null
-[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "repeated revoke changed revoked user state unexpectedly"
+run_tool revoke --yes alice >/dev/null
+[ ! -e "${ISSUED_CERT_DIR}/alice.pem" ] || fail "repeated revoke changed revoked user state unexpectedly"
 
 FAIL_BIN_DIR="${BASE_DIR}/fail-bin"
 mkdir -p "${FAIL_BIN_DIR}"
@@ -153,7 +195,7 @@ fi
 [ -s "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was removed after failed reissue"
 assert_no_reissue_leftovers alice
 run_tool manage >/dev/null
-[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "manage reissued alice after failed reissue"
+[ ! -e "${ISSUED_CERT_DIR}/alice.pem" ] || fail "manage reissued alice after failed reissue"
 
 MARKER_FAIL_BIN_DIR="${BASE_DIR}/marker-fail-bin"
 mkdir -p "${MARKER_FAIL_BIN_DIR}"
@@ -177,15 +219,20 @@ if PATH="${MARKER_FAIL_BIN_DIR}:${BIN_DIR}:${PATH}" \
     fail "reissue unexpectedly succeeded when disabled marker removal failed"
 fi
 [ -s "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was removed after marker removal failure"
-[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "marker removal failure left a usable alice certificate"
+[ ! -e "${ISSUED_CERT_DIR}/alice.pem" ] || fail "marker removal failure left a usable alice certificate"
+[ ! -e "${USER_CERT_DIR}/alice/alice.p12" ] || fail "marker removal failure left a usable alice p12"
 assert_no_reissue_leftovers alice
 run_tool manage >/dev/null
-[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "manage reissued alice after marker removal failure"
+[ ! -e "${ISSUED_CERT_DIR}/alice.pem" ] || fail "manage reissued alice after marker removal failure"
 
 run_tool reissue alice >/dev/null
-[ -s "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "alice certificate was not reissued"
+[ -s "${USER_CERT_DIR}/alice/alice.p12" ] || fail "alice p12 was not reissued"
+[ -s "${USER_CERT_DIR}/alice/ios-alice.p12" ] || fail "alice iOS p12 was not reissued"
+[ ! -e "${USER_CERT_DIR}/alice/alice-cert.pem" ] || fail "alice certificate pem was left in user directory after reissue"
+[ ! -e "${USER_CERT_DIR}/alice/alice-key.pem" ] || fail "alice private key pem was left in user directory after reissue"
+[ -s "${ISSUED_CERT_DIR}/alice.pem" ] || fail "alice issued certificate was not reissued"
 [ ! -e "${CA_PRIVATE_DIR}/disabled-users/alice" ] || fail "disabled marker was not cleared by reissue"
-new_serial=$(openssl x509 -in "${USER_CERT_DIR}/alice/alice-cert.pem" -noout -serial | sed 's/^serial=//')
+new_serial=$(openssl x509 -in "${ISSUED_CERT_DIR}/alice.pem" -noout -serial | sed 's/^serial=//' | tr '[:lower:]' '[:upper:]')
 [ "${old_serial}" != "${new_serial}" ] || fail "reissue reused old certificate serial"
 openssl crl -in "${CA_PUBLIC_DIR}/crl.pem" -noout -text | grep -qi "${old_serial}" || fail "old serial disappeared from CRL after reissue"
 

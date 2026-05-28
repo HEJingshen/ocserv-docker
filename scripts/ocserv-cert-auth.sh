@@ -10,14 +10,14 @@ CONFIG_PER_USER_DIR=${CONFIG_PER_USER_DIR:-/etc/ocserv/config-per-user}
 LOCK_FILE=${LOCK_FILE:-/var/lib/ocserv-auth/ocserv-cert-auth.lock}
 ALLOW_EMPTY_P12_PASSWORD=${ALLOW_EMPTY_P12_PASSWORD:-false}
 P12_EXPORT_PASSWORD=${P12_EXPORT_PASSWORD:-}
-P12_EXPORT_PASSWORD_FILE=${P12_EXPORT_PASSWORD_FILE:-}
 
 CA_CERT="${CA_PUBLIC_DIR}/ca-cert.pem"
 CA_KEY="${CA_PRIVATE_DIR}/ca-key.pem"
 CRL_FILE="${CA_PUBLIC_DIR}/crl.pem"
 REVOKED_DIR="${CA_PRIVATE_DIR}/revoked"
 DISABLED_DIR="${CA_PRIVATE_DIR}/disabled-users"
-ARCHIVE_DIR="${CERT_DIR}/revoked-archive"
+ISSUED_CERT_DIR="${CA_PRIVATE_DIR}/issued-certs"
+REVOKED_METADATA_DIR="${CA_PRIVATE_DIR}/revoked-metadata"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -35,7 +35,7 @@ Usage:
   ocserv-cert-auth init-ca
   ocserv-cert-auth manage
   ocserv-cert-auth status
-  ocserv-cert-auth revoke <username> [username...]
+  ocserv-cert-auth revoke [--yes|-y] <username> [username...]
   ocserv-cert-auth reissue <username> [username...]
   ocserv-cert-auth menu
 
@@ -75,24 +75,12 @@ validate_p12_export_policy() {
             ;;
     esac
 
-    if [[ -n "${P12_EXPORT_PASSWORD}" && -n "${P12_EXPORT_PASSWORD_FILE}" ]]; then
-        die "set only one of P12_EXPORT_PASSWORD or P12_EXPORT_PASSWORD_FILE"
-    fi
-
-    if [[ -n "${P12_EXPORT_PASSWORD_FILE}" && ! -r "${P12_EXPORT_PASSWORD_FILE}" ]]; then
-        die "P12_EXPORT_PASSWORD_FILE is not readable: ${P12_EXPORT_PASSWORD_FILE}"
-    fi
-
-    if [[ -z "${P12_EXPORT_PASSWORD}" && -z "${P12_EXPORT_PASSWORD_FILE}" && "${ALLOW_EMPTY_P12_PASSWORD}" != "true" ]]; then
-        die "empty P12 export passwords are disabled; set P12_EXPORT_PASSWORD, P12_EXPORT_PASSWORD_FILE, or ALLOW_EMPTY_P12_PASSWORD=true"
+    if [[ -z "${P12_EXPORT_PASSWORD}" && "${ALLOW_EMPTY_P12_PASSWORD}" != "true" ]]; then
+        die "empty P12 export passwords are disabled; set P12_EXPORT_PASSWORD or ALLOW_EMPTY_P12_PASSWORD=true"
     fi
 }
 
 p12_passout_arg() {
-    if [[ -n "${P12_EXPORT_PASSWORD_FILE}" ]]; then
-        printf 'file:%s\n' "${P12_EXPORT_PASSWORD_FILE}"
-        return 0
-    fi
     if [[ -n "${P12_EXPORT_PASSWORD}" ]]; then
         printf 'pass:%s\n' "${P12_EXPORT_PASSWORD}"
         return 0
@@ -105,7 +93,7 @@ p12_passout_arg() {
 }
 
 p12_uses_empty_password() {
-    [[ -z "${P12_EXPORT_PASSWORD}" && -z "${P12_EXPORT_PASSWORD_FILE}" && "${ALLOW_EMPTY_P12_PASSWORD}" == "true" ]]
+    [[ -z "${P12_EXPORT_PASSWORD}" && "${ALLOW_EMPTY_P12_PASSWORD}" == "true" ]]
 }
 
 prepare_dirs() {
@@ -116,9 +104,10 @@ prepare_dirs() {
         "${CONFIG_PER_USER_DIR}" \
         "${REVOKED_DIR}" \
         "${DISABLED_DIR}" \
-        "${ARCHIVE_DIR}" \
+        "${ISSUED_CERT_DIR}" \
+        "${REVOKED_METADATA_DIR}" \
         "$(dirname -- "${LOCK_FILE}")"
-    chmod 700 "${CA_PRIVATE_DIR}" "${CERT_DIR}" "${REVOKED_DIR}" "${DISABLED_DIR}" "${ARCHIVE_DIR}" 2>/dev/null || true
+    chmod 700 "${CA_PRIVATE_DIR}" "${CERT_DIR}" "${REVOKED_DIR}" "${DISABLED_DIR}" "${ISSUED_CERT_DIR}" "${REVOKED_METADATA_DIR}" 2>/dev/null || true
 }
 
 load_users() {
@@ -154,6 +143,39 @@ disabled_marker() {
 
 is_user_disabled() {
     [[ -f "$(disabled_marker "$1")" ]]
+}
+
+issued_cert_file() {
+    printf '%s/%s.pem\n' "${ISSUED_CERT_DIR}" "$1"
+}
+
+legacy_user_cert_file() {
+    printf '%s/%s/%s-cert.pem\n' "${CERT_DIR}" "$1" "$1"
+}
+
+current_user_cert_file() {
+    local username=$1 issued legacy
+    issued=$(issued_cert_file "${username}")
+    legacy=$(legacy_user_cert_file "${username}")
+    if [[ -f "${issued}" ]]; then
+        printf '%s\n' "${issued}"
+        return 0
+    fi
+    if [[ -f "${legacy}" ]]; then
+        printf '%s\n' "${legacy}"
+        return 0
+    fi
+    return 1
+}
+
+user_p12_artifacts_present() {
+    local username=$1 user_dir="${CERT_DIR}/${username}"
+    [[ -s "${user_dir}/${username}.p12" && -s "${user_dir}/ios-${username}.p12" ]]
+}
+
+cleanup_user_pem_artifacts() {
+    local username=$1 user_dir="${CERT_DIR}/${username}"
+    rm -f "${user_dir}"/*-cert.pem "${user_dir}"/*-key.pem
 }
 
 openssl_major() {
@@ -318,21 +340,64 @@ EOF
     [[ -s "${p12_file}" && -s "${ios_p12_file}" ]] || return 1
 }
 
+install_generated_user_cert() {
+    local username=$1
+    local source_dir=$2
+    local user_dir="${CERT_DIR}/${username}"
+    local issued_cert
+    issued_cert=$(issued_cert_file "${username}")
+
+    mkdir -p "${user_dir}" "${ISSUED_CERT_DIR}" || return 1
+    cp "${source_dir}/${username}.p12" "${user_dir}/${username}.p12" || return 1
+    cp "${source_dir}/ios-${username}.p12" "${user_dir}/ios-${username}.p12" || return 1
+    cp "${source_dir}/${username}-cert.pem" "${issued_cert}" || return 1
+    chmod 600 "${user_dir}/${username}.p12" "${user_dir}/ios-${username}.p12" || return 1
+    chmod 644 "${issued_cert}" || return 1
+    cleanup_user_pem_artifacts "${username}" || return 1
+}
+
 generate_user_cert() {
     local username=$1
-    generate_user_cert_into_dir "${username}" "${CERT_DIR}/${username}"
+    local tmp_dir
+    tmp_dir=$(mktemp -d "${CERT_DIR}/.tmp-${username}.XXXXXX") || return 1
+    if ! generate_user_cert_into_dir "${username}" "${tmp_dir}"; then
+        rm -rf "${tmp_dir}"
+        return 1
+    fi
+    if ! install_generated_user_cert "${username}" "${tmp_dir}"; then
+        rm -rf "${tmp_dir}"
+        return 1
+    fi
+    rm -rf "${tmp_dir}" || return 1
+}
+
+migrate_legacy_user_cert() {
+    local username=$1
+    local issued legacy
+    issued=$(issued_cert_file "${username}")
+    legacy=$(legacy_user_cert_file "${username}")
+
+    if [[ ! -f "${issued}" && -f "${legacy}" ]]; then
+        mkdir -p "${ISSUED_CERT_DIR}" || return 1
+        cp "${legacy}" "${issued}" || return 1
+        chmod 644 "${issued}" || return 1
+        cleanup_user_pem_artifacts "${username}" || return 1
+        info "[${username}] migrated certificate state to ${ISSUED_CERT_DIR}"
+    elif [[ -f "${issued}" ]]; then
+        cleanup_user_pem_artifacts "${username}" || return 1
+    fi
 }
 
 cert_status_for_user() {
     local username=$1
-    local cert_file="${CERT_DIR}/${username}/${username}-cert.pem"
+    local cert_file
     local days_left
 
     if is_user_disabled "${username}"; then
         printf '%s\trevoked\tcertificate reissue is disabled\n' "${username}"
         return
     fi
-    if [[ ! -f "${cert_file}" ]]; then
+    if ! cert_file=$(current_user_cert_file "${username}"); then
         printf '%s\tmissing\tneeds generation\n' "${username}"
         return
     fi
@@ -350,6 +415,10 @@ cert_status_for_user() {
             printf '%s\texpired\texpired %s days ago\n' "${username}" "${days_left#-}"
             ;;
         *)
+            if ! user_p12_artifacts_present "${username}"; then
+                printf '%s\tartifact-missing\tcertificate is valid but p12 artifacts are missing; revoke and reissue\n' "${username}"
+                return
+            fi
             printf '%s\tvalid\t%s days left\n' "${username}" "${days_left}"
             ;;
     esac
@@ -386,11 +455,15 @@ manage_certs() {
             info "[${user}] revoked; skipping automatic reissue"
             continue
         fi
+        migrate_legacy_user_cert "${user}" || die "failed to migrate certificate state for ${user}"
         line=$(cert_status_for_user "${user}")
         IFS=$'\t' read -r _ status detail <<< "${line}"
         case "${status}" in
             valid)
                 info "[${user}] valid; ${detail}"
+                ;;
+            artifact-missing)
+                warn "[${user}] ${status}; ${detail}"
                 ;;
             *)
                 info "[${user}] ${status}; generating certificate"
@@ -432,46 +505,112 @@ EOF
     rm -f "${tmpl}"
 }
 
+join_usernames() {
+    local IFS=,
+    printf '%s\n' "$*"
+}
+
+confirm_revoke_users() {
+    local expected input
+    expected=$(join_usernames "$@")
+    warn "about to revoke client certificates for: ${expected}"
+    warn "this removes current p12 files and issued certificate state, writes disabled markers, and updates the CRL"
+    read -r -p "Type ${expected} to confirm revoke: " input || die "revoke cancelled"
+    [[ "${input}" == "${expected}" ]] || die "revoke cancelled"
+}
+
 revoke_users() {
+    local skip_confirm=false
+    if [[ "${1:-}" == "--skip-confirm" ]]; then
+        skip_confirm=true
+        shift || true
+    fi
     [[ "$#" -gt 0 ]] || die "revoke requires at least one username"
     load_users
     ensure_ca
 
-    local user cert_file serial archive_target revoked_cert marker_file
+    local user cert_file marker_file
+    local -a revoke_targets=()
     for user in "$@"; do
         [[ "${user}" =~ ^[A-Za-z0-9_-]+$ ]] || die "unsupported username: ${user}"
         user_exists "${user}" || die "user not found in ocpasswd: ${user}"
-        cert_file="${CERT_DIR}/${user}/${user}-cert.pem"
         marker_file=$(disabled_marker "${user}")
         if [[ -f "${marker_file}" ]]; then
-            if [[ ! -f "${cert_file}" ]]; then
+            if ! current_user_cert_file "${user}" >/dev/null; then
                 info "[${user}] already revoked; keeping disabled marker"
                 continue
             fi
             warn "[${user}] disabled marker exists but certificate file is present; revoking current file"
         fi
-        [[ -f "${cert_file}" ]] || die "certificate not found for ${user}: ${cert_file}"
+        cert_file=$(current_user_cert_file "${user}") || die "certificate not found for ${user}"
+        revoke_targets+=("${user}")
+    done
+
+    if [[ "${#revoke_targets[@]}" -eq 0 ]]; then
+        return 0
+    fi
+    if [[ "${skip_confirm}" != "true" ]]; then
+        confirm_revoke_users "${revoke_targets[@]}"
+    fi
+
+    local serial metadata_file revoked_cert issued_file
+    for user in "${revoke_targets[@]}"; do
+        cert_file=$(current_user_cert_file "${user}") || die "certificate not found for ${user}"
+        marker_file=$(disabled_marker "${user}")
+        issued_file=$(issued_cert_file "${user}")
         serial=$(cert_serial "${cert_file}")
         revoked_cert="${REVOKED_DIR}/${user}-${serial}.pem"
+        metadata_file="${REVOKED_METADATA_DIR}/${user}-${serial}.env"
         cp "${cert_file}" "${revoked_cert}"
         chmod 600 "${revoked_cert}"
 
-        archive_target="${ARCHIVE_DIR}/${user}-$(date +%Y%m%d%H%M%S)"
-        mkdir -p "${archive_target}"
-        cp -a "${CERT_DIR}/${user}/." "${archive_target}/"
+        mkdir -p "${REVOKED_METADATA_DIR}"
         rm -f "${CERT_DIR}/${user}"/*.p12 "${CERT_DIR}/${user}"/*-cert.pem "${CERT_DIR}/${user}"/*-key.pem
+        rm -f "${issued_file}"
         {
             printf 'revoked_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'username=%s\n' "${user}"
             printf 'serial=%s\n' "${serial}"
-            printf 'archive=%s\n' "${archive_target}"
+            printf 'revoked_cert=%s\n' "${revoked_cert}"
+        } > "${metadata_file}"
+        chmod 600 "${metadata_file}"
+        {
+            printf 'revoked_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'username=%s\n' "${user}"
+            printf 'serial=%s\n' "${serial}"
+            printf 'metadata=%s\n' "${metadata_file}"
         } > "${marker_file}"
         chmod 600 "${marker_file}"
-        info "[${user}] certificate staged for revocation and archived to ${archive_target}"
+        info "[${user}] certificate staged for revocation and metadata written to ${metadata_file}"
     done
 
     rebuild_crl_from_revoked_store
     info "CRL updated: ${CRL_FILE}"
+}
+
+revoke_from_cli() {
+    local skip_confirm=false
+    local -a users=()
+    local arg
+    for arg in "$@"; do
+        case "${arg}" in
+            --yes|-y)
+                skip_confirm=true
+                ;;
+            -*)
+                die "unknown revoke option: ${arg}"
+                ;;
+            *)
+                users+=("${arg}")
+                ;;
+        esac
+    done
+    [[ "${#users[@]}" -gt 0 ]] || die "revoke requires at least one username"
+    if [[ "${skip_confirm}" == "true" ]]; then
+        revoke_users --skip-confirm "${users[@]}"
+    else
+        revoke_users "${users[@]}"
+    fi
 }
 
 reissue_users() {
@@ -480,7 +619,7 @@ reissue_users() {
     load_users
     ensure_ca
 
-    local user marker_file tmp_dir user_dir backup_dir
+    local user marker_file tmp_dir user_dir backup_dir issued_file issued_backup
     for user in "$@"; do
         [[ "${user}" =~ ^[A-Za-z0-9_-]+$ ]] || die "unsupported username: ${user}"
         user_exists "${user}" || die "user not found in ocpasswd: ${user}"
@@ -494,7 +633,9 @@ reissue_users() {
         fi
 
         user_dir="${CERT_DIR}/${user}"
+        issued_file=$(issued_cert_file "${user}")
         backup_dir=""
+        issued_backup=""
         if [[ -d "${user_dir}" ]]; then
             if ! backup_dir=$(mktemp -d "${CERT_DIR}/.old-${user}.XXXXXX"); then
                 rm -rf "${tmp_dir}"
@@ -509,20 +650,47 @@ reissue_users() {
                 die "failed to back up existing certificate directory for ${user}; disabled marker preserved"
             fi
         fi
-        if ! mv "${tmp_dir}" "${user_dir}"; then
+        if [[ -f "${issued_file}" ]]; then
+            if ! issued_backup=$(mktemp "${CA_PRIVATE_DIR}/.old-issued-${user}.XXXXXX"); then
+                rm -rf "${tmp_dir}"
+                if [[ -n "${backup_dir}" && -d "${backup_dir}" ]]; then
+                    mv "${backup_dir}" "${user_dir}" 2>/dev/null || true
+                fi
+                die "failed to prepare issued certificate backup for ${user}; disabled marker preserved"
+            fi
+            if ! mv "${issued_file}" "${issued_backup}"; then
+                rm -rf "${tmp_dir}" "${issued_backup}"
+                if [[ -n "${backup_dir}" && -d "${backup_dir}" ]]; then
+                    mv "${backup_dir}" "${user_dir}" 2>/dev/null || true
+                fi
+                die "failed to back up issued certificate for ${user}; disabled marker preserved"
+            fi
+        fi
+        if ! install_generated_user_cert "${user}" "${tmp_dir}"; then
             if [[ -n "${backup_dir}" && -d "${backup_dir}" ]]; then
+                rm -rf "${user_dir}" 2>/dev/null || true
                 mv "${backup_dir}" "${user_dir}" 2>/dev/null || true
+            fi
+            if [[ -n "${issued_backup}" && -f "${issued_backup}" ]]; then
+                mv "${issued_backup}" "${issued_file}" 2>/dev/null || true
+            else
+                rm -f "${issued_file}" 2>/dev/null || true
             fi
             rm -rf "${tmp_dir}"
             die "failed to install reissued certificate for ${user}; disabled marker preserved"
         fi
+        rm -rf "${tmp_dir}"
         if ! rm -f "${marker_file}"; then
             rm -rf "${user_dir}" 2>/dev/null || {
                 chmod -R u+rwX "${user_dir}" 2>/dev/null || true
                 rm -rf "${user_dir}" 2>/dev/null || true
             }
+            rm -f "${issued_file}" 2>/dev/null || true
             if [[ -n "${backup_dir}" && -d "${backup_dir}" ]]; then
                 mv "${backup_dir}" "${user_dir}" 2>/dev/null || true
+            fi
+            if [[ -n "${issued_backup}" && -f "${issued_backup}" ]]; then
+                mv "${issued_backup}" "${issued_file}" 2>/dev/null || true
             fi
             die "failed to clear disabled marker for ${user}; disabled marker preserved and previous certificate state restored where possible"
         fi
@@ -531,6 +699,9 @@ reissue_users() {
                 chmod -R u+rwX "${backup_dir}" 2>/dev/null || true
                 rm -rf "${backup_dir}" || die "failed to remove old backup directory containing private key material: ${backup_dir}"
             fi
+        fi
+        if [[ -n "${issued_backup}" ]]; then
+            rm -f "${issued_backup}" || die "failed to remove old issued certificate backup: ${issued_backup}"
         fi
         info "[${user}] certificate reissued"
     done
@@ -607,7 +778,7 @@ main() {
         revoke)
             check_dependencies
             shift || true
-            with_lock revoke_users "$@"
+            with_lock revoke_from_cli "$@"
             ;;
         reissue)
             check_dependencies

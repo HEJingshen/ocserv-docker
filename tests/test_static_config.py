@@ -168,11 +168,18 @@ class StaticConfigTest(unittest.TestCase):
         self.assertNotIn("EXPORTER_IMAGE=kingsonho/ocserv-exporter:latest", self.env_example)
 
     def test_p12_empty_password_is_explicitly_configured(self):
+        removed_file_password_var = "P12_EXPORT_PASSWORD" + "_FILE"
         self.assertIn("ALLOW_EMPTY_P12_PASSWORD=true", self.env_example)
         self.assertIn("ALLOW_EMPTY_P12_PASSWORD=${ALLOW_EMPTY_P12_PASSWORD:-true}", self.compose)
+        self.assertIn("P12_EXPORT_PASSWORD=", self.env_example)
+        self.assertIn("P12_EXPORT_PASSWORD=${P12_EXPORT_PASSWORD:-}", self.compose)
+        self.assertNotIn(removed_file_password_var, self.env_example)
+        self.assertNotIn(removed_file_password_var, self.compose)
+        self.assertNotIn(removed_file_password_var, self.cert_auth_script)
         self.assertIn("validate_p12_export_policy()", self.cert_auth_script)
         self.assertIn("ALLOW_EMPTY_P12_PASSWORD must be true or false", self.cert_auth_script)
         self.assertIn("empty P12 export passwords are disabled", self.cert_auth_script)
+        self.assertIn("set P12_EXPORT_PASSWORD or ALLOW_EMPTY_P12_PASSWORD=true", self.cert_auth_script)
 
     def test_fail2ban_uses_monitoring_port(self):
         self.assertIn("MONITORING_PORT", self.fail2ban_setup)
@@ -198,12 +205,27 @@ class StaticConfigTest(unittest.TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(manage_match)
-        self.assertIn("is_user_disabled", manage_match.group("body"))
+        manage_body = manage_match.group("body")
+        self.assertIn("is_user_disabled", manage_body)
+        self.assertIn("migrate_legacy_user_cert", manage_body)
+        self.assertIn("artifact-missing", manage_body)
 
         self.assertIn("reissue_users()", self.cert_auth_script)
         self.assertIn("reissue)", self.cert_auth_script)
         self.assertIn("certtool_supports_required_options()", self.cert_auth_script)
         self.assertNotIn("certtool --version", self.cert_auth_script)
+        self.assertIn('ISSUED_CERT_DIR="${CA_PRIVATE_DIR}/issued-certs"', self.cert_auth_script)
+        self.assertIn('REVOKED_METADATA_DIR="${CA_PRIVATE_DIR}/revoked-metadata"', self.cert_auth_script)
+        self.assertIn("current_user_cert_file()", self.cert_auth_script)
+        self.assertIn("install_generated_user_cert()", self.cert_auth_script)
+        self.assertIn("migrate_legacy_user_cert()", self.cert_auth_script)
+        self.assertIn("user_p12_artifacts_present()", self.cert_auth_script)
+        self.assertIn("artifact-missing", self.cert_auth_script)
+        self.assertIn("confirm_revoke_users()", self.cert_auth_script)
+        self.assertIn("revoke_from_cli()", self.cert_auth_script)
+        self.assertIn("--yes|-y)", self.cert_auth_script)
+        self.assertIn('revoke_users --skip-confirm "${users[@]}"', self.cert_auth_script)
+        self.assertNotIn('cp -a "${CERT_DIR}/${user}/."', self.cert_auth_script)
         self.assertNotRegex(
             self.cert_auth_script,
             r"status\)\n\s+shift \|\| true\n\s+with_lock show_status",
@@ -216,6 +238,21 @@ class StaticConfigTest(unittest.TestCase):
         )
         self.assertIsNotNone(generate_match)
         self.assertNotIn("die", generate_match.group("body"))
+
+        show_status_body = show_status_match.group("body")
+        self.assertNotIn("migrate_legacy_user_cert", show_status_body)
+        self.assertNotIn("cleanup_user_pem_artifacts", show_status_body)
+
+        install_match = re.search(
+            r"install_generated_user_cert\(\) \{(?P<body>.*?)\n\}",
+            self.cert_auth_script,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(install_match)
+        install_body = install_match.group("body")
+        self.assertIn('cp "${source_dir}/${username}.p12"', install_body)
+        self.assertIn('cp "${source_dir}/${username}-cert.pem" "${issued_cert}"', install_body)
+        self.assertIn('cleanup_user_pem_artifacts "${username}"', install_body)
 
         reissue_match = re.search(
             r"reissue_users\(\) \{(?P<body>.*?)\n\}",
@@ -238,6 +275,18 @@ class StaticConfigTest(unittest.TestCase):
         self.assertNotIn('rm -rf "${backup_dir}" || warn', reissue_body)
         self.assertIn('chmod -R u+rwX "${backup_dir}"', reissue_body)
         self.assertIn("failed to remove old backup directory containing private key material", reissue_body)
+        self.assertIn('issued_file=$(issued_cert_file "${user}")', reissue_body)
+        self.assertIn('mv "${issued_backup}" "${issued_file}" 2>/dev/null || true', reissue_body)
+
+        interactive_revoke_match = re.search(
+            r"interactive_revoke\(\) \{(?P<body>.*?)\n\}",
+            self.cert_auth_script,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(interactive_revoke_match)
+        interactive_revoke_body = interactive_revoke_match.group("body")
+        self.assertIn('revoke_users "${users[@]}"', interactive_revoke_body)
+        self.assertNotIn("--skip-confirm", interactive_revoke_body)
 
 
 if __name__ == "__main__":

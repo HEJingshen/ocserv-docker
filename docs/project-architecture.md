@@ -226,7 +226,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `./config/config-per-user` | `/etc/ocserv/config-per-user` | `ro`（只读） | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
-`ocserv-auth` 工具容器通过 `tools` profile 按需运行，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、吊销记录、禁用标记和用户证书。吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。
+`ocserv-auth` 工具容器通过 `tools` profile 按需运行，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。
 
 ### 日志轮转
 
@@ -513,8 +513,8 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   ├── ocserv.conf                     # 渲染后的 ocserv 主配置
 │   ├── auth/ocpasswd                   # 用户密码文件
 │   ├── client-ca/public/               # 客户端证书 CA 与 CRL
-│   ├── client-ca/private/              # CA 私钥和吊销记录（仅工具容器挂载）
-│   ├── user-certs/                     # 用户证书与 p12 文件
+│   ├── client-ca/private/              # CA 私钥、签发证书索引和吊销记录（仅工具容器挂载）
+│   ├── user-certs/                     # 用户 p12 交付文件
 │   └── config-per-user/                # 每用户配置
 │
 ├── exporter/

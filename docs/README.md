@@ -186,6 +186,8 @@ docker compose --profile tools run --rm ocserv-auth revoke username
 docker compose restart ocserv
 ```
 
+执行 `revoke` 时需要输入目标用户名确认。自动化场景可显式传入 `--yes` 或 `-y` 跳过确认，例如 `revoke --yes username`。
+
 重新签发已吊销用户证书必须显式执行：
 
 ```bash
@@ -195,7 +197,7 @@ docker compose restart ocserv
 
 `reissue` 只接受已经被 `revoke` 标记为吊销的用户。未吊销用户如需轮换证书，应先执行 `revoke username`，再执行 `reissue username`；如果 `reissue` 生成证书失败，吊销禁用标记会保留，`manage` 仍不会自动重发该用户证书。
 
-证书文件会持久化到 `config/user-certs/<username>/`，其中 `<username>.p12` 适用于常见客户端，`ios-<username>.p12` 使用 iOS 兼容格式。`.p12` 文件按当前项目策略导出为空导入密码，必须通过文件权限、加密传输和及时删除临时副本来控制泄露风险。
+用户交付文件会持久化到 `config/user-certs/<username>/`，其中 `<username>.p12` 适用于常见客户端，`ios-<username>.p12` 使用 iOS 兼容格式。用户目录不会长期保存 `*-key.pem` 或 `*-cert.pem`；当前有效证书索引保存在 `config/client-ca/private/issued-certs/`，吊销证书和吊销元数据保存在 `config/client-ca/private/revoked/` 与 `config/client-ca/private/revoked-metadata/`。如果 P12 交付文件丢失，`status` 会显示 `artifact-missing`，应先吊销再重新签发。
 
 客户端证书认证依赖 `config/client-ca/public/ca-cert.pem` 和 `config/client-ca/public/crl.pem`。CA 私钥只保存在 `config/client-ca/private/`，不会挂载到长期运行的 `ocserv` 容器。
 
@@ -454,7 +456,7 @@ Alpine `full` 会强制保留 PAM、GSSAPI/Kerberos，并自动探测 RADIUS 与
 | `./config/config-per-user` | `/etc/ocserv/config-per-user` | ro | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | rw | 日志 |
 
-按需运行的 `ocserv-auth` 工具容器额外挂载 `./config/client-ca/private` 和 `./config/user-certs`，用于保存 CA 私钥、吊销记录和用户证书文件；这些目录不会进入 `ocserv` 运行容器。
+按需运行的 `ocserv-auth` 工具容器额外挂载 `./config/client-ca/private` 和 `./config/user-certs`，用于保存 CA 私钥、证书管理索引、吊销记录和用户 P12 交付文件；这些目录不会进入 `ocserv` 运行容器。
 
 ### 5.3 容器权限
 

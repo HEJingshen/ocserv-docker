@@ -72,7 +72,6 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - ALLOW_EMPTY_P12_PASSWORD=${ALLOW_EMPTY_P12_PASSWORD:-true}
       - P12_EXPORT_PASSWORD=${P12_EXPORT_PASSWORD:-}
-      - P12_EXPORT_PASSWORD_FILE=${P12_EXPORT_PASSWORD_FILE:-}
     volumes:
       - ./config/auth:/etc/ocserv/auth:ro
       - ./config/client-ca/public:/etc/ocserv/ca:rw
