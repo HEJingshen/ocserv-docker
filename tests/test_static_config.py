@@ -10,12 +10,33 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
+POSIX_SHELL_SCRIPTS = (
+    "scripts/render-ocserv-conf.sh",
+    "scripts/configure-alpine-repositories.sh",
+    "scripts/prepare-ocserv-config.sh",
+    "scripts/prepare-monitoring-config.sh",
+    "scripts/migrate-legacy-cert-auth.sh",
+    "scripts/setup-fail2ban.sh",
+    "nginx/docker-entrypoint.sh",
+    "docker/ocserv/s6-init.sh",
+    "tests/test_nginx_entrypoint.sh",
+    "tests/test_ocserv_cert_auth.sh",
+    "tests/test_migrate_legacy_cert_auth.sh",
+)
+
+BASH_SHELL_SCRIPTS = (
+    "scripts/ocserv-cert-auth.sh",
+    "install-docker.sh",
+)
+
+
 class StaticConfigTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.dockerfile = (ROOT_DIR / "Dockerfile").read_text(encoding="utf-8")
         cls.exporter_dockerfile = (ROOT_DIR / "exporter" / "Dockerfile").read_text(encoding="utf-8")
         cls.auth_dockerfile = (ROOT_DIR / "auth" / "Dockerfile").read_text(encoding="utf-8")
+        cls.ocserv_version = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip()
         cls.ocserv_template = (ROOT_DIR / "config" / "ocserv.conf.template").read_text(encoding="utf-8")
         cls.env_example = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
         cls.dockerignore = (ROOT_DIR / ".dockerignore").read_text(encoding="utf-8")
@@ -28,6 +49,38 @@ class StaticConfigTest(unittest.TestCase):
         cls.render_script = (ROOT_DIR / "scripts" / "render-ocserv-conf.sh").read_text(encoding="utf-8")
         cls.fail2ban_setup = (ROOT_DIR / "scripts" / "setup-fail2ban.sh").read_text(encoding="utf-8")
         cls.fail2ban_jail = (ROOT_DIR / "fail2ban" / "jail.d" / "nginx-auth.conf").read_text(encoding="utf-8")
+
+    def test_shell_scripts_have_declared_interpreter_style(self):
+        expected_scripts = sorted(POSIX_SHELL_SCRIPTS + BASH_SHELL_SCRIPTS)
+        actual_scripts = sorted(
+            path.relative_to(ROOT_DIR).as_posix()
+            for path in ROOT_DIR.rglob("*.sh")
+            if ".git" not in path.parts
+        )
+        self.assertEqual(expected_scripts, actual_scripts)
+
+        for script in POSIX_SHELL_SCRIPTS:
+            lines = (ROOT_DIR / script).read_text(encoding="utf-8").splitlines()
+            self.assertGreaterEqual(len(lines), 2, script)
+            self.assertEqual("#!/bin/sh", lines[0], script)
+            self.assertEqual("set -eu", lines[1], script)
+
+        for script in BASH_SHELL_SCRIPTS:
+            lines = (ROOT_DIR / script).read_text(encoding="utf-8").splitlines()
+            self.assertGreaterEqual(len(lines), 2, script)
+            self.assertEqual("#!/usr/bin/env bash", lines[0], script)
+            first_command = next(
+                line
+                for line in lines[1:]
+                if line.strip() and not line.startswith("#")
+            )
+            self.assertEqual("set -euo pipefail", first_command, script)
+
+        self.assertIn(f"for f in {' '.join(POSIX_SHELL_SCRIPTS)}; do", self.workflow)
+        self.assertIn(f"for f in {' '.join(BASH_SHELL_SCRIPTS)}; do", self.workflow)
+        self.assertIn('sh -n "$f"', self.workflow)
+        self.assertIn('bash -n "$f"', self.workflow)
+        self.assertNotIn("&> /dev/null", self.fail2ban_setup)
 
     def test_ocserv_seccomp_build_support_is_disabled(self):
         self.assertNotIn("libseccomp-dev", self.dockerfile)
@@ -47,6 +100,9 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn("ARG ALPINE_IMAGE=alpine:3.23.4", self.dockerfile)
         self.assertIn("ARG ALPINE_IMAGE=alpine:3.23.4", self.exporter_dockerfile)
         self.assertIn("ARG ALPINE_IMAGE=alpine:3.23.4", self.auth_dockerfile)
+        self.assertIn("ARG OCSERV_VERSION\n", self.dockerfile)
+        self.assertIn("ARG OCSERV_VERSION\n", self.exporter_dockerfile)
+        self.assertNotIn(f"ARG OCSERV_VERSION={self.ocserv_version}", combined)
         for old_token in (
             "alpine-" + "rootfs",
             "ALPINE_" + "MINIROOTFS_SHA256",
@@ -99,7 +155,10 @@ class StaticConfigTest(unittest.TestCase):
         auth_service = self.compose.split("\n  ocserv-auth:", 1)[1]
         self.assertNotIn("ALLOW_EMPTY_P12_PASSWORD", ocserv_service)
         self.assertIn("ALLOW_EMPTY_P12_PASSWORD=${ALLOW_EMPTY_P12_PASSWORD:-true}", auth_service)
-        self.assertIn("image: ${OCSERV_AUTH_IMAGE:-kingsonho/ocserv-auth:1.4.2}", auth_service)
+        self.assertIn(
+            f"image: ${{OCSERV_AUTH_IMAGE:-kingsonho/ocserv-auth:${{OCSERV_VERSION:-{self.ocserv_version}}}}}",
+            auth_service,
+        )
         self.assertNotIn("\n    build:", auth_service)
 
         self.assertIn("./config/client-ca/public:/etc/ocserv/ca:ro", self.compose)
@@ -177,6 +236,9 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn("docker build --pull -f auth/Dockerfile -t ocserv-auth:ci .", self.workflow)
         self.assertIn("OCSERV_AUTH_IMAGE_NAME: kingsonho/ocserv-auth", self.workflow)
         self.assertIn("OCSERV_TARBALL_SHA256", self.workflow)
+        self.assertIn("- 'VERSION'", self.workflow)
+        self.assertIn('echo "OCSERV_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"', self.workflow)
+        self.assertNotIn(f'OCSERV_VERSION: "{self.ocserv_version}"', self.workflow)
         self.assertIn("sha256sum -c -", self.workflow)
         self.assertIn("sudo apt-get update -qq", self.workflow)
         self.assertIn('for f in scripts/render-ocserv-conf.sh', self.workflow)
@@ -191,6 +253,17 @@ class StaticConfigTest(unittest.TestCase):
         self.assertIn("needs_source: \"false\"", self.workflow)
         self.assertIn("if: matrix.image.needs_source == 'true'", self.workflow)
         self.assertIn("env[matrix.image.name_var]", self.workflow)
+        self.assertIn("id: build", self.workflow)
+        self.assertIn("push-by-digest=true", self.workflow)
+        self.assertIn("name-canonical=true", self.workflow)
+        self.assertIn("steps.build.outputs.digest", self.workflow)
+        self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2", self.workflow)
+        self.assertIn("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0", self.workflow)
+        self.assertIn("pattern: digests-${{ matrix.image.type }}-*", self.workflow)
+        self.assertIn("merge-multiple: true", self.workflow)
+        self.assertIn("IMAGE_REF=\"${{ env.REGISTRY }}/${IMAGE_NAME}\"", self.workflow)
+        self.assertIn("docker buildx imagetools create", self.workflow)
+        self.assertNotIn(":${{ env.OCSERV_VERSION }}-${{ matrix.platform.arch }}", self.workflow)
         self.assertNotIn("Resolve image metadata", self.workflow)
         self.assertNotIn("setup-qemu-action", self.workflow)
         self.assertNotIn("Set up QEMU", self.workflow)
@@ -199,9 +272,23 @@ class StaticConfigTest(unittest.TestCase):
         self.assertNotIn(f"{os.linesep}      - name: Build ocserv slim", self.workflow)
 
     def test_image_defaults_are_pinned_in_env_example(self):
-        self.assertIn("OCSERV_IMAGE=kingsonho/ocserv:1.4.2", self.env_example)
-        self.assertIn("OCSERV_AUTH_IMAGE=kingsonho/ocserv-auth:1.4.2", self.env_example)
-        self.assertIn("EXPORTER_IMAGE=kingsonho/ocserv-exporter:1.4.2", self.env_example)
+        self.assertRegex(self.ocserv_version, r"^[0-9]+\.[0-9]+\.[0-9]+$")
+        self.assertIn(f"OCSERV_VERSION={self.ocserv_version}", self.env_example)
+        self.assertIn(
+            f"image: ${{OCSERV_IMAGE:-kingsonho/ocserv:${{OCSERV_VERSION:-{self.ocserv_version}}}}}",
+            self.compose,
+        )
+        self.assertIn(
+            f"image: ${{OCSERV_AUTH_IMAGE:-kingsonho/ocserv-auth:${{OCSERV_VERSION:-{self.ocserv_version}}}}}",
+            self.compose,
+        )
+        self.assertIn(
+            f"image: ${{EXPORTER_IMAGE:-kingsonho/ocserv-exporter:${{OCSERV_VERSION:-{self.ocserv_version}}}}}",
+            self.monitoring_compose,
+        )
+        self.assertIn("# OCSERV_IMAGE=kingsonho/ocserv:${OCSERV_VERSION}", self.env_example)
+        self.assertIn("# OCSERV_AUTH_IMAGE=kingsonho/ocserv-auth:${OCSERV_VERSION}", self.env_example)
+        self.assertIn("# EXPORTER_IMAGE=kingsonho/ocserv-exporter:${OCSERV_VERSION}", self.env_example)
         self.assertIn("GRAFANA_IMAGE=grafana/grafana:13.0.1-security-01", self.env_example)
         self.assertIn("NGINX_IMAGE=nginx:1.30.2-alpine3.23-slim", self.env_example)
         self.assertNotIn("OCSERV_IMAGE=kingsonho/ocserv:latest", self.env_example)

@@ -7,6 +7,7 @@ on:
     paths:
       - 'Dockerfile'
       - '**/Dockerfile'
+      - 'VERSION'
       - '.github/workflows/**'
       - 'auth/**'
       - 'config/**'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'Dockerfile'
       - '**/Dockerfile'
+      - 'VERSION'
       - '.github/workflows/**'
       - 'auth/**'
       - 'config/**'
@@ -37,7 +39,6 @@ env:
   OCSERV_IMAGE_NAME: kingsonho/ocserv
   EXPORTER_IMAGE_NAME: kingsonho/ocserv-exporter
   OCSERV_AUTH_IMAGE_NAME: kingsonho/ocserv-auth
-  OCSERV_VERSION: "1.4.2"
   OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
   ALPINE_VERSION: "3.23.4"
   ALPINE_IMAGE_AMD64: alpine:3.23.4@sha256:4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b
@@ -61,10 +62,10 @@ jobs:
 
       - name: Check shell scripts
         run: |
-          for f in scripts/render-ocserv-conf.sh scripts/configure-alpine-repositories.sh scripts/prepare-ocserv-config.sh scripts/prepare-monitoring-config.sh nginx/docker-entrypoint.sh docker/ocserv/s6-init.sh tests/test_nginx_entrypoint.sh tests/test_ocserv_cert_auth.sh; do
+          for f in scripts/render-ocserv-conf.sh scripts/configure-alpine-repositories.sh scripts/prepare-ocserv-config.sh scripts/prepare-monitoring-config.sh scripts/migrate-legacy-cert-auth.sh scripts/setup-fail2ban.sh nginx/docker-entrypoint.sh docker/ocserv/s6-init.sh tests/test_nginx_entrypoint.sh tests/test_ocserv_cert_auth.sh tests/test_migrate_legacy_cert_auth.sh; do
             sh -n "$f"
           done
-          for f in scripts/ocserv-cert-auth.sh scripts/setup-fail2ban.sh; do
+          for f in scripts/ocserv-cert-auth.sh install-docker.sh; do
             bash -n "$f"
           done
 
@@ -115,6 +116,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Load ocserv version
+        run: echo "OCSERV_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
       - name: Download source files
         if: matrix.image.needs_source == 'true'
         run: |
@@ -152,19 +156,36 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build and optionally push single-platform image
+      - name: Build and optionally push single-platform image digest
+        id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/${{ matrix.platform.arch }}
-          tags: ${{ env.REGISTRY }}/${{ env[matrix.image.name_var] }}:${{ env.OCSERV_VERSION }}-${{ matrix.platform.arch }}
-          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          tags: ${{ env.REGISTRY }}/${{ env[matrix.image.name_var] }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
           cache-from: type=gha,scope=${{ matrix.image.type }}-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.type }}-${{ matrix.platform.arch }}
           build-args: ${{ steps.build_args.outputs.args }}
           sbom: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
           provenance: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+
+      - name: Export image digest
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        run: |
+          mkdir -p /tmp/digests/${{ matrix.image.type }}
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${{ matrix.image.type }}/${digest#sha256:}"
+
+      - name: Upload image digest
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-${{ matrix.image.type }}-${{ matrix.platform.arch }}
+          path: /tmp/digests/${{ matrix.image.type }}/*
+          if-no-files-found: error
+          retention-days: 1
 
   merge-manifests:
     needs: build-images
@@ -182,6 +203,12 @@ jobs:
           - type: auth
             name_var: OCSERV_AUTH_IMAGE_NAME
     steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Load ocserv version
+        run: echo "OCSERV_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
@@ -191,12 +218,31 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Download image digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: digests-${{ matrix.image.type }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
       - name: Publish multi-arch manifests
         env:
           IMAGE_NAME: ${{ env[matrix.image.name_var] }}
         run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${IMAGE_NAME}"
+          mapfile -t DIGEST_FILES < <(find /tmp/digests -type f | sort)
+
+          if [ "${#DIGEST_FILES[@]}" -ne 2 ]; then
+            printf 'expected 2 image digests for %s, found %s\n' "${IMAGE_NAME}" "${#DIGEST_FILES[@]}" >&2
+            exit 1
+          fi
+
+          SOURCES=()
+          for digest_file in "${DIGEST_FILES[@]}"; do
+            SOURCES+=("${IMAGE_REF}@sha256:$(basename "${digest_file}")")
+          done
+
           docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ env.OCSERV_VERSION }} \
-            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:latest \
-            ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ env.OCSERV_VERSION }}-amd64 \
-            ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ env.OCSERV_VERSION }}-arm64
+            -t "${IMAGE_REF}:${{ env.OCSERV_VERSION }}" \
+            -t "${IMAGE_REF}:latest" \
+            "${SOURCES[@]}"

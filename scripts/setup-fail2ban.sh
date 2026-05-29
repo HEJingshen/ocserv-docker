@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -40,9 +40,9 @@ if [ "${MONITORING_PORT}" -lt 1 ] || [ "${MONITORING_PORT}" -gt 65535 ]; then
 fi
 
 echo "📦 安装 Fail2Ban..."
-if command -v apt &> /dev/null; then
+if command -v apt >/dev/null 2>&1; then
     sudo apt update && sudo apt install -y fail2ban nftables
-elif command -v dnf &> /dev/null; then
+elif command -v dnf >/dev/null 2>&1; then
     sudo dnf install -y fail2ban nftables
 else
     echo "❌ 不支持的包管理器" && exit 1

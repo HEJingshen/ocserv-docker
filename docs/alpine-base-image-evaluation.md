@@ -6,9 +6,9 @@
 
 | 镜像 | Dockerfile | 发布标签 |
 |:--|:--|:--|
-| ocserv | `Dockerfile` | `kingsonho/ocserv:1.4.2`；`latest` 指向该版本标签 |
-| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:1.4.2`；`latest` 指向该版本标签 |
-| ocserv-auth | `auth/Dockerfile` | `kingsonho/ocserv-auth:1.4.2`；`latest` 指向该版本标签；本地备用 `ocserv-auth:local` |
+| ocserv | `Dockerfile` | `kingsonho/ocserv:${OCSERV_VERSION}`；`latest` 指向该版本标签 |
+| exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:${OCSERV_VERSION}`；`latest` 指向该版本标签 |
+| ocserv-auth | `auth/Dockerfile` | `kingsonho/ocserv-auth:${OCSERV_VERSION}`；`latest` 指向该版本标签；本地备用 `ocserv-auth:local` |
 
 本地构建默认使用 `alpine:3.23.4`。发布构建为 amd64 和 arm64 分别传入官方 Alpine 平台 digest，使基础镜像输入固定，同时让 Buildx 负责平台解析。`auth` 镜像同样复用 Alpine 基线，并通过 `scripts/configure-alpine-repositories.sh` 启用 `main + community` 仓库以安装 `fzf`。
 
@@ -27,24 +27,28 @@ Dockerfile 使用 BuildKit cache mount 缓存 `apk` 索引，保留 virtual pack
 构建前只需要准备 ocserv 源码：
 
 ```bash
+OCSERV_VERSION="$(cat VERSION)"
 mkdir -p src
-wget -O src/ocserv-1.4.2.tar.xz https://www.infradead.org/ocserv/ocserv-1.4.2.tar.xz
+wget -O "src/ocserv-${OCSERV_VERSION}.tar.xz" \
+  "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz"
 ```
 
 构建 ocserv 主镜像：
 
 ```bash
 docker buildx build \
+  --build-arg OCSERV_VERSION="$(cat VERSION)" \
   -f Dockerfile \
-  -t ocserv:1.4.2 .
+  -t "ocserv:$(cat VERSION)" .
 ```
 
 构建 exporter 镜像：
 
 ```bash
 docker buildx build \
+  --build-arg OCSERV_VERSION="$(cat VERSION)" \
   -f exporter/Dockerfile \
-  -t ocserv-exporter:1.4.2 .
+  -t "ocserv-exporter:$(cat VERSION)" .
 ```
 
 构建证书工具镜像：
@@ -55,7 +59,7 @@ docker buildx build \
   -t ocserv-auth:local .
 ```
 
-如果部署时要使用本地构建版本，请在 `.env` 中设置 `OCSERV_AUTH_IMAGE=ocserv-auth:local`；默认 Compose 使用 Docker Hub 上的 `kingsonho/ocserv-auth:1.4.2`。
+如果部署时要使用本地构建版本，请在 `.env` 中设置 `OCSERV_AUTH_IMAGE=ocserv-auth:local`；默认 Compose 使用 `OCSERV_VERSION` 选择 Docker Hub 上的版本标签。
 
 arm64 构建使用 `--platform linux/arm64`。
 

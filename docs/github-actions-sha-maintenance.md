@@ -25,4 +25,4 @@ rg -n '@(master|main|latest|v[0-9]+)(\s|$)' .github/workflows
 
 最后一条命令不应返回任何匹配结果。
 
-对于 pull request，还需要确认 `docker-build.yml` 的 `validate` job 和 `build-images` 6 个矩阵任务全部通过；如果调整了发布逻辑，还要额外确认 `merge-manifests` 仍然只在 `main`/`master` 的非 PR 场景执行，并继续生成 `:<version>` 与 `:latest` 两类多架构标签。
+对于 pull request，还需要确认 `docker-build.yml` 的 `validate` job 和 `build-images` 6 个矩阵任务全部通过；如果调整了发布逻辑，还要额外确认 `merge-manifests` 仍然只在 `main`/`master` 的非 PR 场景执行，并继续通过 digest artifacts 生成 `:<version>` 与 `:latest` 两类多架构标签，不发布带架构后缀的版本标签。

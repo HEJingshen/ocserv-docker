@@ -4,7 +4,7 @@ ARG ALPINE_IMAGE=alpine:3.23.4
 
 FROM ${ALPINE_IMAGE} AS builder
 
-ARG OCSERV_VERSION=1.4.2
+ARG OCSERV_VERSION
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
@@ -63,7 +63,7 @@ RUN set -eux; \
 
 FROM ${ALPINE_IMAGE}
 
-ARG OCSERV_VERSION=1.4.2
+ARG OCSERV_VERSION
 ARG ALPINE_IMAGE=alpine:3.23.4
 ARG ALPINE_VERSION=3.23.4
 ARG BUILD_DATE

@@ -116,7 +116,7 @@ docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 
 首次使用证书工具前，建议至少先创建一个密码用户。
 
-默认证书工具镜像为 `kingsonho/ocserv-auth:1.4.2`。首次使用前可先预拉取：
+默认证书工具镜像默认为 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，版本来自 `.env` 中的 `OCSERV_VERSION`。首次使用前可先预拉取：
 
 ```bash
 docker compose --profile tools pull ocserv-auth
@@ -299,7 +299,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml down -v
 构建前至少准备 ocserv 源码包：
 
 ```bash
-OCSERV_VERSION=1.4.2
+OCSERV_VERSION="$(cat VERSION)"
 OCSERV_TARBALL_SHA256=e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5
 mkdir -p src
 curl -L -o "src/ocserv-${OCSERV_VERSION}.tar.xz" \
@@ -310,20 +310,27 @@ echo "${OCSERV_TARBALL_SHA256}  src/ocserv-${OCSERV_VERSION}.tar.xz" | sha256sum
 ### 4.2 构建 ocserv 镜像
 
 ```bash
-docker buildx build -t ocserv:1.4.2 .
+docker buildx build \
+  --build-arg OCSERV_VERSION="$(cat VERSION)" \
+  -t "ocserv:$(cat VERSION)" .
 ```
 
 如需多架构构建：
 
 ```bash
-docker buildx build --platform linux/amd64 -t registry.example.com/ocserv:1.4.2-amd64 .
-docker buildx build --platform linux/arm64 -t registry.example.com/ocserv:1.4.2-arm64 .
+docker buildx build --platform linux/amd64,linux/arm64 \
+  --build-arg OCSERV_VERSION="$(cat VERSION)" \
+  -t "registry.example.com/ocserv:$(cat VERSION)" \
+  --push .
 ```
 
 ### 4.3 构建 Exporter 镜像
 
 ```bash
-docker buildx build -f exporter/Dockerfile -t ocserv-exporter:1.4.2 .
+docker buildx build \
+  --build-arg OCSERV_VERSION="$(cat VERSION)" \
+  -f exporter/Dockerfile \
+  -t "ocserv-exporter:$(cat VERSION)" .
 ```
 
 ### 4.4 构建证书工具镜像（可选，本地备用）
@@ -332,7 +339,7 @@ docker buildx build -f exporter/Dockerfile -t ocserv-exporter:1.4.2 .
 docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
 ```
 
-如果要在部署时使用本地构建镜像，请把 `OCSERV_AUTH_IMAGE=ocserv-auth:local` 写入 `.env`。默认情况下，Compose 会直接拉取 `kingsonho/ocserv-auth:1.4.2`。更多构建和镜像实现细节见 [project-architecture.md](./project-architecture.md)。
+如果要在部署时使用本地构建镜像，请把 `OCSERV_AUTH_IMAGE=ocserv-auth:local` 写入 `.env`。默认情况下，Compose 会按 `OCSERV_VERSION` 拉取 Docker Hub 上的版本标签。升级 ocserv 时先更新仓库根目录 `VERSION`，再同步 `OCSERV_TARBALL_SHA256`。更多构建和镜像实现细节见 [project-architecture.md](./project-architecture.md)。
 
 ---
 

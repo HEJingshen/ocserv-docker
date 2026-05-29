@@ -1,6 +1,6 @@
 services:
   ocserv:
-    image: ${OCSERV_IMAGE:-kingsonho/ocserv:1.4.2}
+    image: ${OCSERV_IMAGE:-kingsonho/ocserv:${OCSERV_VERSION:-1.4.2}}
     container_name: ocserv
     restart: unless-stopped
     mem_limit: ${OCSERV_MEM_LIMIT:-512m}
@@ -59,7 +59,7 @@ services:
       - ${NETWORK_NAME:-monitor-net}
 
   ocserv-auth:
-    image: ${OCSERV_AUTH_IMAGE:-kingsonho/ocserv-auth:1.4.2}
+    image: ${OCSERV_AUTH_IMAGE:-kingsonho/ocserv-auth:${OCSERV_VERSION:-1.4.2}}
     profiles:
       - tools
     network_mode: none

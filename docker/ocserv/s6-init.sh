@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -eu
 
 echo "=== ocserv initialization start ==="
 
@@ -39,7 +39,10 @@ if [ -n "${VPN_NETWORK_VAL}" ]; then
                 IFS='.'
                 set -- ${VPN_NETMASK_VAL}
                 IFS="${_old_IFS}"
-                for _octet in "$1" "$2" "$3" "$4"; do
+                if [ "$#" -ne 4 ]; then
+                    _prefix=0
+                fi
+                for _octet in "${1:-}" "${2:-}" "${3:-}" "${4:-}"; do
                     case "${_octet}" in
                         255) _prefix=$((_prefix + 8)) ;;
                         254) _prefix=$((_prefix + 7)) ;;

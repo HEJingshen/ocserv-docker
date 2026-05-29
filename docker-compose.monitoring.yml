@@ -1,6 +1,6 @@
 services:
   ocserv-exporter:
-    image: ${EXPORTER_IMAGE:-kingsonho/ocserv-exporter:1.4.2}
+    image: ${EXPORTER_IMAGE:-kingsonho/ocserv-exporter:${OCSERV_VERSION:-1.4.2}}
     container_name: ocserv-exporter
     # occtl socket queries require root peer credentials in this Docker deployment.
     # The exporter only receives the ocserv runtime socket as a read-only volume.
