@@ -8,7 +8,7 @@
 |:--|:--|:--|
 | ocserv | `Dockerfile` | `kingsonho/ocserv:1.4.2`；`latest` 指向该版本标签 |
 | exporter | `exporter/Dockerfile` | `kingsonho/ocserv-exporter:1.4.2`；`latest` 指向该版本标签 |
-| ocserv-auth | `auth/Dockerfile` | `ocserv-auth:local`（按需本地构建工具镜像） |
+| ocserv-auth | `auth/Dockerfile` | `kingsonho/ocserv-auth:1.4.2`；`latest` 指向该版本标签；本地备用 `ocserv-auth:local` |
 
 本地构建默认使用 `alpine:3.23.4`。发布构建为 amd64 和 arm64 分别传入官方 Alpine 平台 digest，使基础镜像输入固定，同时让 Buildx 负责平台解析。`auth` 镜像同样复用 Alpine 基线，并通过 `scripts/configure-alpine-repositories.sh` 启用 `main + community` 仓库以安装 `fzf`。
 
@@ -54,6 +54,8 @@ docker buildx build \
   -f auth/Dockerfile \
   -t ocserv-auth:local .
 ```
+
+如果部署时要使用本地构建版本，请在 `.env` 中设置 `OCSERV_AUTH_IMAGE=ocserv-auth:local`；默认 Compose 使用 Docker Hub 上的 `kingsonho/ocserv-auth:1.4.2`。
 
 arm64 构建使用 `--platform linux/arm64`。
 

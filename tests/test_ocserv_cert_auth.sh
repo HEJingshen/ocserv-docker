@@ -107,6 +107,20 @@ run_tool() {
     bash "${SCRIPT}" "$@"
 }
 
+run_tool_with_path_prefix() {
+    path_prefix=$1
+    shift
+    PATH="${path_prefix}:${BIN_DIR}:${PATH}" \
+    OCPASSWD="${AUTH_DIR}/ocpasswd" \
+    CA_PUBLIC_DIR="${CA_PUBLIC_DIR}" \
+    CA_PRIVATE_DIR="${CA_PRIVATE_DIR}" \
+    CERT_DIR="${USER_CERT_DIR}" \
+    CONFIG_PER_USER_DIR="${CONFIG_PER_USER_DIR}" \
+    LOCK_FILE="${LOCK_FILE}" \
+    ALLOW_EMPTY_P12_PASSWORD=true \
+    bash "${SCRIPT}" "$@"
+}
+
 assert_no_reissue_leftovers() {
     user=$1
     for candidate in "${USER_CERT_DIR}/.tmp-${user}."* "${USER_CERT_DIR}/.old-${user}."*; do
@@ -157,6 +171,26 @@ run_tool manage >/dev/null
 
 status_output=$(run_tool status 2>&1)
 echo "$status_output" | grep -q '^alice[[:space:]]*valid' || fail "alice status is not valid"
+echo "$status_output" | grep -Eq '^alice[[:space:]]*valid[[:space:]]*expires [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z \([0-9]+ days left\)$' || fail "alice status did not include expiry detail"
+CA_CERT_BACKUP="${BASE_DIR}/ca-cert-backup.pem"
+cp "${CA_PUBLIC_DIR}/ca-cert.pem" "${CA_CERT_BACKUP}"
+
+VERIFY_FAIL_BIN_DIR="${BASE_DIR}/verify-fail-bin"
+mkdir -p "${VERIFY_FAIL_BIN_DIR}"
+cat > "${VERIFY_FAIL_BIN_DIR}/openssl" <<EOF
+#!/bin/sh
+if [ "\$1" = "verify" ]; then
+    printf '%s\n' 'CN = forced verify failure' >&2
+    printf '%s\n' 'error 20 at 0 depth lookup: unable to get local issuer certificate' >&2
+    exit 2
+fi
+exec "${REAL_OPENSSL}" "\$@"
+EOF
+chmod +x "${VERIFY_FAIL_BIN_DIR}/openssl"
+status_output=$(run_tool_with_path_prefix "${VERIFY_FAIL_BIN_DIR}" status 2>&1)
+echo "$status_output" | grep -q '^alice[[:space:]]*invalid-chain' || fail "alice status did not downgrade on verify failure"
+echo "$status_output" | grep -q 'unable to get local issuer certificate' || fail "status did not surface verify failure reason"
+
 bob_serial=$(normalize_serial "$(openssl x509 -in "${ISSUED_CERT_DIR}/bob.pem" -noout -serial | sed 's/^serial=//')")
 if run_tool reissue bob >/dev/null 2>&1; then
     fail "reissue unexpectedly succeeded for non-revoked bob"
@@ -178,6 +212,32 @@ run_tool manage >/dev/null
 rm -f "${USER_CERT_DIR}/bob/ios-bob.p12"
 status_output=$(run_tool status 2>&1)
 echo "$status_output" | grep -q '^bob[[:space:]]*artifact-missing' || fail "bob status did not report missing p12 artifact"
+status_output=$(run_tool_with_path_prefix "${VERIFY_FAIL_BIN_DIR}" status 2>&1)
+echo "$status_output" | grep -q '^bob[[:space:]]*artifact-missing' || fail "artifact-missing status lost precedence over verify failure"
+
+printf 'not a certificate\n' > "${CA_PUBLIC_DIR}/ca-cert.pem"
+status_output=$(run_tool status 2>&1)
+echo "$status_output" | grep -q 'ca-invalid' || fail "status did not report unreadable CA"
+echo "$status_output" | grep -q '^alice[[:space:]]*invalid-chain' || fail "alice status did not downgrade on unreadable CA"
+echo "$status_output" | grep -q '^bob[[:space:]]*artifact-missing' || fail "artifact-missing status lost precedence over unreadable CA"
+cp "${CA_CERT_BACKUP}" "${CA_PUBLIC_DIR}/ca-cert.pem"
+
+EXPIRED_CA_BIN_DIR="${BASE_DIR}/expired-ca-bin"
+mkdir -p "${EXPIRED_CA_BIN_DIR}"
+cat > "${EXPIRED_CA_BIN_DIR}/openssl" <<EOF
+#!/bin/sh
+if [ "\$1" = "x509" ] && [ "\$2" = "-in" ] && [ "\$3" = "${CA_PUBLIC_DIR}/ca-cert.pem" ] && [ "\$4" = "-noout" ] && [ "\$5" = "-enddate" ]; then
+    printf 'notAfter=Jan  1 00:00:00 2000 GMT\n'
+    exit 0
+fi
+exec "${REAL_OPENSSL}" "\$@"
+EOF
+chmod +x "${EXPIRED_CA_BIN_DIR}/openssl"
+status_output=$(run_tool_with_path_prefix "${EXPIRED_CA_BIN_DIR}" status 2>&1)
+echo "$status_output" | grep -q 'ca-expired' || fail "status did not report expired CA"
+echo "$status_output" | grep -q '^alice[[:space:]]*invalid-chain' || fail "alice status did not downgrade on expired CA"
+echo "$status_output" | grep -q 'issuing CA certificate expired 2000-01-01T00:00:00Z' || fail "status did not include expired CA detail"
+echo "$status_output" | grep -q '^bob[[:space:]]*artifact-missing' || fail "artifact-missing status lost precedence over expired CA"
 run_tool manage >/dev/null
 [ ! -e "${USER_CERT_DIR}/bob/ios-bob.p12" ] || fail "manage unexpectedly regenerated missing bob p12 artifact"
 
@@ -209,6 +269,8 @@ assert_crl_contains_serial "${CA_PUBLIC_DIR}/crl.pem" "${old_serial}" "old seria
 
 status_output=$(run_tool status 2>&1)
 echo "$status_output" | grep -q '^alice[[:space:]]*revoked' || fail "alice status is not revoked"
+status_output=$(run_tool_with_path_prefix "${VERIFY_FAIL_BIN_DIR}" status 2>&1)
+echo "$status_output" | grep -q '^alice[[:space:]]*revoked' || fail "revoked status lost precedence over verify failure"
 run_tool manage >/dev/null
 [ ! -e "${ISSUED_CERT_DIR}/alice.pem" ] || fail "manage reissued a revoked user unexpectedly"
 

@@ -338,7 +338,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ocserv_bytes_rx_rate_bytes_per_second",
+          "expr": "ocserv_active_sessions_bytes_rx_rate_bytes_per_second",
           "interval": "10s",
           "legendFormat": "RX Rate (B/s)",
           "refId": "A"
@@ -348,7 +348,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ocserv_bytes_tx_rate_bytes_per_second",
+          "expr": "ocserv_active_sessions_bytes_tx_rate_bytes_per_second",
           "interval": "10s",
           "legendFormat": "TX Rate (B/s)",
           "refId": "B"
@@ -674,7 +674,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ocserv_stats_bytes_rx_total",
+          "expr": "ocserv_server_bytes_rx_total",
           "interval": "30s",
           "legendFormat": "RX Total",
           "refId": "A"
@@ -684,7 +684,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ocserv_stats_bytes_tx_total",
+          "expr": "ocserv_server_bytes_tx_total",
           "interval": "30s",
           "legendFormat": "TX Total",
           "refId": "B"

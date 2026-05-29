@@ -74,10 +74,10 @@ class OcservExporterTest(unittest.TestCase):
         exporter.clear_user_metrics(clear_history=True)
         exporter.previous_total_traffic = None
         exporter.reset_session_counts()
-        exporter.ocserv_rx_bytes.set(0)
-        exporter.ocserv_tx_bytes.set(0)
-        exporter.ocserv_rx_rate.set(0)
-        exporter.ocserv_tx_rate.set(0)
+        exporter.ocserv_active_sessions_bytes_rx.set(0)
+        exporter.ocserv_active_sessions_bytes_tx.set(0)
+        exporter.ocserv_active_sessions_bytes_rx_rate.set(0)
+        exporter.ocserv_active_sessions_bytes_tx_rate.set(0)
 
     def collect_with_users(self, users, scrape_time):
         def fake_run_occtl(args):
@@ -153,12 +153,12 @@ class OcservExporterTest(unittest.TestCase):
         self.assertEqual(exporter.ocserv_user_rx._metrics[label_12]._value.get(), 360)
         self.assertEqual(exporter.ocserv_user_rx_rate._metrics[label_11]._value.get(), 5)
         self.assertEqual(exporter.ocserv_user_rx_rate._metrics[label_12]._value.get(), 6)
-        self.assertEqual(exporter.ocserv_rx_bytes._value.get(), 510)
-        self.assertEqual(exporter.ocserv_tx_bytes._value.get(), 880)
-        self.assertEqual(exporter.ocserv_rx_rate._value.get(), 11)
-        self.assertEqual(exporter.ocserv_tx_rate._value.get(), 18)
-        self.assertEqual(exporter.ocserv_stats_rx_bytes._value.get(), 999999)
-        self.assertEqual(exporter.ocserv_stats_tx_bytes._value.get(), 888888)
+        self.assertEqual(exporter.ocserv_active_sessions_bytes_rx._value.get(), 510)
+        self.assertEqual(exporter.ocserv_active_sessions_bytes_tx._value.get(), 880)
+        self.assertEqual(exporter.ocserv_active_sessions_bytes_rx_rate._value.get(), 11)
+        self.assertEqual(exporter.ocserv_active_sessions_bytes_tx_rate._value.get(), 18)
+        self.assertEqual(exporter.ocserv_server_bytes_rx._value.get(), 999999)
+        self.assertEqual(exporter.ocserv_server_bytes_tx._value.get(), 888888)
 
     def test_disconnected_session_labels_and_history_are_removed(self):
         first_users = [
@@ -183,6 +183,18 @@ class OcservExporterTest(unittest.TestCase):
         metric_names = {metric.name for metric in FakeGauge.registry}
         self.assertNotIn("ocserv_scrape_success_total", metric_names)
         self.assertNotIn("ocserv_active_users", metric_names)
+        self.assertNotIn("ocserv_bytes_rx_total", metric_names)
+        self.assertNotIn("ocserv_bytes_tx_total", metric_names)
+        self.assertNotIn("ocserv_bytes_rx_rate_bytes_per_second", metric_names)
+        self.assertNotIn("ocserv_bytes_tx_rate_bytes_per_second", metric_names)
+        self.assertNotIn("ocserv_stats_bytes_rx_total", metric_names)
+        self.assertNotIn("ocserv_stats_bytes_tx_total", metric_names)
+        self.assertIn("ocserv_active_sessions_bytes_rx", metric_names)
+        self.assertIn("ocserv_active_sessions_bytes_tx", metric_names)
+        self.assertIn("ocserv_active_sessions_bytes_rx_rate_bytes_per_second", metric_names)
+        self.assertIn("ocserv_active_sessions_bytes_tx_rate_bytes_per_second", metric_names)
+        self.assertIn("ocserv_server_bytes_rx_total", metric_names)
+        self.assertIn("ocserv_server_bytes_tx_total", metric_names)
 
     def test_session_detail_metrics_are_disabled_by_default(self):
         disabled_exporter = load_exporter(session_detail_metrics=None)
@@ -214,10 +226,10 @@ class OcservExporterTest(unittest.TestCase):
 
         self.assertEqual(disabled_exporter.ocserv_active_sessions._value.get(), 1)
         self.assertEqual(disabled_exporter.ocserv_active_accounts._value.get(), 1)
-        self.assertEqual(disabled_exporter.ocserv_rx_bytes._value.get(), 150)
-        self.assertEqual(disabled_exporter.ocserv_tx_bytes._value.get(), 260)
-        self.assertEqual(disabled_exporter.ocserv_rx_rate._value.get(), 5)
-        self.assertEqual(disabled_exporter.ocserv_tx_rate._value.get(), 6)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_rx._value.get(), 150)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_tx._value.get(), 260)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_rx_rate._value.get(), 5)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_tx_rate._value.get(), 6)
         self.assertEqual(disabled_exporter.previous_user_traffic, {})
 
     def test_status_raw_traffic_does_not_override_user_traffic_totals(self):
@@ -239,17 +251,17 @@ class OcservExporterTest(unittest.TestCase):
                 with mock.patch.object(disabled_exporter.time, "time", side_effect=[1000, 1000.1]):
                     disabled_exporter.collect_metrics()
 
-        self.assertEqual(disabled_exporter.ocserv_rx_bytes._value.get(), 400)
-        self.assertEqual(disabled_exporter.ocserv_tx_bytes._value.get(), 700)
-        self.assertEqual(disabled_exporter.ocserv_stats_rx_bytes._value.get(), 999999)
-        self.assertEqual(disabled_exporter.ocserv_stats_tx_bytes._value.get(), 888888)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_rx._value.get(), 400)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_tx._value.get(), 700)
+        self.assertEqual(disabled_exporter.ocserv_server_bytes_rx._value.get(), 999999)
+        self.assertEqual(disabled_exporter.ocserv_server_bytes_tx._value.get(), 888888)
 
     def test_users_failure_resets_traffic_without_status_raw_fallback(self):
         disabled_exporter = load_exporter(session_detail_metrics=None)
-        disabled_exporter.ocserv_rx_bytes.set(400)
-        disabled_exporter.ocserv_tx_bytes.set(700)
-        disabled_exporter.ocserv_rx_rate.set(40)
-        disabled_exporter.ocserv_tx_rate.set(70)
+        disabled_exporter.ocserv_active_sessions_bytes_rx.set(400)
+        disabled_exporter.ocserv_active_sessions_bytes_tx.set(700)
+        disabled_exporter.ocserv_active_sessions_bytes_rx_rate.set(40)
+        disabled_exporter.ocserv_active_sessions_bytes_tx_rate.set(70)
 
         def fake_run_occtl(args):
             if args == ["show", "status"]:
@@ -265,13 +277,13 @@ class OcservExporterTest(unittest.TestCase):
 
         self.assertEqual(disabled_exporter.ocserv_active_sessions._value.get(), 0)
         self.assertEqual(disabled_exporter.ocserv_active_accounts._value.get(), 0)
-        self.assertEqual(disabled_exporter.ocserv_rx_bytes._value.get(), 0)
-        self.assertEqual(disabled_exporter.ocserv_tx_bytes._value.get(), 0)
-        self.assertEqual(disabled_exporter.ocserv_rx_rate._value.get(), 0)
-        self.assertEqual(disabled_exporter.ocserv_tx_rate._value.get(), 0)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_rx._value.get(), 0)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_tx._value.get(), 0)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_rx_rate._value.get(), 0)
+        self.assertEqual(disabled_exporter.ocserv_active_sessions_bytes_tx_rate._value.get(), 0)
         self.assertIsNone(disabled_exporter.previous_total_traffic)
-        self.assertEqual(disabled_exporter.ocserv_stats_rx_bytes._value.get(), 999999)
-        self.assertEqual(disabled_exporter.ocserv_stats_tx_bytes._value.get(), 888888)
+        self.assertEqual(disabled_exporter.ocserv_server_bytes_rx._value.get(), 999999)
+        self.assertEqual(disabled_exporter.ocserv_server_bytes_tx._value.get(), 888888)
 
     def test_missing_status_fields_use_safe_defaults(self):
         def fake_run_occtl(args):

@@ -191,21 +191,122 @@ openssl_major() {
     openssl version 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\./) {split($i,a,"."); print a[1]; exit}}'
 }
 
-cert_days_left() {
+date_string_to_epoch() {
+    local raw_date=$1
+    date -u -d "${raw_date}" +%s 2>/dev/null || date -u -jf "%b %e %T %Y %Z" "${raw_date}" +%s 2>/dev/null || printf '0'
+}
+
+date_string_to_utc() {
+    local raw_date=$1
+    date -u -d "${raw_date}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -jf "%b %e %T %Y %Z" "${raw_date}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf ''
+}
+
+cert_not_after_raw() {
     local cert_file=$1
     [[ -f "${cert_file}" ]] || { printf 'none\n'; return; }
 
-    local end_date end_ts now_ts
+    local end_date
     end_date=$(openssl x509 -in "${cert_file}" -noout -enddate 2>/dev/null | sed 's/notAfter=//') || {
         printf 'error\n'
         return
     }
     [[ -n "${end_date}" ]] || { printf 'error\n'; return; }
+    printf '%s\n' "${end_date}"
+}
 
-    end_ts=$(date -d "${end_date}" +%s 2>/dev/null || date -jf "%b %e %T %Y %Z" "${end_date}" +%s 2>/dev/null || printf '0')
+cert_not_after_utc() {
+    local cert_file=$1
+    local end_date end_utc
+    end_date=$(cert_not_after_raw "${cert_file}")
+    case "${end_date}" in
+        none|error)
+            printf '%s\n' "${end_date}"
+            return
+            ;;
+    esac
+
+    end_utc=$(date_string_to_utc "${end_date}")
+    [[ -n "${end_utc}" ]] || { printf 'error\n'; return; }
+    printf '%s\n' "${end_utc}"
+}
+
+cert_days_left() {
+    local cert_file=$1
+    [[ -f "${cert_file}" ]] || { printf 'none\n'; return; }
+
+    local end_date end_ts now_ts
+    end_date=$(cert_not_after_raw "${cert_file}")
+    case "${end_date}" in
+        none|error)
+            printf '%s\n' "${end_date}"
+            return
+            ;;
+    esac
+
+    end_ts=$(date_string_to_epoch "${end_date}")
     now_ts=$(date +%s)
     [[ "${end_ts}" != "0" ]] || { printf 'error\n'; return; }
     printf '%s\n' "$(((end_ts - now_ts) / 86400))"
+}
+
+format_cert_expiry_detail() {
+    local cert_file=$1
+    local days_left=$2
+    local expires_at
+
+    expires_at=$(cert_not_after_utc "${cert_file}")
+    case "${expires_at}" in
+        none|error)
+            expires_at="unknown"
+            ;;
+    esac
+
+    case "${days_left}" in
+        -*|0)
+            printf 'expired %s (%s days ago)\n' "${expires_at}" "${days_left#-}"
+            ;;
+        *)
+            printf 'expires %s (%s days left)\n' "${expires_at}" "${days_left}"
+            ;;
+    esac
+}
+
+status_ca_health() {
+    local ca_days_left ca_detail
+
+    if [[ ! -f "${CA_CERT}" ]]; then
+        printf 'missing\tCA certificate is missing\n'
+        return
+    fi
+
+    ca_days_left=$(cert_days_left "${CA_CERT}")
+    case "${ca_days_left}" in
+        error)
+            printf 'invalid\tCA certificate is unreadable or invalid\n'
+            ;;
+        -*|0)
+            ca_detail=$(format_cert_expiry_detail "${CA_CERT}" "${ca_days_left}")
+            printf 'expired\t%s\n' "${ca_detail}"
+            ;;
+        *)
+            ca_detail=$(format_cert_expiry_detail "${CA_CERT}" "${ca_days_left}")
+            printf 'valid\t%s\n' "${ca_detail}"
+            ;;
+    esac
+}
+
+verify_cert_chain() {
+    local cert_file=$1
+    local output reason
+
+    [[ -f "${CA_CERT}" ]] || { printf 'issuing CA certificate is missing\n'; return 1; }
+
+    output=$(openssl verify -CAfile "${CA_CERT}" "${cert_file}" 2>&1) && return 0
+    reason=$(printf '%s\n' "${output}" | awk -F': ' '/error [0-9]+ at [0-9]+ depth lookup:/ {print $NF; exit}')
+    [[ -n "${reason}" ]] || reason=$(printf '%s\n' "${output}" | tail -n 1)
+    [[ -n "${reason}" ]] || reason="certificate chain verification failed"
+    printf '%s\n' "${reason}"
+    return 1
 }
 
 cert_serial() {
@@ -405,7 +506,7 @@ migrate_legacy_user_cert() {
 cert_status_for_user() {
     local username=$1
     local cert_file
-    local days_left
+    local days_left detail ca_health_line ca_status ca_detail verify_reason
 
     if is_user_disabled "${username}"; then
         printf '%s\trevoked\tcertificate reissue is disabled\n' "${username}"
@@ -426,24 +527,57 @@ cert_status_for_user() {
             printf '%s\terror\tcertificate is invalid\n' "${username}"
             ;;
         -*|0)
-            printf '%s\texpired\texpired %s days ago\n' "${username}" "${days_left#-}"
+            detail=$(format_cert_expiry_detail "${cert_file}" "${days_left}")
+            printf '%s\texpired\t%s\n' "${username}" "${detail}"
             ;;
         *)
+            detail=$(format_cert_expiry_detail "${cert_file}" "${days_left}")
             if ! user_p12_artifacts_present "${username}"; then
-                printf '%s\tartifact-missing\tcertificate is valid but p12 artifacts are missing; revoke and reissue\n' "${username}"
+                printf '%s\tartifact-missing\t%s; p12 artifacts are missing; revoke and reissue\n' "${username}" "${detail}"
                 return
             fi
-            printf '%s\tvalid\t%s days left\n' "${username}" "${days_left}"
+            ca_health_line=$(status_ca_health)
+            IFS=$'\t' read -r ca_status ca_detail <<< "${ca_health_line}"
+            case "${ca_status}" in
+                missing)
+                    printf '%s\tinvalid-chain\t%s; issuing CA certificate is missing\n' "${username}" "${detail}"
+                    return
+                    ;;
+                invalid)
+                    printf '%s\tinvalid-chain\t%s; issuing CA certificate is unreadable or invalid\n' "${username}" "${detail}"
+                    return
+                    ;;
+                expired)
+                    printf '%s\tinvalid-chain\t%s; issuing CA certificate %s\n' "${username}" "${detail}" "${ca_detail}"
+                    return
+                    ;;
+            esac
+            if ! verify_reason=$(verify_cert_chain "${cert_file}"); then
+                printf '%s\tinvalid-chain\t%s; %s\n' "${username}" "${detail}" "${verify_reason}"
+                return
+            fi
+            printf '%s\tvalid\t%s\n' "${username}" "${detail}"
             ;;
     esac
 }
 
 show_status() {
     load_users
+    local ca_health_line ca_status ca_detail
 
-    if [[ ! -f "${CA_CERT}" ]]; then
-        warn "ca-missing: ${CA_CERT}"
-    fi
+    ca_health_line=$(status_ca_health)
+    IFS=$'\t' read -r ca_status ca_detail <<< "${ca_health_line}"
+    case "${ca_status}" in
+        missing)
+            warn "ca-missing: ${CA_CERT}"
+            ;;
+        invalid)
+            warn "ca-invalid: ${ca_detail}"
+            ;;
+        expired)
+            warn "ca-expired: ${ca_detail}"
+            ;;
+    esac
     if [[ ! -f "${CRL_FILE}" ]]; then
         warn "crl-missing: ${CRL_FILE}"
     fi

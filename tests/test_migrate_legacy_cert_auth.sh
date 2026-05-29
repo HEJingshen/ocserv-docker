@@ -40,10 +40,6 @@ while [ "$#" -gt 0 ]; do
             printf 'compose version\n' >> "${log_file}"
             exit 0
             ;;
-        build)
-            printf 'build %s\n' "${2:-}" >> "${log_file}"
-            exit 0
-            ;;
         run)
             printf 'run %s %s %s\n' "${2:-}" "${3:-}" "${4:-}" >> "${log_file}"
             break
@@ -234,7 +230,7 @@ test_apply_migrates_complete_legacy_tree() {
     printf '%s\n' "${output}" | grep -q "Backup directory: ${backup_dir}" || fail "output missing backup directory"
     printf '%s\n' "${output}" | grep -q 'Manual restore instructions:' || fail "output missing restore instructions"
     printf '%s\n' "${output}" | grep -q 'docker compose --profile tools run --rm ocserv-auth status' || fail "output missing runtime check command"
-    grep -q 'build ocserv-auth' "${base_dir}/.docker-log" || fail "docker build was not invoked"
+    ! grep -q 'build ocserv-auth' "${base_dir}/.docker-log" || fail "docker build should not be invoked"
     grep -q 'run --rm ocserv-auth manage' "${base_dir}/.docker-log" || fail "docker manage was not invoked"
 
     rm -rf "${base_dir}"

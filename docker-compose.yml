@@ -59,10 +59,7 @@ services:
       - ${NETWORK_NAME:-monitor-net}
 
   ocserv-auth:
-    image: ${OCSERV_AUTH_IMAGE:-ocserv-auth:local}
-    build:
-      context: .
-      dockerfile: auth/Dockerfile
+    image: ${OCSERV_AUTH_IMAGE:-kingsonho/ocserv-auth:1.4.2}
     profiles:
       - tools
     network_mode: none

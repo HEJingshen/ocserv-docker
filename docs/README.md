@@ -116,6 +116,12 @@ docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 
 首次使用证书工具前，建议至少先创建一个密码用户。
 
+默认证书工具镜像为 `kingsonho/ocserv-auth:1.4.2`。首次使用前可先预拉取：
+
+```bash
+docker compose --profile tools pull ocserv-auth
+```
+
 ### 2.4 客户端证书认证（可选登录方式）
 
 启用客户端证书登录前，先初始化 CA：
@@ -137,6 +143,8 @@ docker compose --profile tools run --rm ocserv-auth manage
 ```bash
 docker compose --profile tools run --rm ocserv-auth status
 ```
+
+`status` 是只读检查，不会自动创建或修复 CA/证书文件。输出会显示用户证书的到期时间；如果颁发 CA 缺失、不可读、已过期，或证书链校验失败，对应用户会显示为 `invalid-chain`，而不是 `valid`。
 
 吊销指定用户证书：
 
@@ -318,13 +326,13 @@ docker buildx build --platform linux/arm64 -t registry.example.com/ocserv:1.4.2-
 docker buildx build -f exporter/Dockerfile -t ocserv-exporter:1.4.2 .
 ```
 
-### 4.4 构建证书工具镜像
+### 4.4 构建证书工具镜像（可选，本地备用）
 
 ```bash
 docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
 ```
 
-构建后把镜像名写入 `.env`，再按第二章或第三章启动。更多构建和镜像实现细节见 [project-architecture.md](./project-architecture.md)。
+如果要在部署时使用本地构建镜像，请把 `OCSERV_AUTH_IMAGE=ocserv-auth:local` 写入 `.env`。默认情况下，Compose 会直接拉取 `kingsonho/ocserv-auth:1.4.2`。更多构建和镜像实现细节见 [project-architecture.md](./project-architecture.md)。
 
 ---
 

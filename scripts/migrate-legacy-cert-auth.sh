@@ -284,7 +284,6 @@ run_render() {
 run_manage() {
     (
         CDPATH= cd -- "${PROJECT_ROOT}" && \
-        docker compose --profile tools build ocserv-auth >/dev/null && \
         docker compose --profile tools run --rm ocserv-auth manage >/dev/null
     )
 }

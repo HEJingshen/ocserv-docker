@@ -158,12 +158,12 @@ Prometheus 默认不对公网暴露。排查时可在宿主机通过 `docker exe
 | `ocserv_sessions_total` | Gauge | 服务启动以来处理的总会话数 |
 | `ocserv_authentication_failures_total` | Gauge | 服务启动以来认证失败总数 |
 | `ocserv_banned_ips` | Gauge | 当前封禁 IP 数 |
-| `ocserv_stats_bytes_rx_total` | Gauge | `show status.raw_rx`，上次 stats reset 以来的累计接收字节，用于 Overview 的 Traffic Total 面板 |
-| `ocserv_stats_bytes_tx_total` | Gauge | `show status.raw_tx`，上次 stats reset 以来的累计发送字节，用于 Overview 的 Traffic Total 面板 |
-| `ocserv_bytes_rx_total` | Gauge | 当前在线会话累计接收字节求和，固定来自 `show users` |
-| `ocserv_bytes_tx_total` | Gauge | 当前在线会话累计发送字节求和，固定来自 `show users` |
-| `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 当前接收速率（字节/秒） |
-| `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 当前发送速率（字节/秒） |
+| `ocserv_server_bytes_rx_total` | Gauge | `show status.raw_rx`，上次 stats reset 以来的累计接收字节，用于 Overview 的 Traffic Total 面板 |
+| `ocserv_server_bytes_tx_total` | Gauge | `show status.raw_tx`，上次 stats reset 以来的累计发送字节，用于 Overview 的 Traffic Total 面板 |
+| `ocserv_active_sessions_bytes_rx` | Gauge | 当前在线会话累计接收字节求和，固定来自 `show users`，不是单调递增 Counter |
+| `ocserv_active_sessions_bytes_tx` | Gauge | 当前在线会话累计发送字节求和，固定来自 `show users`，不是单调递增 Counter |
+| `ocserv_active_sessions_bytes_rx_rate_bytes_per_second` | Gauge | 当前在线会话总接收速率（字节/秒） |
+| `ocserv_active_sessions_bytes_tx_rate_bytes_per_second` | Gauge | 当前在线会话总发送速率（字节/秒） |
 | `ocserv_build_info` | Info | ocserv 版本信息 |
 
 ### 常用查询语句
@@ -176,16 +176,13 @@ ocserv_active_sessions
 ocserv_active_accounts
 
 # 当前接收速率（字节/秒）
-ocserv_bytes_rx_rate_bytes_per_second
-
-# 历史兼容：基于累计值计算近 1 分钟平均接收速率
-rate(ocserv_bytes_rx_total[1m])
+ocserv_active_sessions_bytes_rx_rate_bytes_per_second
 
 # 服务是否在线
 ocserv_up
 ```
 
-默认 Overview 看板只查询服务级和聚合指标，避免默认加载 `ocserv_user_*` 高基数序列。需要用户排行、每会话表格或连接时长时，设置 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 并打开 Ocserv Sessions 看板。同一账号多设备同时连接时，每会话流量指标带 `session_id` 标签，因此同账号、同公网 IP 的连接也会在明细表和趋势图中分开显示。
+默认 Overview 看板只查询服务级和聚合指标，避免默认加载 `ocserv_user_*` 高基数序列。需要用户排行、每会话表格或连接时长时，设置 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 并打开 Ocserv Sessions 看板。同一账号多设备同时连接时，每会话流量指标带 `session_id` 标签，因此同账号、同公网 IP 的连接也会在明细表和趋势图中分开显示。`ocserv_active_sessions_bytes_rx/tx` 反映的是当前在线会话的累计值求和，随会话断开或重连会回落，不能按 Prometheus Counter 语义使用 `rate()`.
 
 ### 指标重要性评估
 
@@ -194,12 +191,12 @@ ocserv_up
 | `ocserv_up` | 关键 | 服务可用性核心指标，应保留 |
 | `ocserv_active_sessions` | 关键 | 当前真实在线会话数 |
 | `ocserv_active_accounts` | 高 | 区分同账号多设备场景，排障价值高 |
-| `ocserv_bytes_rx/tx_rate_bytes_per_second` | 高 | 实时带宽面板核心指标 |
+| `ocserv_active_sessions_bytes_rx/tx_rate_bytes_per_second` | 高 | 实时带宽面板核心指标 |
 | `ocserv_sessions_total` / `ocserv_authentication_failures_total` / `ocserv_banned_ips` | 高 | 固定服务级指标，成本低，适合默认开启 |
 | `ocserv_user_bytes_rx/tx` | 中高 | 每会话流量、排行、明细表依赖，标签基数随会话数增长，默认关闭 |
 | `ocserv_user_connected_seconds` | 中高 | 连接时长排障有用，默认关闭 |
 | `ocserv_scrape_duration_seconds` | 中 | 采集性能和 occtl 阻塞排查有用 |
-| `ocserv_bytes_rx/tx_total` | 中 | 当前在线会话流量求和，不适合作为严格单调 Counter 使用 |
+| `ocserv_active_sessions_bytes_rx/tx` | 中 | 当前在线会话流量求和，不适合作为严格单调 Counter 使用 |
 | `ocserv_uptime_seconds` | 中 | 服务运行时长辅助排障 |
 | `ocserv_build_info` | 低中 | 版本定位有用，维护成本低 |
 | `ocserv_user_bytes_rx/tx_rate_bytes_per_second` | 低中 | 当前明细诊断有价值，仅 Sessions 看板使用 |

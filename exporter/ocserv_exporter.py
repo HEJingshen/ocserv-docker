@@ -98,12 +98,12 @@ ocserv_stats_auth_failures_total = Gauge(
     "ocserv_stats_authentication_failures_total",
     "Number of authentication failures since the last ocserv stats reset",
 )
-ocserv_stats_rx_bytes = Gauge(
-    "ocserv_stats_bytes_rx_total",
+ocserv_server_bytes_rx = Gauge(
+    "ocserv_server_bytes_rx_total",
     "Total bytes received from clients since the last ocserv stats reset",
 )
-ocserv_stats_tx_bytes = Gauge(
-    "ocserv_stats_bytes_tx_total",
+ocserv_server_bytes_tx = Gauge(
+    "ocserv_server_bytes_tx_total",
     "Total bytes sent to clients since the last ocserv stats reset",
 )
 ocserv_auth_time_average = Gauge(
@@ -124,17 +124,24 @@ ocserv_session_time_max = Gauge(
 )
 
 # ==========================================
-# 流量指标 (使用 Gauge 因为 occtl 返回累计值)
+# 流量指标
+# Active-session totals come from current live sessions, so they are Gauges instead of Prometheus Counters.
 # ==========================================
-ocserv_rx_bytes = Gauge("ocserv_bytes_rx_total", "Total bytes received from clients")
-ocserv_tx_bytes = Gauge("ocserv_bytes_tx_total", "Total bytes sent to clients")
-ocserv_rx_rate = Gauge(
-    "ocserv_bytes_rx_rate_bytes_per_second",
-    "Current receive traffic rate from clients in bytes per second",
+ocserv_active_sessions_bytes_rx = Gauge(
+    "ocserv_active_sessions_bytes_rx",
+    "Total bytes received from clients across current active sessions",
 )
-ocserv_tx_rate = Gauge(
-    "ocserv_bytes_tx_rate_bytes_per_second",
-    "Current transmit traffic rate to clients in bytes per second",
+ocserv_active_sessions_bytes_tx = Gauge(
+    "ocserv_active_sessions_bytes_tx",
+    "Total bytes sent to clients across current active sessions",
+)
+ocserv_active_sessions_bytes_rx_rate = Gauge(
+    "ocserv_active_sessions_bytes_rx_rate_bytes_per_second",
+    "Current receive traffic rate from clients across active sessions in bytes per second",
+)
+ocserv_active_sessions_bytes_tx_rate = Gauge(
+    "ocserv_active_sessions_bytes_tx_rate_bytes_per_second",
+    "Current transmit traffic rate to clients across active sessions in bytes per second",
 )
 
 # ==========================================
@@ -294,8 +301,8 @@ def reset_status_metrics():
     ocserv_stats_timed_out_idle_sessions_total.set(0)
     ocserv_stats_closed_error_sessions_total.set(0)
     ocserv_stats_auth_failures_total.set(0)
-    ocserv_stats_rx_bytes.set(0)
-    ocserv_stats_tx_bytes.set(0)
+    ocserv_server_bytes_rx.set(0)
+    ocserv_server_bytes_tx.set(0)
     ocserv_auth_time_average.set(0)
     ocserv_auth_time_max.set(0)
     ocserv_session_time_average.set(0)
@@ -337,10 +344,10 @@ def collect_metrics():
         ocserv_up.set(0)
         reset_session_counts()
         reset_status_metrics()
-        ocserv_rx_bytes.set(0)
-        ocserv_tx_bytes.set(0)
-        ocserv_rx_rate.set(0)
-        ocserv_tx_rate.set(0)
+        ocserv_active_sessions_bytes_rx.set(0)
+        ocserv_active_sessions_bytes_tx.set(0)
+        ocserv_active_sessions_bytes_rx_rate.set(0)
+        ocserv_active_sessions_bytes_tx_rate.set(0)
         previous_total_traffic = None
         clear_user_metrics(clear_history=True)
         return
@@ -353,10 +360,10 @@ def collect_metrics():
         # 服务不可用时重置所有流量指标
         reset_session_counts()
         reset_status_metrics()
-        ocserv_rx_bytes.set(0)
-        ocserv_tx_bytes.set(0)
-        ocserv_rx_rate.set(0)
-        ocserv_tx_rate.set(0)
+        ocserv_active_sessions_bytes_rx.set(0)
+        ocserv_active_sessions_bytes_tx.set(0)
+        ocserv_active_sessions_bytes_rx_rate.set(0)
+        ocserv_active_sessions_bytes_tx_rate.set(0)
         previous_total_traffic = None
         clear_user_metrics(clear_history=True)
         return
@@ -374,8 +381,8 @@ def collect_metrics():
     ocserv_stats_timed_out_idle_sessions_total.set(status_value(status, "Timed out (idle) sessions"))
     ocserv_stats_closed_error_sessions_total.set(status_value(status, "Closed due to error sessions"))
     ocserv_stats_auth_failures_total.set(status_value(status, "Authentication failures"))
-    ocserv_stats_rx_bytes.set(status_value(status, "raw_rx"))
-    ocserv_stats_tx_bytes.set(status_value(status, "raw_tx"))
+    ocserv_server_bytes_rx.set(status_value(status, "raw_rx"))
+    ocserv_server_bytes_tx.set(status_value(status, "raw_tx"))
     ocserv_auth_time_average.set(status_value(status, "raw_avg_auth_time"))
     ocserv_auth_time_max.set(status_value(status, "raw_max_auth_time"))
     ocserv_session_time_average.set(status_value(status, "raw_avg_session_time"))
@@ -478,16 +485,16 @@ def collect_metrics():
         }
 
         # Traffic Total/Rate intentionally use current active sessions from show users.
-        ocserv_rx_bytes.set(rx_total)
-        ocserv_tx_bytes.set(tx_total)
-        ocserv_rx_rate.set(rx_rate_total)
-        ocserv_tx_rate.set(tx_rate_total)
+        ocserv_active_sessions_bytes_rx.set(rx_total)
+        ocserv_active_sessions_bytes_tx.set(tx_total)
+        ocserv_active_sessions_bytes_rx_rate.set(rx_rate_total)
+        ocserv_active_sessions_bytes_tx_rate.set(tx_rate_total)
     else:
         reset_session_counts()
-        ocserv_rx_bytes.set(0)
-        ocserv_tx_bytes.set(0)
-        ocserv_rx_rate.set(0)
-        ocserv_tx_rate.set(0)
+        ocserv_active_sessions_bytes_rx.set(0)
+        ocserv_active_sessions_bytes_tx.set(0)
+        ocserv_active_sessions_bytes_rx_rate.set(0)
+        ocserv_active_sessions_bytes_tx_rate.set(0)
         previous_total_traffic = None
         clear_user_metrics(clear_history=True)
 

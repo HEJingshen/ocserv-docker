@@ -36,6 +36,7 @@ env:
   REGISTRY: docker.io
   OCSERV_IMAGE_NAME: kingsonho/ocserv
   EXPORTER_IMAGE_NAME: kingsonho/ocserv-exporter
+  OCSERV_AUTH_IMAGE_NAME: kingsonho/ocserv-auth
   OCSERV_VERSION: "1.4.2"
   OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
   ALPINE_VERSION: "3.23.4"
@@ -52,33 +53,26 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends gnutls-bin
 
       - name: Run unit tests
-        run: |
-          python3 -m unittest exporter/test_ocserv_exporter.py tests/test_fail2ban_filter.py tests/test_static_config.py
+        run: python3 -m unittest exporter/test_ocserv_exporter.py tests/test_fail2ban_filter.py tests/test_static_config.py
 
       - name: Check shell scripts
         run: |
-          sh -n scripts/render-ocserv-conf.sh
-          sh -n scripts/configure-alpine-repositories.sh
-          sh -n scripts/prepare-ocserv-config.sh
-          sh -n scripts/prepare-monitoring-config.sh
-          sh -n nginx/docker-entrypoint.sh
-          sh -n docker/ocserv/s6-init.sh
-          bash -n scripts/ocserv-cert-auth.sh
-          bash -n scripts/setup-fail2ban.sh
-          sh tests/test_nginx_entrypoint.sh
-          sh tests/test_ocserv_cert_auth.sh
+          for f in scripts/render-ocserv-conf.sh scripts/configure-alpine-repositories.sh scripts/prepare-ocserv-config.sh scripts/prepare-monitoring-config.sh nginx/docker-entrypoint.sh docker/ocserv/s6-init.sh tests/test_nginx_entrypoint.sh tests/test_ocserv_cert_auth.sh; do
+            sh -n "$f"
+          done
+          for f in scripts/ocserv-cert-auth.sh scripts/setup-fail2ban.sh; do
+            bash -n "$f"
+          done
 
       - name: Lint Dockerfiles
-        run: |
-          docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile exporter/Dockerfile auth/Dockerfile
+        run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile exporter/Dockerfile auth/Dockerfile
 
       - name: Build auth tool image
-        run: |
-          docker build --pull -f auth/Dockerfile -t ocserv-auth:ci .
+        run: docker build --pull -f auth/Dockerfile -t ocserv-auth:ci .
 
       - name: Validate Compose files
         env:
@@ -93,28 +87,41 @@ jobs:
 
   build-images:
     needs: validate
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 60
-    name: Build ${{ matrix.image_type }} (${{ matrix.platform }})
+    name: Build ${{ matrix.image.type }} (${{ matrix.platform.arch }})
     strategy:
       fail-fast: false
       matrix:
-        image_type: [ocserv, exporter]
-        platform: [amd64, arm64]
+        image:
+          - type: ocserv
+            dockerfile: Dockerfile
+            name_var: OCSERV_IMAGE_NAME
+            needs_source: "true"
+          - type: exporter
+            dockerfile: exporter/Dockerfile
+            name_var: EXPORTER_IMAGE_NAME
+            needs_source: "true"
+          - type: auth
+            dockerfile: auth/Dockerfile
+            name_var: OCSERV_AUTH_IMAGE_NAME
+            needs_source: "false"
+        platform:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Download source files
+        if: matrix.image.needs_source == 'true'
         run: |
           mkdir -p src
-          curl -L -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
+          curl -fsSL -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
             https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
           echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz" | sha256sum -c -
-
-      - name: Set up QEMU
-        if: matrix.platform == 'arm64'
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -128,24 +135,34 @@ jobs:
 
       - name: Set build date
         id: date
-        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve build args
+        id: build_args
+        run: |
+          {
+            echo "args<<EOF"
+            echo "ALPINE_IMAGE=${{ matrix.platform.arch == 'amd64' && env.ALPINE_IMAGE_AMD64 || env.ALPINE_IMAGE_ARM64 }}"
+            echo "APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine"
+            if [ "${{ matrix.image.needs_source }}" = "true" ]; then
+              echo "OCSERV_VERSION=${{ env.OCSERV_VERSION }}"
+              echo "ALPINE_VERSION=${{ env.ALPINE_VERSION }}"
+              echo "BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and optionally push single-platform image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
-          file: ${{ matrix.image_type == 'ocserv' && 'Dockerfile' || 'exporter/Dockerfile' }}
-          platforms: linux/${{ matrix.platform }}
-          tags: ${{ env.REGISTRY }}/${{ matrix.image_type == 'ocserv' && env.OCSERV_IMAGE_NAME || env.EXPORTER_IMAGE_NAME }}:${{ env.OCSERV_VERSION }}-${{ matrix.platform }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/${{ matrix.platform.arch }}
+          tags: ${{ env.REGISTRY }}/${{ env[matrix.image.name_var] }}:${{ env.OCSERV_VERSION }}-${{ matrix.platform.arch }}
           push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
-          cache-from: type=gha,scope=${{ matrix.image_type }}-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image_type }}-${{ matrix.platform }}
-          build-args: |
-            OCSERV_VERSION=${{ env.OCSERV_VERSION }}
-            ALPINE_IMAGE=${{ matrix.platform == 'amd64' && env.ALPINE_IMAGE_AMD64 || env.ALPINE_IMAGE_ARM64 }}
-            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
-            APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
-            BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}
+          cache-from: type=gha,scope=${{ matrix.image.type }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.type }}-${{ matrix.platform.arch }}
+          build-args: ${{ steps.build_args.outputs.args }}
           sbom: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
           provenance: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
 
@@ -154,10 +171,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    name: Merge manifests (${{ matrix.image_type }})
+    name: Merge manifests (${{ matrix.image.type }})
     strategy:
       matrix:
-        image_type: [ocserv, exporter]
+        image:
+          - type: ocserv
+            name_var: OCSERV_IMAGE_NAME
+          - type: exporter
+            name_var: EXPORTER_IMAGE_NAME
+          - type: auth
+            name_var: OCSERV_AUTH_IMAGE_NAME
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -169,8 +192,9 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Publish multi-arch manifests
+        env:
+          IMAGE_NAME: ${{ env[matrix.image.name_var] }}
         run: |
-          IMAGE_NAME="${{ matrix.image_type == 'ocserv' && env.OCSERV_IMAGE_NAME || env.EXPORTER_IMAGE_NAME }}"
           docker buildx imagetools create \
             -t ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ env.OCSERV_VERSION }} \
             -t ${{ env.REGISTRY }}/${IMAGE_NAME}:latest \

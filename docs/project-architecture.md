@@ -70,7 +70,7 @@
 |:--|:--|:--|
 | `ocserv` | 默认生产标签 `kingsonho/ocserv:1.4.2`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
 | `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:1.4.2`，`latest` 指向该版本标签 | Python exporter + `occtl` |
-| `ocserv-auth` | 按需工具标签 `ocserv-auth:local` | Bash 证书管理脚本、`certtool`/OpenSSL、`flock` 锁、`fzf` 交互菜单 |
+| `ocserv-auth` | 默认工具标签 `kingsonho/ocserv-auth:1.4.2`，`latest` 指向该版本标签；本地备用 `ocserv-auth:local` | Bash 证书管理脚本、`certtool`/OpenSSL、`flock` 锁、`fzf` 交互菜单 |
 
 ### 镜像元数据（LABELs）
 
@@ -177,7 +177,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
 | `OCSERV_IMAGE` | `kingsonho/ocserv:1.4.2` | ocserv 服务镜像 |
-| `OCSERV_AUTH_IMAGE` | `ocserv-auth:local` | 按需客户端证书管理工具镜像 |
+| `OCSERV_AUTH_IMAGE` | `kingsonho/ocserv-auth:1.4.2` | 按需客户端证书管理工具镜像；如需本地构建版本可改为 `ocserv-auth:local` |
 | `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
 | `TZ` | `Asia/Shanghai` | 时区设置 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
@@ -224,7 +224,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `./config/config-per-user` | `/etc/ocserv/config-per-user` | `ro`（只读） | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
-`ocserv-auth` 工具容器通过 `tools` profile 按需运行，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。该工具镜像同样基于 Alpine，并通过仓库配置脚本启用 `community` 仓库，以保留 `fzf` 支持的交互式证书撤销菜单。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。
+`ocserv-auth` 工具容器通过 `tools` profile 按需运行，默认从 Docker Hub 拉取 `kingsonho/ocserv-auth:1.4.2`，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。该工具镜像同样基于 Alpine，并通过仓库配置脚本启用 `community` 仓库，以保留 `fzf` 支持的交互式证书撤销菜单。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。开发或离线场景如需改用本地构建镜像，可在 `.env` 中覆盖 `OCSERV_AUTH_IMAGE=ocserv-auth:local`。
 
 ### 日志轮转
 
@@ -283,12 +283,12 @@ healthcheck:
 | `ocserv_stats_*` | Gauge | `show status` stats 字段 | 上次 stats reset 以来的会话、超时、错误关闭、认证失败和流量统计 |
 | `ocserv_auth_time_*_seconds` | Gauge | `show status.raw_*_auth_time` | 平均/最大认证耗时 |
 | `ocserv_session_time_*_seconds` | Gauge | `show status.raw_*_session_time` | 平均/最大会话时长 |
-| `ocserv_stats_bytes_rx_total` | Gauge | `show status.raw_rx` | 上次 stats reset 以来的接收字节累计值 |
-| `ocserv_stats_bytes_tx_total` | Gauge | `show status.raw_tx` | 上次 stats reset 以来的发送字节累计值 |
-| `ocserv_bytes_rx_total` | Gauge | 遍历用户列表累加 `RX` | 当前在线会话累计接收字节求和 |
-| `ocserv_bytes_tx_total` | Gauge | 遍历用户列表累加 `TX` | 当前在线会话累计发送字节求和 |
-| `ocserv_bytes_rx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前接收速率 |
-| `ocserv_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前发送速率 |
+| `ocserv_server_bytes_rx_total` | Gauge | `show status.raw_rx` | 上次 stats reset 以来的服务级接收字节累计值 |
+| `ocserv_server_bytes_tx_total` | Gauge | `show status.raw_tx` | 上次 stats reset 以来的服务级发送字节累计值 |
+| `ocserv_active_sessions_bytes_rx` | Gauge | 遍历用户列表累加 `RX` | 当前在线会话累计接收字节求和，非单调 Counter |
+| `ocserv_active_sessions_bytes_tx` | Gauge | 遍历用户列表累加 `TX` | 当前在线会话累计发送字节求和，非单调 Counter |
+| `ocserv_active_sessions_bytes_rx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前在线会话总接收速率 |
+| `ocserv_active_sessions_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前在线会话总发送速率 |
 | `ocserv_build_info` | Info | `occtl --version` | ocserv 版本 |
 
 每会话指标默认关闭。开启后使用 `username`, `session_id`, `ip`, `vpn_ip`, `device` 标签。`session_id` 优先来自 ocserv 连接 ID，用于区分同一账号、同一公网 IP 后的多个并发连接。
@@ -463,18 +463,20 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
        ├─ auth/Dockerfile 构建校验
        └─ docker compose 配置展开校验
        │
-2. build-images matrix job（2 x 2 并行）
-       ├─ image_type: ocserv, exporter
-       ├─ platform: amd64, arm64
-       ├─ checkout + 下载 ocserv 源码
-       ├─ 仅 arm64 初始化 QEMU
+2. build-images matrix job（3 x 2 并行）
+       ├─ matrix.image.type: ocserv, exporter, auth
+       ├─ matrix.platform.arch: amd64, arm64
+       ├─ matrix.platform.runner: amd64 使用 `ubuntu-24.04`，arm64 使用 `ubuntu-24.04-arm`
+       ├─ checkout
+       ├─ 按镜像类型决定是否下载 ocserv 源码（ocserv/exporter 需要，auth 跳过）
+       ├─ tags 直接通过 `env[matrix.image.name_var]` 解析镜像仓库名
        ├─ Buildx 单平台构建
        ├─ 缓存: GitHub Actions 缓存（按 image/platform 分 scope）
        ├─ 标签: `:<version>-amd64` / `:<version>-arm64`
        └─ 仅在 `main`/`master` 非 PR 场景推送单架构镜像并生成 SBOM/provenance
        │
 3. merge-manifests matrix job
-       ├─ image_type: ocserv, exporter
+       ├─ matrix.image.type: ocserv, exporter, auth
        ├─ 合并 `:<version>-amd64` + `:<version>-arm64`
        └─ 发布多架构 `:<version>` 和 `:latest`
        │
@@ -486,7 +488,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| `push` 到 `main`/`master` | 先发布 `kingsonho/ocserv:1.4.2-amd64`、`kingsonho/ocserv:1.4.2-arm64`、`kingsonho/ocserv-exporter:1.4.2-amd64`、`kingsonho/ocserv-exporter:1.4.2-arm64`；再合并生成 `:1.4.2` 与 `:latest` |
+| `push` 到 `main`/`master` | 先发布 `kingsonho/ocserv:1.4.2-amd64`、`kingsonho/ocserv:1.4.2-arm64`、`kingsonho/ocserv-exporter:1.4.2-amd64`、`kingsonho/ocserv-exporter:1.4.2-arm64`、`kingsonho/ocserv-auth:1.4.2-amd64`、`kingsonho/ocserv-auth:1.4.2-arm64`；再合并生成各镜像的 `:1.4.2` 与 `:latest` |
 | `workflow_dispatch` on `main`/`master` | 与 `push main/master` 相同 |
 | `pull_request` 或非主分支手动执行 | 仅构建测试，不推送镜像 |
 
