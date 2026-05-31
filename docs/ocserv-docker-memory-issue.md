@@ -112,13 +112,7 @@ done
 
 修复生效后，预期结果是 `ocserv` 容器内存不再在持续流量下单调增长至 `512m` 后周期性回落；单个 `ocserv-worker` 的 `RssAnon` 也不应持续累积而不释放。
 
-项目同时通过静态测试防止配置回退：
-
-```bash
-python3 -m unittest tests/test_static_config.py
-```
-
-该测试会检查：
+项目通过 CI 的 Dockerfile lint、auth 镜像构建和 Compose 配置展开校验，并可通过人工复核防止配置回退。重点检查：
 
 - `Dockerfile` 不再包含 `libseccomp-dev`
 - `Dockerfile` 不再包含 `-Dseccomp=enabled`

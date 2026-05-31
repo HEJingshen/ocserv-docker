@@ -3,21 +3,18 @@
 [![Build & Pull](https://github.com/GentleKingson/ocserv-docker/actions/workflows/docker-build.yml/badge.svg)](https://github.com/GentleKingson/ocserv-docker/actions/workflows/docker-build.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
-基于 Docker 的 OpenConnect Server（ocserv），支持 **amd64 / arm64**，可选 **Prometheus + Grafana** 监控栈。
-
-这份文档只负责**部署命令指导**。变量细节、监控面板说明、实现原理和专项问题，请跳转到对应专题文档。
+基于 Docker 的 OpenConnect Server（ocserv），支持 **amd64 / arm64**，内置 **s6-overlay 进程管理**。
 
 ---
 
 ## 目录
 
 - [一、部署前准备](#一部署前准备)
-- [二、单独部署 ocserv](#二单独部署-ocserv)
-- [三、与监控系统一起部署](#三与监控系统一起部署)
-- [四、自行构建镜像](#四自行构建镜像)
-- [五、配置参考](#五配置参考)
-- [六、故障排查](#六故障排查)
-- [七、功能模块指南](#七功能模块指南)
+- [二、部署 ocserv](#二部署-ocserv)
+- [三、自行构建镜像](#三自行构建镜像)
+- [四、配置参考](#四配置参考)
+- [五、故障排查](#五故障排查)
+- [六、功能模块指南](#六功能模块指南)
 
 ---
 
@@ -30,8 +27,8 @@
 | 操作系统 | Linux（Debian / Ubuntu / CentOS / Rocky / Alma 等） |
 | CPU 架构 | x86_64 或 ARM64 |
 | 内核模块 | `tun`（`/dev/net/tun` 存在） |
-| 内存 | 仅主服务建议 ≥ 64MB；带监控建议 ≥ 512MB |
-| 端口 | `443/tcp`、`443/udp`；监控默认额外使用 `8443/tcp` |
+| 内存 | 建议 ≥ 64MB |
+| 端口 | `443/tcp`、`443/udp` |
 
 ### 1.2 克隆项目
 
@@ -77,7 +74,7 @@ sudo certbot certonly --standalone -d your.domain.com
 
 ---
 
-## 二、单独部署 ocserv
+## 二、部署 ocserv
 
 ### 2.1 配置环境变量并准备配置
 
@@ -217,84 +214,9 @@ docker exec ocserv occtl show users
 
 ---
 
-## 三、与监控系统一起部署
+## 三、自行构建镜像
 
-### 3.1 架构概览
-
-```text
-ocserv -> ocserv-exporter -> Prometheus -> Grafana
-                                         ^
-                                         |
-                                      Nginx
-```
-
-监控部署会额外启动 `ocserv-exporter`、`prometheus`、`grafana` 和 `nginx`。
-
-### 3.2 配置环境变量并准备监控配置
-
-直接执行监控准备脚本：
-
-```bash
-./scripts/prepare-monitoring-config.sh
-```
-
-至少修改：
-
-- `DOMAIN`：你的服务器域名
-- `GF_ADMIN_PASSWORD`：Grafana 管理员密码，不能为空
-
-脚本会自动校验证书路径、渲染 ocserv 配置，并检查监控 Compose 配置可用性。监控变量与面板细节见 [grafana-prometheus.md](./grafana-prometheus.md)。
-
-### 3.3 启动完整栈
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
-```
-
-验证：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml ps
-docker exec nginx-proxy nginx -t
-```
-
-### 3.4 访问监控
-
-Grafana 默认地址：
-
-```text
-https://your.domain.com:8443/grafana/
-```
-
-登录账号固定为 `admin`，密码为 `.env` 中的 `GF_ADMIN_PASSWORD`。如果修改了 `MONITORING_PORT`，请按实际端口访问。
-
-详细监控使用说明、Prometheus 查询和面板说明见 [grafana-prometheus.md](./grafana-prometheus.md)。
-
-### 3.5 部署 Fail2Ban
-
-如需保护监控登录入口，可在宿主机执行：
-
-```bash
-./scripts/setup-fail2ban.sh
-sudo fail2ban-client status nginx-auth
-sudo fail2ban-client set nginx-auth unbanip <IP>
-```
-
-详细说明见 [fail2ban.md](./fail2ban.md)。
-
-### 3.6 数据持久化
-
-Grafana 和 Prometheus 数据使用 Docker 卷持久化。需要彻底清理时执行：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml down -v
-```
-
----
-
-## 四、自行构建镜像
-
-### 4.1 准备构建素材
+### 3.1 准备构建素材
 
 构建前至少准备 ocserv 源码包：
 
@@ -307,7 +229,7 @@ curl -L -o "src/ocserv-${OCSERV_VERSION}.tar.xz" \
 echo "${OCSERV_TARBALL_SHA256}  src/ocserv-${OCSERV_VERSION}.tar.xz" | sha256sum -c -
 ```
 
-### 4.2 构建 ocserv 镜像
+### 3.2 构建 ocserv 镜像
 
 ```bash
 docker buildx build \
@@ -324,16 +246,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --push .
 ```
 
-### 4.3 构建 Exporter 镜像
-
-```bash
-docker buildx build \
-  --build-arg OCSERV_VERSION="$(cat VERSION)" \
-  -f exporter/Dockerfile \
-  -t "ocserv-exporter:$(cat VERSION)" .
-```
-
-### 4.4 构建证书工具镜像（可选，本地备用）
+### 3.3 构建证书工具镜像（可选，本地备用）
 
 ```bash
 docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
@@ -343,27 +256,25 @@ docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
 
 ---
 
-## 五、配置参考
+## 四、配置参考
 
-### 5.1 必须知道
+### 4.1 必须知道
 
 - 基础部署至少要改 `DOMAIN`
-- 带监控部署还必须设置 `GF_ADMIN_PASSWORD`
 - 如果改过 `.env`，需要重新执行 `./scripts/render-ocserv-conf.sh`
-- `ocserv` 默认对外端口由 `OCSERV_PORT` 控制，Grafana 默认对外端口由 `MONITORING_PORT` 控制
+- `ocserv` 默认对外端口由 `OCSERV_PORT` 控制
 
-### 5.2 变量与配置入口
+### 4.2 变量与配置入口
 
 - 基础部署变量：见 [../.env.example](../.env.example)
-- 监控变量和面板说明：见 [grafana-prometheus.md](./grafana-prometheus.md)
 - Compose、配置渲染、挂载和实现原理：见 [project-architecture.md](./project-architecture.md)
 - ocserv 主配置模板：见 [../config/ocserv.conf.template](../config/ocserv.conf.template)
 
 ---
 
-## 六、故障排查
+## 五、故障排查
 
-### 6.1 服务无法启动
+### 5.1 服务无法启动
 
 先检查日志、证书和端口占用：
 
@@ -376,7 +287,7 @@ OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
 sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
 ```
 
-### 6.2 客户端无法连接
+### 5.2 客户端无法连接
 
 重点检查健康状态、防火墙和监听端口：
 
@@ -387,53 +298,29 @@ sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
 sudo ss -ulnp | grep ":${OCSERV_PORT:-443}"
 ```
 
-### 6.3 监控面板异常
-
-先看监控栈状态和 Nginx 日志：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml ps
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config
-docker logs nginx-proxy
-```
-
-详细监控排查见 [grafana-prometheus.md](./grafana-prometheus.md)。
-
-### 6.4 ocserv 内存增长问题
+### 5.3 ocserv 内存增长问题
 
 专项分析和修复背景见 [ocserv-docker-memory-issue.md](./ocserv-docker-memory-issue.md)。
 
 ```bash
-docker stats --no-stream ocserv ocserv-exporter prometheus grafana nginx-proxy
-docker exec ocserv occtl -s /run/ocserv/occtl.socket show status
-docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
+docker stats --no-stream ocserv
+docker exec ocserv occtl show status
+docker exec ocserv occtl show users
 ```
 
 ---
 
-## 七、功能模块指南
+## 六、功能模块指南
 
-### 7.1 s6-overlay 进程管理
+### 6.1 s6-overlay 进程管理
 
 负责容器启动时的检查、iptables 初始化和 ocserv 主进程托管。实现细节见 [project-architecture.md](./project-architecture.md)。
 
-### 7.2 Prometheus Exporter
-
-负责通过 `occtl` 导出会话数、账号数、流量和运行状态指标。监控指标与面板说明见 [grafana-prometheus.md](./grafana-prometheus.md)。
-
-### 7.3 Nginx 反向代理
-
-负责为 Grafana 提供 HTTPS 入口与子路径代理。模板渲染机制见 [project-architecture.md](./project-architecture.md)。
-
-### 7.4 CI/CD 自动构建
+### 6.2 CI/CD 自动构建
 
 仓库通过 GitHub Actions 构建并发布多架构镜像。发布流程说明见 [project-architecture.md](./project-architecture.md)。
 
-### 7.5 Fail2Ban 安全防护
-
-用于保护 Grafana 登录入口，部署方法见 [fail2ban.md](./fail2ban.md)。
-
-### 7.6 Docker 安装脚本
+### 6.3 Docker 安装脚本
 
 `install-docker.sh` 用于快速安装 Docker 与 Compose，支持多发行版和镜像源自动选择。
 

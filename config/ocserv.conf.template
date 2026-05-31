@@ -263,7 +263,7 @@ server-stats-reset-time = 604800
 
 # Keepalive in seconds
 # [scope: vhost user]
-keepalive = 30
+keepalive = 300
 
 # Dead peer detection in seconds.
 # Note that when the client is behind a NAT this value
@@ -279,7 +279,7 @@ dpd = 30
 # The mobile clients are distinguished from the header
 # 'X-AnyConnect-Identifier-Platform'.
 # [scope: vhost user]
-mobile-dpd = 300
+mobile-dpd = 180
 
 # If using DTLS, and no UDP traffic is received for this
 # many seconds, attempt to send future traffic over the TCP
@@ -341,7 +341,7 @@ compression = false
 # list of algorithms (e.g., "lz4:lzs"). This is a global setting and cannot
 # be set per virtual host.
 # [scope: global]
-#compression-algo-priority = lz4:lzs
+compression-algo-priority = lzs:lz4
 
 # Set the minimum size under which a packet will not be compressed.
 # That is to allow low-latency for VoIP packets. The default size
@@ -365,7 +365,7 @@ no-compress-limit = 512
 # in your system.
 
 # [scope: vhost]
-tls-priorities = "NORMAL:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1"
+tls-priorities = "NORMAL:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:-RSA"
 
 # More combinations in priority strings are available, check
 # http://gnutls.org/manual/html_node/Priority-Strings.html
@@ -460,7 +460,7 @@ deny-roaming = false
 # this amount of seconds is elapsed. Set to zero to disable (note
 # that, some clients fail if rekey is disabled).
 # [scope: vhost]
-rekey-time = 172800
+rekey-time = 86400
 
 # ReKey method
 # Valid options: ssl, new-tunnel
@@ -545,7 +545,7 @@ log-level = 2
 # Of-Service, by setting it to a hexadecimal number (e.g., 0x20).
 # This can be set per user/group or globally.
 # [scope: vhost user]
-#net-priority = 3
+net-priority = 4
 
 # Set the VPN worker process into a specific cgroup. This is Linux
 # specific and can be set per user/group or globally.
@@ -564,7 +564,7 @@ device = vpns
 # Whether the generated IPs will be predictable, i.e., IP stays the
 # same for the same user when possible.
 # [scope: vhost]
-predictable-ips = true
+predictable-ips = false
 
 # The default domain to be advertised. Multiple domains (functional on
 # openconnect clients) can be provided in a space separated list.
@@ -632,7 +632,7 @@ ping-leases = false
 # Note that the MTU is negotiated using the value set and the
 # value sent by the peer.
 # [scope: vhost user]
-mtu = 1420
+mtu = 1400
 
 # Unset to enable bandwidth restrictions (in bytes/second). The
 # setting here is global, but can also be set per user or per group.
@@ -648,7 +648,7 @@ mtu = 1420
 # the output buffer. The default is low to improve latency.
 # Setting it higher will improve throughput.
 # [scope: vhost]
-#output-buffer = 10
+output-buffer = 10
 
 # Routes to be forwarded to the client. If you need the
 # client to forward routes to the server, you may use the
@@ -678,7 +678,7 @@ mtu = 1420
 # This setting can be overridden per vhost, user, or group.
 #
 # [scope: vhost user]
-#no-udp = false
+no-udp = false
 
 # If set, the script /usr/libexec/ocserv-fw will be called to restrict
 # the user to its allowed routes and prevent him from accessing

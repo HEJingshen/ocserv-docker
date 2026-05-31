@@ -5,8 +5,6 @@
 # Local data
 logs/
 config/
-nginx/logs/
-nginx/conf.d/
 
 # IDE / editor
 .DS_Store
@@ -17,8 +15,6 @@ nginx/conf.d/
 # Non-build project files
 docs/
 tests/
-monitoring/
-fail2ban/
 README.md
 install-docker.sh
 docker-compose*.yml

@@ -46,7 +46,7 @@ chmod 700 "${CLIENT_CA_PRIVATE_DIR}" "${USER_CERT_DIR}"
 chmod 755 "${CLIENT_CA_PUBLIC_DIR}" "${CONFIG_PER_USER_DIR}"
 
 printf '\nEdit environment variables now: %s %s\n' "${EDITOR_CMD}" "${ENV_FILE}"
-printf 'At minimum, set DOMAIN. If enabling monitoring, also set GF_ADMIN_PASSWORD.\n\n'
+printf 'At minimum, set DOMAIN.\n\n'
 
 if ! command -v "${EDITOR_CMD}" >/dev/null 2>&1; then
     fail "editor command not found: ${EDITOR_CMD}"
@@ -62,8 +62,6 @@ Configuration prepared.
 
 Next steps:
   1. Verify TLS certificate paths for DOMAIN in .env.
-  2. Start ocserv only:
+  2. Start ocserv:
        docker compose up -d
-  3. Or start ocserv with monitoring:
-       docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 EOF

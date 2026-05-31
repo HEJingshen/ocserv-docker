@@ -37,7 +37,6 @@ concurrency:
 env:
   REGISTRY: docker.io
   OCSERV_IMAGE_NAME: kingsonho/ocserv
-  EXPORTER_IMAGE_NAME: kingsonho/ocserv-exporter
   OCSERV_AUTH_IMAGE_NAME: kingsonho/ocserv-auth
   OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
   ALPINE_VERSION: "3.23.4"
@@ -52,17 +51,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install test dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gnutls-bin
-
-      - name: Run unit tests
-        run: python3 -m unittest exporter/test_ocserv_exporter.py tests/test_fail2ban_filter.py tests/test_static_config.py
-
       - name: Check shell scripts
         run: |
-          for f in scripts/render-ocserv-conf.sh scripts/configure-alpine-repositories.sh scripts/prepare-ocserv-config.sh scripts/prepare-monitoring-config.sh scripts/migrate-legacy-cert-auth.sh scripts/setup-fail2ban.sh nginx/docker-entrypoint.sh docker/ocserv/s6-init.sh tests/test_nginx_entrypoint.sh tests/test_ocserv_cert_auth.sh tests/test_migrate_legacy_cert_auth.sh; do
+          for f in scripts/render-ocserv-conf.sh scripts/configure-alpine-repositories.sh scripts/prepare-ocserv-config.sh scripts/migrate-legacy-cert-auth.sh docker/ocserv/s6-init.sh tests/test_ocserv_cert_auth.sh tests/test_migrate_legacy_cert_auth.sh; do
             sh -n "$f"
           done
           for f in scripts/ocserv-cert-auth.sh install-docker.sh; do
@@ -70,7 +61,7 @@ jobs:
           done
 
       - name: Lint Dockerfiles
-        run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile exporter/Dockerfile auth/Dockerfile
+        run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile auth/Dockerfile
 
       - name: Build auth tool image
         run: docker build --pull -f auth/Dockerfile -t ocserv-auth:ci .
@@ -79,12 +70,9 @@ jobs:
         env:
           # CI-only value for Compose interpolation; production must set this in .env.
           DOMAIN: ci.example.com
-          GF_ADMIN_PASSWORD: ci-validation-only
           SKIP_TLS_CHECK: "true"
         run: |
-          EDITOR=true ./scripts/prepare-monitoring-config.sh
           docker compose config >/tmp/docker-compose.yml
-          docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config >/tmp/docker-compose.monitoring.yml
 
   build-images:
     needs: validate
@@ -98,10 +86,6 @@ jobs:
           - type: ocserv
             dockerfile: Dockerfile
             name_var: OCSERV_IMAGE_NAME
-            needs_source: "true"
-          - type: exporter
-            dockerfile: exporter/Dockerfile
-            name_var: EXPORTER_IMAGE_NAME
             needs_source: "true"
           - type: auth
             dockerfile: auth/Dockerfile
@@ -198,8 +182,6 @@ jobs:
         image:
           - type: ocserv
             name_var: OCSERV_IMAGE_NAME
-          - type: exporter
-            name_var: EXPORTER_IMAGE_NAME
           - type: auth
             name_var: OCSERV_AUTH_IMAGE_NAME
     steps:

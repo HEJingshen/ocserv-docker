@@ -3,7 +3,7 @@
 [![Build & Pull](https://github.com/GentleKingson/ocserv-docker/actions/workflows/docker-build.yml/badge.svg)](https://github.com/GentleKingson/ocserv-docker/actions/workflows/docker-build.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
-基于 Docker 的 OpenConnect Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **s6-overlay 进程管理**，可选 **Prometheus + Grafana 监控栈**。
+基于 Docker 的 OpenConnect Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **s6-overlay 进程管理**。
 
 ## 许可证
 

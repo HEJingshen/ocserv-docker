@@ -2,7 +2,7 @@
 
 ## 总览
 
-本项目将 OpenConnect Server（ocserv）容器化，围绕 **主服务** 核心，向外扩展 **监控栈**、**安全防护**、**CI/CD 自动化** 三层能力。
+本项目将 OpenConnect Server（ocserv）容器化，围绕 **主服务** 核心，提供 **CI/CD 自动化** 能力。
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -12,26 +12,11 @@
 ┌──────────────────────▼──────────────────────────────┐
 │                   Docker Host                       │
 │                                                     │
-│  ┌──────────────┐    ┌───────────────────┐          │
-│  │   ocserv     │───▶│ ocserv-exporter   │          │
-│  │  s6-overlay  │    │  (Unix socket)    │          │
-│  └──────────────┘    └────────┬──────────┘          │
-│                               │ :9100               │
-│  ┌──────────────┐    ┌────────▼───────────┐         │
-│  │  Prometheus  │◄───│  scrape /metrics   │         │
-│  │  :9090       │    └────────┬───────────┘         │
-│  └──────┬───────┘             │                     │
-│         │ query               │ query               │
-│  ┌──────▼─────────────────────▼───────────┐         │
-│  │              Grafana                   │         │
-│  │             :3000                      │         │
-│  └──────────────────────┬─────────────────┘         │
-│                         │ proxy                     │
-│  ┌──────────────────────▼────────────────┐          │
-│  │              Nginx                    │          │
-│  │                :8443                  │          │
-│  │  /grafana/                            │          │
-│  └───────────────────────────────────────┘          │
+│  ┌──────────────┐                                   │
+│  │   ocserv     │                                   │
+│  │  s6-overlay  │                                   │
+│  └──────────────┘                                   │
+│                                                     │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -64,12 +49,11 @@
 
 ### Alpine 基线
 
-`Dockerfile`、`exporter/Dockerfile` 和 `auth/Dockerfile` 均通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签；`auth` 镜像会通过仓库配置脚本启用 `main` 与 `community`，以安装交互式证书管理所需的 `fzf`。
+`Dockerfile` 和 `auth/Dockerfile` 均通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签；`auth` 镜像会通过仓库配置脚本启用 `main` 与 `community`，以安装交互式证书管理所需的 `fzf`。
 
 | 镜像 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `ocserv` | 默认生产标签 `kingsonho/ocserv:${OCSERV_VERSION}`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT、s6、监控 socket |
-| `exporter` | 监控采集标签 `kingsonho/ocserv-exporter:${OCSERV_VERSION}`，`latest` 指向该版本标签 | Python exporter + `occtl` |
+| `ocserv` | 默认生产标签 `kingsonho/ocserv:${OCSERV_VERSION}`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT、s6 |
 | `ocserv-auth` | 默认工具标签 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，`latest` 指向该版本标签；本地备用 `ocserv-auth:local` | Bash 证书管理脚本、`certtool`/OpenSSL、`flock` 锁、`fzf` 交互菜单 |
 
 ### 镜像元数据（LABELs）
@@ -80,7 +64,6 @@
 |:--|:--|:--|
 | `org.opencontainers.image.title` | `ocserv` | 镜像名称 |
 | `org.opencontainers.image.version` | `${OCSERV_VERSION}` | ocserv 版本，发布构建从根目录 `VERSION` 注入 |
-| `org.opencontainers.image.s6-overlay-version` | `3.2.3.0` | s6-overlay 版本 |
 | `org.opencontainers.image.created` | `<BUILD_DATE>` | 构建时间 |
 | `org.opencontainers.image.source` | GitHub 仓库地址 | 源码来源 |
 
@@ -183,7 +166,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `TZ` | `Asia/Shanghai` | 时区设置 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
 | `LOG_MAX_FILE` | `3` | 日志文件保留数量 |
-| `NETWORK_NAME` | `monitor-net` | Docker 网络名称 |
 
 > **安全提示**：`.env` 文件已添加到 `.gitignore`，避免敏感信息（如密码）泄露到版本控制。
 
@@ -252,161 +234,7 @@ healthcheck:
 
 ---
 
-## 四、监控栈（docker-compose.monitoring.yml）
-
-所有监控组件通过独立的 compose 文件编排，与主服务解耦，可单独启停。
-
-### 4.1 ocserv-exporter
-
-| 项目 | 说明 |
-|:--|:--|
-| 基础镜像 | 官方 `alpine:3.23.4`；CI 按平台传入 digest |
-| 构建方式 | 多阶段构建，builder 从 ocserv 源码只编译 `occtl`，runtime 复制该二进制 |
-| 运行方式 | 运行镜像安装 `python3` 和 `python3-prometheus-client`；镜像默认用户为 `nobody`，监控 Compose 显式设置 `user: "0:0"`，因为 Docker 部署中 `occtl` 查询 socket 需要 root peer credentials |
-| 数据采集 | 通过 `occtl -j show status` 和 `occtl -j show users`（JSON 格式）调用 ocserv 的 Unix socket 接口 |
-| 暴露端口 | `9100` |
-| 采集周期 | 镜像和监控编排默认 10 秒；生产均衡低压配置 |
-| occtl 超时 | 镜像默认 5 秒；监控编排默认 2 秒，避免采集阻塞超过 Prometheus timeout |
-| 会话明细 | 默认关闭 `ocserv_user_*` 高基数指标，可通过 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` 开启 |
-
-**采集指标**：
-
-| 指标名 | 类型 | 来源 | 说明 |
-|:--|:--|:--|:--|
-| `ocserv_up` | Gauge | 能否成功调用 occtl | 1=在线，0=异常 |
-| `ocserv_active_sessions` | Gauge | `show users` 返回列表长度 | 当前在线会话数 |
-| `ocserv_active_accounts` | Gauge | `show users` 中 `Username` 去重 | 当前唯一账号数 |
-| `ocserv_uptime_seconds` | Gauge | `show status.uptime` | 主进程运行时长 |
-| `ocserv_start_time_seconds` | Gauge | `show status.raw_up_since` | 服务启动时间戳 |
-| `ocserv_sessions_total` | Gauge | `show status.Total sessions` | 服务启动以来处理的总会话数 |
-| `ocserv_authentication_failures_total` | Gauge | `show status.Total authentication failures` | 服务启动以来认证失败总数 |
-| `ocserv_banned_ips` | Gauge | `show status.IPs in ban list` | 当前封禁 IP 数 |
-| `ocserv_stats_*` | Gauge | `show status` stats 字段 | 上次 stats reset 以来的会话、超时、错误关闭、认证失败和流量统计 |
-| `ocserv_auth_time_*_seconds` | Gauge | `show status.raw_*_auth_time` | 平均/最大认证耗时 |
-| `ocserv_session_time_*_seconds` | Gauge | `show status.raw_*_session_time` | 平均/最大会话时长 |
-| `ocserv_server_bytes_rx_total` | Gauge | `show status.raw_rx` | 上次 stats reset 以来的服务级接收字节累计值 |
-| `ocserv_server_bytes_tx_total` | Gauge | `show status.raw_tx` | 上次 stats reset 以来的服务级发送字节累计值 |
-| `ocserv_active_sessions_bytes_rx` | Gauge | 遍历用户列表累加 `RX` | 当前在线会话累计接收字节求和，非单调 Counter |
-| `ocserv_active_sessions_bytes_tx` | Gauge | 遍历用户列表累加 `TX` | 当前在线会话累计发送字节求和，非单调 Counter |
-| `ocserv_active_sessions_bytes_rx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前在线会话总接收速率 |
-| `ocserv_active_sessions_bytes_tx_rate_bytes_per_second` | Gauge | 根据相邻两次在线会话累计值差值计算 | 当前在线会话总发送速率 |
-| `ocserv_build_info` | Info | `occtl --version` | ocserv 版本 |
-
-每会话指标默认关闭。开启后使用 `username`, `session_id`, `ip`, `vpn_ip`, `device` 标签。`session_id` 优先来自 ocserv 连接 ID，用于区分同一账号、同一公网 IP 后的多个并发连接。
-
-采集周期：按 `EXPORTER_INTERVAL_SECONDS` 执行 `collect_metrics()`，最小 5 秒。建议小规模排障用 5 秒，均衡生产用 10 秒，资源优先或在线用户较多时用 15 秒。
-
-### 4.2 Prometheus
-
-| 项目 | 说明 |
-|:--|:--|
-| 镜像 | `prom/prometheus:v3.11.3` |
-| 子路径 | `--web.route-prefix=/prometheus` 用于内部访问路径；默认不通过 Nginx 对外暴露 |
-| 数据存储 | `prometheus_data` Docker 卷，容器重建不丢失 |
-| 采集目标 | `ocserv:9100`，路径 `/metrics` |
-| 采集间隔 | 全局 10 秒 |
-
-### 4.3 Grafana
-
-| 项目 | 说明 |
-|:--|:--|
-| 镜像 | `grafana/grafana:13.0.1-security-01` |
-| 子路径 | `GF_SERVER_SERVE_FROM_SUB_PATH=true` + `GF_SERVER_ROOT_URL=https://your.domain.com:8443/grafana/` |
-| 数据存储 | `grafana_data` Docker 卷 |
-| 自动配置 | 通过 `monitoring/datasources/` 和 `monitoring/dashboards/` 自动注入数据源和看板 |
-| 生产资源限制 | 默认限制 Grafana 为 `512m` 内存和 `1.00` CPU，可通过 `.env` 调整 |
-
-**内置看板**：
-
-| 看板 | 默认刷新 | 查询重点 | 说明 |
-|:--|:--|:--|:--|
-| Ocserv Overview | 30 秒 | 服务状态、活跃会话、活跃账号、采集健康、实时速率、累计流量、版本 | 默认长期打开，避免高基数查询 |
-| Ocserv Sessions | 30 秒 | 当前会话明细、排行、连接时长 | 排障时使用，需开启 `EXPORTER_ENABLE_SESSION_DETAIL_METRICS=true` |
-
-### 4.4 Nginx 反向代理
-
-| 项目 | 说明 |
-|:--|:--|
-| 镜像 | `nginx:1.30.2-alpine3.23-slim` |
-| 端口 | `${MONITORING_PORT:-8443}`（HTTPS） |
-| TLS | Let's Encrypt 证书，挂载 `/etc/letsencrypt/live/${DOMAIN}` 下的证书文件 |
-| 子路径路由 | `/grafana/` → Grafana |
-| 配置生成 | 启动时严格校验变量/证书，通过 `envsubst` 原子渲染配置，并在 `nginx -t` 通过后启动 |
-
-> 80 端口未映射，保留给 certbot HTTP-01 验证使用。ocserv 独立使用 `${OCSERV_PORT:-443}` 端口。
-
-**模板化配置机制**：
-
-Nginx 配置采用模板文件 + 启动脚本动态生成的方式，支持环境变量替换。启动脚本采用严格失败策略：`DOMAIN`、`MONITORING_PORT`、TLS 证书、模板目录或渲染结果任一异常都会阻止 Nginx 启动。
-
-```
-nginx/templates/monitoring-subpath.conf.template
-                    ↓ envsubst ${DOMAIN}
-nginx/conf.d/monitoring-subpath.conf（运行时生成）
-```
-
-**启动脚本**（`nginx/docker-entrypoint.sh`）：
-
-```sh
-for template in /etc/nginx/templates/*.conf.template; do
-    filename=$(basename "$template" .template)
-    tmp=$(mktemp "/etc/nginx/conf.d/.${filename}.XXXXXX")
-    envsubst '${DOMAIN} ${MONITORING_PORT}' < "$template" > "$tmp"
-    mv "$tmp" "/etc/nginx/conf.d/$filename"
-done
-nginx -t
-```
-
-**优势**：
-- 域名配置集中在 `.env` 文件，无需手动修改多个配置文件
-- 配置文件与代码分离，便于部署到不同环境
-- 启动前完成配置校验，部署错误会以容器启动失败的形式尽早暴露
-
-**关键配置**（生成后的 `nginx/conf.d/monitoring-subpath.conf`）：
-
-- **Grafana 代理**：支持 WebSocket（Grafana Live 实时推送必需）
-- **Prometheus**：保持在 Docker 网络内部，由 Grafana 数据源访问
-- **安全响应头**：HSTS、X-Frame-Options、X-Content-Type-Options 等
-- **SSL 参数**（`snippets/ssl-params.conf`）：TLS 1.2+1.3、ECDHE 套件、OCSP Stapling
-
----
-
-## 五、Fail2Ban 防护
-
-保护 Nginx 代理的监控端点免受暴力破解。
-
-### 工作流程
-
-```
-Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶ 累计失败次数
-                                              │
-                                      ≥ 5 次 / 10 分钟
-                                              │
-                                              ▼
-                                      nftables 封禁 IP（1 小时）
-```
-
-### 过滤器规则（`fail2ban/filter.d/nginx-auth.conf`）
-
-**匹配**：
-- `/grafana/login` 或 `/grafana/api/login` 返回 401/403
-
-**忽略**：`/health`、`/metrics`、`/favicon`、`/static`、`/public`、`/robots.txt`、`/.well-known`
-
-### 监狱参数（`fail2ban/jail.d/nginx-auth.conf`）
-
-| 参数 | 值 | 说明 |
-|:--|:--|:--|
-| `maxretry` | 5 | 触发封禁的失败次数 |
-| `findtime` | 600 | 统计窗口（10 分钟） |
-| `bantime` | 3600 | 封禁时长（1 小时） |
-| `action` | `nftables-multiport` | 通过 nftables 防火墙封禁 |
-
-`scripts/setup-fail2ban.sh` 执行时会自动替换日志路径为项目的绝对路径。
-
----
-
-## 六、Docker 安装脚本（install-docker.sh）
+## 四、Docker 安装脚本（install-docker.sh）
 
 面向无 Docker 环境的一键安装脚本，支持 12+ Linux 发行版。
 
@@ -441,7 +269,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 ---
 
-## 七、CI/CD（GitHub Actions）
+## 五、CI/CD（GitHub Actions）
 
 工作流定义在 `.github/workflows/docker-build.yml`。
 
@@ -449,7 +277,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 仓库 shell 脚本按解释器能力明确分组：
 
-- 纯 POSIX 脚本使用 `#!/bin/sh` 和 `set -eu`，并在 CI 中通过 `sh -n` 检查；运行期入口、配置渲染脚本、迁移脚本、Fail2Ban 安装脚本和 shell 测试都归入这一类。
+- 纯 POSIX 脚本使用 `#!/bin/sh` 和 `set -eu`，并在 CI 中通过 `sh -n` 检查；运行期入口、配置渲染脚本、迁移脚本和 shell 测试都归入这一类。
 - 需要 Bash 特性的脚本使用 `#!/usr/bin/env bash` 和 `set -euo pipefail`，并在 CI 中通过 `bash -n` 检查；当前仅 `install-docker.sh` 与 `scripts/ocserv-cert-auth.sh` 归入这一类。
 - 新增 `.sh` 文件必须先选择上述一类，并同步更新静态测试中的脚本分类表。
 
@@ -466,18 +294,17 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 ```
 1. validate job
        ├─ checkout
-       ├─ Python 单元测试
        ├─ shell 语法检查
        ├─ hadolint
        ├─ auth/Dockerfile 构建校验
        └─ docker compose 配置展开校验
        │
-2. build-images matrix job（3 x 2 并行）
-       ├─ matrix.image.type: ocserv, exporter, auth
+2. build-images matrix job（2 x 2 并行）
+       ├─ matrix.image.type: ocserv, auth
        ├─ matrix.platform.arch: amd64, arm64
        ├─ matrix.platform.runner: amd64 使用 `ubuntu-24.04`，arm64 使用 `ubuntu-24.04-arm`
        ├─ checkout
-       ├─ 按镜像类型决定是否下载 ocserv 源码（ocserv/exporter 需要，auth 跳过）
+       ├─ 按镜像类型决定是否下载 ocserv 源码（ocserv 需要，auth 跳过）
        ├─ tags 直接通过 `env[matrix.image.name_var]` 解析镜像仓库名（不带版本或架构后缀）
        ├─ Buildx 单平台构建
        ├─ 缓存: GitHub Actions 缓存（按 image/platform 分 scope）
@@ -485,7 +312,7 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
        └─ 生成 SBOM/provenance
        │
 3. merge-manifests matrix job
-       ├─ matrix.image.type: ocserv, exporter, auth
+       ├─ matrix.image.type: ocserv, auth
        ├─ 下载 amd64/arm64 digest artifacts
        ├─ 合并 `image@sha256:<digest>` 源
        └─ 发布多架构 `:<version>` 和 `:latest`
@@ -504,20 +331,21 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 
 ---
 
-## 八、项目文件索引
+## 六、项目文件索引
 
 ```
 ├── Dockerfile                          # 多阶段构建 + s6 服务定义
 ├── docker-compose.yml                  # 主服务编排（支持环境变量）
-├── docker-compose.monitoring.yml       # 监控栈编排（exporter + Prometheus + Grafana + Nginx）
 ├── install-docker.sh                   # Docker 一键安装脚本
 ├── docker/
 │   └── ocserv/s6-init.sh               # ocserv 容器启动前初始化脚本
 ├── scripts/
 │   ├── prepare-ocserv-config.sh        # 交互式准备 .env、目录权限并渲染 ocserv.conf
-│   ├── prepare-monitoring-config.sh    # 交互式准备完整监控栈部署前配置
 │   ├── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
-│   └── setup-fail2ban.sh               # Fail2Ban 部署脚本
+│   ├── migrate-legacy-cert-auth.sh     # 从旧版 ocserv-auth 迁移
+│   └── ocserv-cert-auth.sh             # 证书管理主脚本
+├── auth/
+│   └── Dockerfile                      # ocserv-auth 工具镜像
 ├── .env.example                        # 环境变量模板（提交到 Git）
 ├── .env                                # 实际环境变量（不提交，包含敏感配置）
 │
@@ -533,34 +361,9 @@ Nginx access.log ──▶ Fail2Ban 过滤器 ──▶ 匹配 401/403 ──▶
 │   ├── user-certs/                     # 用户 p12 交付文件
 │   └── config-per-user/                # 每用户配置
 │
-├── exporter/
-│   ├── Dockerfile                      # exporter Alpine 多阶段构建
-│   ├── ocserv_exporter.py              # Prometheus 指标采集器模块
-│   └── test_ocserv_exporter.py         # exporter 单元测试
-│
-├── monitoring/
-│   ├── prometheus.yml                  # 采集配置（10s 间隔）
-│   ├── datasources/prometheus.yml      # Grafana 数据源自动注入
-│   └── dashboards/
-│       ├── dashboards.yml              # Grafana dashboard provider
-│       └── definitions/
-│           ├── ocserv.json             # Overview 总览看板
-│           └── ocserv-sessions.json    # Sessions 会话明细看板
-│
-├── nginx/
-│   ├── templates/                      # Nginx 配置模板（支持环境变量替换）
-│   │   └── monitoring-subpath.conf.template
-│   ├── conf.d/                         # 生成的实际配置文件（运行时生成）
-│   ├── snippets/ssl-params.conf        # TLS 安全参数
-│   └── docker-entrypoint.sh            # 启动脚本（envsubst 变量替换）
-│
-├── fail2ban/
-│   ├── filter.d/nginx-auth.conf        # 暴力破解匹配规则
-│   └── jail.d/nginx-auth.conf          # 封禁参数模板
-│
 ├── tests/
-│   ├── test_fail2ban_filter.py         # Fail2Ban 样例日志匹配测试
-│   └── test_nginx_entrypoint.sh        # Nginx 模板渲染和失败路径测试
+│   ├── test_ocserv_cert_auth.sh        # 证书认证测试
+│   └── test_migrate_legacy_cert_auth.sh # 迁移测试
 │
 └── .github/workflows/
     └── docker-build.yml                # CI/CD 多架构构建流水线

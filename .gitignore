@@ -13,8 +13,17 @@ src/
 
 # Runtime data and generated files
 logs/
-nginx/logs/
-nginx/conf.d/
-nginx/.htpasswd
 config/ocserv.conf
 config/auth/ocpasswd
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Certificate and key files (sensitive)
+config/client-ca/private/
+config/user-certs/*.p12
+config/user-certs/*.key
+config/user-certs/*.cert

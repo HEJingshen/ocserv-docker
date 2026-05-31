@@ -44,6 +44,8 @@ OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-$(env_value OCSERV_ENABLE_CER
 OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-false}
 OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-$(env_value OCSERV_ENABLE_COMPRESSION)}
 OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-false}
+OCSERV_NO_UDP=${OCSERV_NO_UDP:-$(env_value OCSERV_NO_UDP)}
+OCSERV_NO_UDP=${OCSERV_NO_UDP:-false}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_value OCSERV_MAX_CLIENTS)}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}
 
@@ -62,6 +64,14 @@ case "${OCSERV_ENABLE_COMPRESSION}" in
         ;;
     *)
         fail "OCSERV_ENABLE_COMPRESSION must be true or false: ${OCSERV_ENABLE_COMPRESSION}"
+        ;;
+esac
+
+case "${OCSERV_NO_UDP}" in
+    true|false)
+        ;;
+    *)
+        fail "OCSERV_NO_UDP must be true or false: ${OCSERV_NO_UDP}"
         ;;
 esac
 
@@ -111,6 +121,7 @@ trap 'rm -f "${TMP_FILE}"' EXIT HUP INT TERM
 awk -v domain="${DOMAIN}" \
     -v enable_cert_auth="${OCSERV_ENABLE_CERT_AUTH}" \
     -v enable_compression="${OCSERV_ENABLE_COMPRESSION}" \
+    -v no_udp="${OCSERV_NO_UDP}" \
     -v max_clients="${OCSERV_MAX_CLIENTS}" '
     {
         gsub(/\$\{DOMAIN\}/, domain)
@@ -130,6 +141,10 @@ awk -v domain="${DOMAIN}" \
             print "compression = " enable_compression
             next
         }
+        if ($0 ~ /^[[:space:]]*no-udp[[:space:]]*=/) {
+            print "no-udp = " no_udp
+            next
+        }
         if ($0 ~ /^[[:space:]]*max-clients[[:space:]]*=/) {
             sub(/=.*/, "= " max_clients)
         }
@@ -145,5 +160,5 @@ chmod 0644 "${TMP_FILE}"
 mv "${TMP_FILE}" "${OUTPUT_FILE}"
 trap - EXIT HUP INT TERM
 
-printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s OCSERV_ENABLE_CERT_AUTH=%s OCSERV_ENABLE_COMPRESSION=%s\n' \
-    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}" "${OCSERV_ENABLE_CERT_AUTH}" "${OCSERV_ENABLE_COMPRESSION}"
+printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s OCSERV_ENABLE_CERT_AUTH=%s OCSERV_ENABLE_COMPRESSION=%s OCSERV_NO_UDP=%s\n' \
+    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}" "${OCSERV_ENABLE_CERT_AUTH}" "${OCSERV_ENABLE_COMPRESSION}" "${OCSERV_NO_UDP}"
