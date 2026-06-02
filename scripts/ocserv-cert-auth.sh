@@ -178,12 +178,14 @@ current_user_cert_file() {
 }
 
 user_p12_artifacts_present() {
-    local username=$1 user_dir="${CERT_DIR}/${username}"
+    local username=$1
+    local user_dir="${CERT_DIR}/${username}"
     [[ -s "${user_dir}/${username}.p12" && -s "${user_dir}/ios-${username}.p12" ]]
 }
 
 cleanup_user_pem_artifacts() {
-    local username=$1 user_dir="${CERT_DIR}/${username}"
+    local username=$1
+    local user_dir="${CERT_DIR}/${username}"
     rm -f "${user_dir}"/*-cert.pem "${user_dir}"/*-key.pem
 }
 
