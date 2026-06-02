@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die() {
+    printf '[-] %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage:
+  occ users
+  occ status
+  occ reload
+
+Runs occtl commands through the running ocserv container.
+EOF
+}
+
+require_no_extra_args() {
+    local action=$1
+    shift
+    [[ "$#" -eq 0 ]] || {
+        usage >&2
+        die "${action} does not accept extra arguments"
+    }
+}
+
+require_docker() {
+    command -v docker >/dev/null 2>&1 || die "docker is required"
+}
+
+case "${1:-}" in
+    users)
+        shift
+        require_no_extra_args "users" "$@"
+        require_docker
+        exec docker exec ocserv occtl show users
+        ;;
+    status)
+        shift
+        require_no_extra_args "status" "$@"
+        require_docker
+        exec docker exec ocserv occtl show status
+        ;;
+    reload)
+        shift
+        require_no_extra_args "reload" "$@"
+        require_docker
+        exec docker exec ocserv occtl reload
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    "")
+        usage >&2
+        exit 2
+        ;;
+    *)
+        usage >&2
+        die "unknown command: $1"
+        ;;
+esac

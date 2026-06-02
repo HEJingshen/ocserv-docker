@@ -111,6 +111,12 @@ docker compose up -d
 docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 ```
 
+也可以使用仓库内置短命令创建密码用户：
+
+```bash
+./scripts/ocu add username
+```
+
 首次使用证书工具前，建议至少先创建一个密码用户。
 
 默认证书工具镜像默认为 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，版本来自 `.env` 中的 `OCSERV_VERSION`。首次使用前可先预拉取：
@@ -120,6 +126,37 @@ docker compose --profile tools pull ocserv-auth
 ```
 
 ### 2.4 客户端证书认证（可选登录方式）
+
+证书工具的完整 Compose 命令可以直接使用；如果希望命令更短，也可以使用仓库内置包装脚本：
+
+```bash
+./scripts/oca init-ca
+./scripts/oca manage
+./scripts/oca status
+./scripts/oca revoke username
+./scripts/oca reissue username
+./scripts/oca menu
+```
+
+`scripts/oca` 只是在宿主机上封装 `docker compose --profile tools run --rm ocserv-auth`，不会修改容器权限、挂载或工具入口。它会自动切换到仓库根目录执行，因此也可以从其他目录用绝对路径调用。
+
+如果想在 shell 中直接输入短命令，可以先确认本机没有同名命令：
+
+```bash
+type oca
+type ocu
+type occ
+```
+
+然后按当前 shell 写入别名，例如 zsh 使用 `~/.zshrc`，bash 使用 `~/.bashrc`：
+
+```bash
+alias oca='/absolute/path/to/ocserv-docker/scripts/oca'
+alias ocu='/absolute/path/to/ocserv-docker/scripts/ocu'
+alias occ='/absolute/path/to/ocserv-docker/scripts/occ'
+```
+
+写入后重新打开 shell，或执行 `source ~/.zshrc` / `source ~/.bashrc` 让别名生效。`oca` 负责证书管理，`ocu` 只负责 `ocpasswd` 密码用户管理，`occ` 只负责 `occtl` 运行时控制。下方仍保留完整命令，适合脚本化、排障和不想设置 alias 的场景。
 
 启用客户端证书登录前，先初始化 CA：
 
@@ -207,10 +244,18 @@ docker exec ocserv occtl show users
 | 停止 | `docker compose down` |
 | 重启 | `docker compose restart` |
 | 查看日志 | `docker compose logs -f ocserv` |
-| 在线用户 | `docker exec ocserv occtl show users` |
-| 服务状态 | `docker exec ocserv occtl show status` |
-| 重载配置 | `docker exec ocserv occtl reload` |
-| 删除用户 | `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username` |
+| 创建用户 | `./scripts/ocu add username` 或 `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username` |
+| 删除用户 | `./scripts/ocu delete username` 或 `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username` |
+| 在线用户 | `./scripts/occ users` 或 `docker exec ocserv occtl show users` |
+| 服务状态 | `./scripts/occ status` 或 `docker exec ocserv occtl show status` |
+| 重载配置 | `./scripts/occ reload` 或 `docker exec ocserv occtl reload` |
+
+删除密码用户只会更新 `ocpasswd`，不会自动吊销客户端证书。如果已启用证书认证，并且需要让该用户的现有客户端证书失效，请继续执行：
+
+```bash
+./scripts/oca revoke username
+./scripts/occ reload
+```
 
 ---
 

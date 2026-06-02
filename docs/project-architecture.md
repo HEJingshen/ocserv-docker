@@ -207,7 +207,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `./config/config-per-user` | `/etc/ocserv/config-per-user` | `ro`（只读） | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
-`ocserv-auth` 工具容器通过 `tools` profile 按需运行，默认从 Docker Hub 拉取 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。该工具镜像同样基于 Alpine，并通过仓库配置脚本启用 `community` 仓库，以保留 `fzf` 支持的交互式证书撤销菜单。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。开发或离线场景如需改用本地构建镜像，可在 `.env` 中覆盖 `OCSERV_AUTH_IMAGE=ocserv-auth:local`。
+`ocserv-auth` 工具容器通过 `tools` profile 按需运行，默认从 Docker Hub 拉取 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。该工具镜像同样基于 Alpine，并通过仓库配置脚本启用 `community` 仓库，以保留 `fzf` 支持的交互式证书撤销菜单。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。`scripts/oca` 是宿主机上的短命令包装入口，只封装 `docker compose --profile tools run --rm ocserv-auth`，不改变 Compose profile、挂载、容器入口或安全模型。`scripts/ocu` 只封装长期运行的 `ocserv` 容器内 `ocpasswd` 用户密码管理命令；`scripts/occ` 只封装 `occtl` 运行时控制命令。二者都不改变容器权限、Compose 配置或挂载关系。开发或离线场景如需改用本地构建镜像，可在 `.env` 中覆盖 `OCSERV_AUTH_IMAGE=ocserv-auth:local`。
 
 ### 日志轮转
 
@@ -343,7 +343,10 @@ healthcheck:
 │   ├── prepare-ocserv-config.sh        # 交互式准备 .env、目录权限并渲染 ocserv.conf
 │   ├── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
 │   ├── migrate-legacy-cert-auth.sh     # 从旧版 ocserv-auth 迁移
-│   └── ocserv-cert-auth.sh             # 证书管理主脚本
+│   ├── ocserv-cert-auth.sh             # 证书管理主脚本
+│   ├── oca                             # ocserv-auth 宿主机短命令包装入口
+│   ├── ocu                             # ocpasswd 用户密码管理短命令入口
+│   └── occ                             # occtl 运行时控制短命令入口
 ├── auth/
 │   └── Dockerfile                      # ocserv-auth 工具镜像
 ├── .env.example                        # 环境变量模板（提交到 Git）
