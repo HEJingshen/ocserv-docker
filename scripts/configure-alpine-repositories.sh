@@ -3,6 +3,7 @@ set -eu
 
 APK_MIRROR="${1:-https://dl-cdn.alpinelinux.org/alpine}"
 
+# shellcheck source=/etc/os-release
 . /etc/os-release
 ALPINE_BRANCH="${VERSION_ID}"
 case "${ALPINE_BRANCH}" in

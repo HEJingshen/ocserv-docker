@@ -37,6 +37,7 @@ if [ -n "${VPN_NETWORK_VAL}" ]; then
                 _prefix=0
                 _old_IFS="${IFS}"
                 IFS='.'
+                # shellcheck disable=SC2086
                 set -- ${VPN_NETMASK_VAL}
                 IFS="${_old_IFS}"
                 if [ "$#" -ne 4 ]; then

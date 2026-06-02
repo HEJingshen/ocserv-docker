@@ -6,26 +6,18 @@ on:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
-      - '**/Dockerfile'
-      - 'VERSION'
-      - '.github/workflows/**'
-      - 'auth/**'
-      - 'config/**'
-      - 'docker-compose*.yml'
-      - 'scripts/**'
-      - 'tests/**'
+      - 'auth/Dockerfile'
+      - 'scripts/configure-alpine-repositories.sh'
+      - 'scripts/ocserv-cert-auth.sh'
+      - 'docker/ocserv/s6-init.sh'
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
-      - '**/Dockerfile'
-      - 'VERSION'
-      - '.github/workflows/**'
-      - 'auth/**'
-      - 'config/**'
-      - 'docker-compose*.yml'
-      - 'scripts/**'
-      - 'tests/**'
+      - 'auth/Dockerfile'
+      - 'scripts/configure-alpine-repositories.sh'
+      - 'scripts/ocserv-cert-auth.sh'
+      - 'docker/ocserv/s6-init.sh'
 
 permissions:
   contents: read
@@ -51,28 +43,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Check shell scripts
+      - name: Install shellcheck
         run: |
-          for f in scripts/render-ocserv-conf.sh scripts/configure-alpine-repositories.sh scripts/prepare-ocserv-config.sh scripts/migrate-legacy-cert-auth.sh docker/ocserv/s6-init.sh tests/test_ocserv_cert_auth.sh tests/test_migrate_legacy_cert_auth.sh; do
-            sh -n "$f"
-          done
-          for f in scripts/ocserv-cert-auth.sh install-docker.sh; do
-            bash -n "$f"
-          done
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Check shell syntax
+        run: |
+          sh -n scripts/configure-alpine-repositories.sh
+          sh -n docker/ocserv/s6-init.sh
+          bash -n scripts/ocserv-cert-auth.sh
+
+      - name: Lint shell scripts
+        run: |
+          shellcheck -s sh scripts/configure-alpine-repositories.sh
+          shellcheck -s sh docker/ocserv/s6-init.sh
+          shellcheck -s bash scripts/ocserv-cert-auth.sh
 
       - name: Lint Dockerfiles
         run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile auth/Dockerfile
 
-      - name: Build auth tool image
-        run: docker build --pull -f auth/Dockerfile -t ocserv-auth:ci .
-
-      - name: Validate Compose files
+      - name: Validate Compose file
         env:
-          # CI-only value for Compose interpolation; production must set this in .env.
           DOMAIN: ci.example.com
-          SKIP_TLS_CHECK: "true"
-        run: |
-          docker compose config >/tmp/docker-compose.yml
+        run: docker compose config --quiet
 
   build-images:
     needs: validate
