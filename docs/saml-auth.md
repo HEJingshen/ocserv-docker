@@ -133,9 +133,9 @@ docker inspect ocserv:${VERSION}-saml | jq '.[0].Config.Labels'
 
 ## 已知问题
 
-1. **xmlsec API兼容性**：lasso需要与xmlsec 1.3.x API兼容的补丁，已在Dockerfile.saml中应用
-2. **gcc-15编译**：lasso 2.9.0需要gcc-15兼容补丁
-3. **OpenSSL 3.x**：lasso的某些EVP API在OpenSSL 3.x中有变化
+1. **xmlsec API兼容性**：lasso 2.9.0 已包含 xmlsec 1.3.x API 兼容修复
+2. **gcc-15编译**：lasso 2.9.0 已包含 GCC 15 编译兼容修复
+3. **OpenSSL 3.x**：lasso 的某些 EVP API 在 OpenSSL 3.x 中有变化
 
 ## 参考资源
 

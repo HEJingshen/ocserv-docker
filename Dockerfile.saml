@@ -26,21 +26,11 @@ RUN --mount=type=cache,target=/var/cache/apk \
 
 # Copy lasso 2.9.0 source (includes CVE-2025-47151 security fix)
 COPY src/lasso-2.9.0.tar.gz /tmp/lasso.tar.gz
-COPY src/patches/misc-remove-usage-of-python-six-module.patch /tmp/python3.patch
-COPY src/patches/gcc-15.patch /tmp/gcc15.patch
-COPY src/patches/xmlsec-1.3-api-compat.patch /tmp/xmlsec.patch
 
-# Build lasso with xmlsec 1.3.x API compatibility patches
+# Build lasso. The 2.9.0 source already includes the downstream python-six,
+# GCC 15, and xmlsec 1.3 compatibility fixes needed by this image.
 RUN set -eux; \
     cd /tmp && tar xzf lasso.tar.gz && cd lasso-2.9.0; \
-    # Apply patches for python3, gcc-15, and xmlsec 1.3.x API
-    patch -p1 < /tmp/python3.patch; \
-    patch -p1 < /tmp/gcc15.patch; \
-    patch -p1 < /tmp/xmlsec.patch; \
-    # Additional xmlsec API compatibility fixes
-    sed -i "s/xmlSecCryptoAppKeyLoad(file,/xmlSecCryptoAppKeyLoadEx(file, xmlSecKeyDataTypePublic,/g" lasso/xml/tools.c; \
-    sed -i "s/xmlSecCryptoAppKeyLoad(private_key_file,/xmlSecCryptoAppKeyLoadEx(private_key_file, xmlSecKeyDataTypePrivate,/g" lasso/xml/tools.c; \
-    sed -i '/#ifdef XMLSEC_CRYPTO_DYNAMIC_LOADING/i #define XMLSEC_CRYPTO "openssl"' lasso/lasso.c; \
     touch aclocal.m4 Makefile.in configure config.h.in; \
     ./configure --prefix=/usr --disable-java --disable-perl --disable-php5 --disable-php7 --disable-gtk-doc CFLAGS="-DXMLSEC_CRYPTO=openssl"; \
     make -j$(nproc) && make DESTDIR=/out install; \
@@ -192,7 +182,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
         | grep -v 'liblasso' || true)"; \
     apk add --update-cache --virtual .ocserv-rundeps ${runDeps}; \
     # Install lasso runtime dependencies for SAML support
-    apk add --update-cache libxml2 libxslt xmlsec glib apr1; \
+    apk add --update-cache libxml2 libxslt xmlsec glib apr; \
     apk add --update-cache s6-overlay; \
     [ -x /init ]
 

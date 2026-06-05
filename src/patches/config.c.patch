@@ -11,8 +11,8 @@
  #include <sec-mod-sup-config.h>
  #include <sec-mod-acct.h>
 @@ -216,6 +219,10 @@
- 	{ NAME("oidc"), &oidc_auth_funcs, AUTH_TYPE_OIDC,
- 	  oidc_get_brackets_string },
+	{ NAME("oidc"), &oidc_auth_funcs, AUTH_TYPE_OIDC,
+	  oidc_get_brackets_string },
  #endif
 +#ifdef HAVE_SAML
 +	{ NAME("saml"), &saml_auth_funcs, AUTH_TYPE_SAML,

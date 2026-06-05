@@ -1,9 +1,7 @@
 0001-misc-adjust-to-structured-error-callback-argument-ch.patch
 0001-misc-fix-implicit-function-declaration-errors-85340.patch
 0001-xml-fix-uninitialized-local-variable-85339.patch
-misc-remove-usage-of-python-six-module.patch
 python_unittest_3.13.patch
-gcc-15.patch
 tests-test-that-inserted-comment-do-not-change-node-.patch
 xml-prevent-assignment-of-attribute-value-inside-any.patch
 misc-check-xmlSecGetNodeNsHref-for-possible-NULL-res.patch

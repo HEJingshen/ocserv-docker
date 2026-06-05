@@ -7,11 +7,11 @@
 +opt_saml    = get_option('saml-auth')
  opt_utmp    = get_option('utmp')
  opt_wrap    = get_option('libwrap')
- 
+
 @@ -229,6 +230,20 @@
    oidc_enabled = curl_dep.found() and cjose_dep.found() and jansson_dep.found()
  endif
- 
+
 +# SAML2
 +lasso_dep  = dependency('', required: false)
 +glib_dep   = dependency('', required: false)
@@ -36,4 +36,3 @@
 +cdata.set('HAVE_SAML',                   saml_enabled)
  cdata.set('TRY_SHA2_CRYPT',                   try_sha2_crypt)
  cdata.set('USE_SECCOMP_TRAP',                 get_option('seccomp-trap'))
- 

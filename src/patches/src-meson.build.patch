@@ -8,13 +8,13 @@
 +  auth_sources += files('auth/saml.c')
 +endif
 +
- 
+
  if oidc_enabled
    auth_sources += files('auth/openidconnect.c')
 @@ -213,6 +217,11 @@
    core_deps += [curl_dep, cjose_dep, jansson_dep]
  endif
- 
+
 +if saml_enabled
 +  core_deps += [lasso_dep, glib_dep, gobject_dep, apr_dep]
 +endif
@@ -26,7 +26,7 @@
 @@ -278,6 +287,10 @@
    worker_deps += libm_dep
  endif
- 
+
 +if saml_enabled
 +  worker_sources += files('auth/saml.c')
 +endif

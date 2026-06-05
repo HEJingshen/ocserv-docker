@@ -7,13 +7,13 @@
 +#ifdef HAVE_SAML
 +#define HTTP_AUTH_SAML_PREFIX "SAML"
 +#endif
- 
+
  static int basic_auth_handler(worker_st *ws, unsigned int http_ver,
- 			      const char *msg);
+			      const char *msg);
 @@ -1659,6 +1662,23 @@
- 		}
+		}
  #endif
- 
+
 +#ifdef HAVE_SAML
 +		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
 +			if (req->authorization == NULL ||
@@ -31,6 +31,6 @@
 +		}
 +#endif
 +
- 		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
- 			if (req->authorization == NULL ||
- 			    req->authorization_size == 0)
+		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
+			if (req->authorization == NULL ||
+			    req->authorization_size == 0)
