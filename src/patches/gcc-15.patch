@@ -1,0 +1,58 @@
+Description: fix compilation errors with gcc-15
+Origin: upstream, https://git.entrouvert.org/entrouvert/lasso/pulls/27
+Bug: https://dev.entrouvert.org/issues/101250
+Last-Update: 2025-02-17
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/bindings/python/tests/binding_tests.py
++++ b/bindings/python/tests/binding_tests.py
+@@ -339,6 +339,12 @@
+         self.assertEqual(str(cm.exception),
+                          '<lasso.XmlSchemaInvalidFragmentError(17): An XML tree does not respect at least an XML schema of its namespaces.>')
+ 
++    def test_provider_get_key_encryption_method(self):
++        # check getKeyEncryptionMethod is a Provider method #101250
++        with self.assertRaises(AttributeError):
++            getattr(lasso, 'providerGetKeyEncryptionMethod')
++        getattr(lasso.Provider, 'getKeyEncryptionMethod')
++
+     def test_set_list_of_strings(self):
+         node = lasso.Samlp2RequestedAuthnContext()
+         with self.assertRaises(TypeError, msg='value should be a tuple of strings'):
+--- a/bindings/python/tests/profiles_tests.py
++++ b/bindings/python/tests/profiles_tests.py
+@@ -330,6 +330,12 @@
+             sp_login.setSignatureVerifyHint(lasso.PROFILE_SIGNATURE_VERIFY_HINT_FORCE)
+             sp_login.processAuthnResponseMsg(idp_login.msgBody)
+             sp_login.acceptSso()
++
++            if key_encryption_method:
++                expected_key_encryption_method = key_encryption_method
++            else:
++                expected_key_encryption_method = lasso.getDefaultKeyEncryptionMethod()
++            assert provider.getKeyEncryptionMethod() == expected_key_encryption_method
+             return sp_login.response.debug()
+ 
+         os.environ['LASSO_DEFAULT_KEY_ENCRYPTION_METHOD'] = 'rsa-pkcs1'
+--- a/lasso/id-ff/provider.h
++++ b/lasso/id-ff/provider.h
+@@ -284,7 +284,7 @@
+ LASSO_EXPORT void lasso_provider_set_key_encryption_method(
+ 		LassoProvider *provider, LassoKeyEncryptionMethod method);
+ 
+-LASSO_EXPORT LassoKeyEncryptionMethod lasso_provider_get_key_encryption_method();
++LASSO_EXPORT LassoKeyEncryptionMethod lasso_provider_get_key_encryption_method(const LassoProvider* provider);
+ 
+ 
+ #ifdef __cplusplus
+--- a/lasso/registry-private.h
++++ b/lasso/registry-private.h
+@@ -39,7 +39,7 @@
+ };
+ 
+ LassoRegistry *lasso_registry_new();
+-void lasso_registry_destroy();
++void lasso_registry_destroy(LassoRegistry *registry);
+ void lasso_registry_default_shutdown();
+ gint lasso_registry_add_direct_mapping(LassoRegistry *registry, const char *from_namespace,
+ 		const char *from_name, const char *to_namespace, const char *to_name);

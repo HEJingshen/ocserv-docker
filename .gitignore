@@ -1,20 +1,36 @@
-# Claude Code
+# AI / IDE tooling
 .claude/
+.plan/
 CLAUDE.md
 AGENTS.md
-.DS_Store
+
+# OS files
 **/.DS_Store
 
-# Local source archives
-src/
+# Editor temp files
+*.swp
+*~
 
-# Environment variables (contains sensitive data)
+# Environment variables (sensitive data)
 .env
+.env.*
+!.env.example
 
-# Runtime data and generated files
+# Local source archives & extracted source
+src/*.tar.*
+src/*.tgz
+src/*.zip
+ocserv-*/
+
+# Runtime data
 logs/
 config/ocserv.conf
 config/auth/ocpasswd
+
+# Runtime directories (created by docker-compose)
+config/client-ca/
+config/config-per-user/
+config/user-certs/
 
 # Python cache
 __pycache__/
@@ -22,8 +38,5 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
-# Certificate and key files (sensitive)
-config/client-ca/private/
-config/user-certs/*.p12
-config/user-certs/*.key
-config/user-certs/*.cert
+# Log files
+*.log

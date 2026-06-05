@@ -2,12 +2,17 @@
 .git/
 .github/
 
+# AI / IDE tooling
+.claude/
+.plan/
+CLAUDE.md
+AGENTS.md
+
 # Local data
 logs/
 config/
 
-# IDE / editor
-.DS_Store
+# OS / editor temp files
 **/.DS_Store
 *.swp
 *~
@@ -18,8 +23,14 @@ tests/
 README.md
 install-docker.sh
 docker-compose*.yml
+
+# Environment variables (sensitive data)
 .env
 .env.*
+!.env.example
+
+# Extracted source directories
+ocserv-*/
 
 # Keep only scripts needed by Dockerfile COPY.
 scripts/*

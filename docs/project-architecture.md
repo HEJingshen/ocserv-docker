@@ -51,9 +51,12 @@
 
 `Dockerfile` 和 `auth/Dockerfile` 均通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签；`auth` 镜像会通过仓库配置脚本启用 `main` 与 `community`，以安装交互式证书管理所需的 `fzf`。
 
+**SAML镜像变体**：`Dockerfile.saml` 使用相同Alpine基线，额外编译 liblasso 2.9.0（包含CVE-2025-47151等安全修复）和SAML认证模块。详细配置说明参见 [SAML认证文档](saml-auth.md)。
+
 | 镜像 | 用途 | 关键能力 |
 |:--|:--|:--|
 | `ocserv` | 默认生产标签 `kingsonho/ocserv:${OCSERV_VERSION}`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT、s6 |
+| `ocserv-saml` | SAML认证标签 `kingsonho/ocserv:${OCSERV_VERSION}-saml`，`latest-saml` 指向该版本标签 | **SAML 2.0** + PAM、GSSAPI、RADIUS、OTP、plain auth |
 | `ocserv-auth` | 默认工具标签 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，`latest` 指向该版本标签；本地备用 `ocserv-auth:local` | Bash 证书管理脚本、`certtool`/OpenSSL、`flock` 锁、`fzf` 交互菜单 |
 
 ### 镜像元数据（LABELs）
@@ -66,6 +69,7 @@
 | `org.opencontainers.image.version` | `${OCSERV_VERSION}` | ocserv 版本，发布构建从根目录 `VERSION` 注入 |
 | `org.opencontainers.image.created` | `<BUILD_DATE>` | 构建时间 |
 | `org.opencontainers.image.source` | GitHub 仓库地址 | 源码来源 |
+| `org.opencontainers.image.auth.features` | `SAML2.0,PAM,...` | **SAML镜像专属**：支持的认证方式列表 |
 
 ### s6-overlay 服务定义
 

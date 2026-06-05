@@ -6,6 +6,7 @@ on:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
+      - 'Dockerfile.saml'
       - 'auth/Dockerfile'
       - 'scripts/configure-alpine-repositories.sh'
       - 'scripts/ocserv-cert-auth.sh'
@@ -14,6 +15,7 @@ on:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
+      - 'Dockerfile.saml'
       - 'auth/Dockerfile'
       - 'scripts/configure-alpine-repositories.sh'
       - 'scripts/ocserv-cert-auth.sh'
@@ -61,7 +63,7 @@ jobs:
           shellcheck -s bash scripts/ocserv-cert-auth.sh
 
       - name: Lint Dockerfiles
-        run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile auth/Dockerfile
+        run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile Dockerfile.saml auth/Dockerfile
 
       - name: Validate Compose file
         env:
@@ -81,6 +83,12 @@ jobs:
             dockerfile: Dockerfile
             name_var: OCSERV_IMAGE_NAME
             needs_source: "true"
+            saml: false
+          - type: ocserv-saml
+            dockerfile: Dockerfile.saml
+            name_var: OCSERV_IMAGE_NAME
+            needs_source: "true"
+            saml: true
           - type: auth
             dockerfile: auth/Dockerfile
             name_var: OCSERV_AUTH_IMAGE_NAME
@@ -104,6 +112,13 @@ jobs:
           curl -fsSL -o src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz \
             https://www.infradead.org/ocserv/download/ocserv-${{ env.OCSERV_VERSION }}.tar.xz
           echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ env.OCSERV_VERSION }}.tar.xz" | sha256sum -c -
+
+      - name: Download lasso source for SAML build
+        if: matrix.image.saml == true
+        run: |
+          # Download lasso 2.9.0 (includes security fixes for CVE-2025-47151)
+          curl -fsSL -o src/lasso-2.9.0.tar.gz \
+            https://deb.debian.org/debian/pool/main/l/lasso/lasso_2.9.0.orig.tar.gz
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -176,6 +191,10 @@ jobs:
         image:
           - type: ocserv
             name_var: OCSERV_IMAGE_NAME
+            saml: false
+          - type: ocserv-saml
+            name_var: OCSERV_IMAGE_NAME
+            saml: true
           - type: auth
             name_var: OCSERV_AUTH_IMAGE_NAME
     steps:
@@ -204,6 +223,7 @@ jobs:
       - name: Publish multi-arch manifests
         env:
           IMAGE_NAME: ${{ env[matrix.image.name_var] }}
+          SAML_SUFFIX: ${{ matrix.image.saml && '-saml' || '' }}
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${IMAGE_NAME}"
           mapfile -t DIGEST_FILES < <(find /tmp/digests -type f | sort)
@@ -219,6 +239,6 @@ jobs:
           done
 
           docker buildx imagetools create \
-            -t "${IMAGE_REF}:${{ env.OCSERV_VERSION }}" \
-            -t "${IMAGE_REF}:latest" \
+            -t "${IMAGE_REF}:${{ env.OCSERV_VERSION }}${SAML_SUFFIX}" \
+            -t "${IMAGE_REF}:latest${SAML_SUFFIX}" \
             "${SOURCES[@]}"

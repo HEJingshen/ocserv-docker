@@ -1,0 +1,36 @@
+--- ocserv-1.4.2/src/meson.build.orig	2026-06-04 14:28:27.685356002 +0000
++++ ocserv-1.4.2/src/meson.build	2026-06-04 14:28:27.691356002 +0000
+@@ -176,6 +176,10 @@
+   'auth/radius.c',
+   'auth-unix.c',
+ )
++if saml_enabled
++  auth_sources += files('auth/saml.c')
++endif
++
+ 
+ if oidc_enabled
+   auth_sources += files('auth/openidconnect.c')
+@@ -213,6 +217,11 @@
+   core_deps += [curl_dep, cjose_dep, jansson_dep]
+ endif
+ 
++if saml_enabled
++  core_deps += [lasso_dep, glib_dep, gobject_dep, apr_dep]
++endif
++
++
+ # --------------------------------------------------------------------------
+ # ocserv
+ # --------------------------------------------------------------------------
+@@ -278,6 +287,10 @@
+   worker_deps += libm_dep
+ endif
+ 
++if saml_enabled
++  worker_sources += files('auth/saml.c')
++endif
++
+ executable('ocserv-worker', worker_sources,
+   c_args: ['-DOCSERV_WORKER_PROCESS'],
+   dependencies: worker_deps,

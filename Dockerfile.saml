@@ -1,12 +1,52 @@
 # syntax=docker/dockerfile:1.7
 #
-# Dockerfile for ocserv (standard build without SAML support)
-# For SAML 2.0 authentication support, use Dockerfile.saml
+# Dockerfile for ocserv with SAML 2.0 authentication support
+# Uses lasso 2.9.0 (includes security fixes for CVE-2025-47151, CVE-2025-46404, etc.)
 #
 
 ARG ALPINE_IMAGE=alpine:3.23.4
 
-# Stage 1: Build ocserv
+# Stage 1: Build liblasso 2.9.0 for SAML2 support
+FROM ${ALPINE_IMAGE} AS lasso-builder
+
+ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+
+COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
+
+RUN set -eux; \
+    chmod +x /usr/local/bin/configure-alpine-repositories; \
+    configure-alpine-repositories "${APK_MIRROR}"
+
+# Install lasso build dependencies
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk add --update-cache \
+        build-base pkgconfig glib-dev libxml2-dev libxslt-dev \
+        xmlsec-dev openssl-dev gettext-dev zlib-dev apr-dev \
+        autoconf automake libtool
+
+# Copy lasso 2.9.0 source (includes CVE-2025-47151 security fix)
+COPY src/lasso-2.9.0.tar.gz /tmp/lasso.tar.gz
+COPY src/patches/misc-remove-usage-of-python-six-module.patch /tmp/python3.patch
+COPY src/patches/gcc-15.patch /tmp/gcc15.patch
+COPY src/patches/xmlsec-1.3-api-compat.patch /tmp/xmlsec.patch
+
+# Build lasso with xmlsec 1.3.x API compatibility patches
+RUN set -eux; \
+    cd /tmp && tar xzf lasso.tar.gz && cd lasso-2.9.0; \
+    # Apply patches for python3, gcc-15, and xmlsec 1.3.x API
+    patch -p1 < /tmp/python3.patch; \
+    patch -p1 < /tmp/gcc15.patch; \
+    patch -p1 < /tmp/xmlsec.patch; \
+    # Additional xmlsec API compatibility fixes
+    sed -i "s/xmlSecCryptoAppKeyLoad(file,/xmlSecCryptoAppKeyLoadEx(file, xmlSecKeyDataTypePublic,/g" lasso/xml/tools.c; \
+    sed -i "s/xmlSecCryptoAppKeyLoad(private_key_file,/xmlSecCryptoAppKeyLoadEx(private_key_file, xmlSecKeyDataTypePrivate,/g" lasso/xml/tools.c; \
+    sed -i '/#ifdef XMLSEC_CRYPTO_DYNAMIC_LOADING/i #define XMLSEC_CRYPTO "openssl"' lasso/lasso.c; \
+    touch aclocal.m4 Makefile.in configure config.h.in; \
+    ./configure --prefix=/usr --disable-java --disable-perl --disable-php5 --disable-php7 --disable-gtk-doc CFLAGS="-DXMLSEC_CRYPTO=openssl"; \
+    make -j$(nproc) && make DESTDIR=/out install; \
+    rm -rf /tmp/lasso-* /tmp/*.patch
+
+# Stage 2: Build ocserv with SAML support
 FROM ${ALPINE_IMAGE} AS builder
 
 ARG OCSERV_VERSION
@@ -18,6 +58,7 @@ RUN set -eux; \
     chmod +x /usr/local/bin/configure-alpine-repositories; \
     configure-alpine-repositories "${APK_MIRROR}"
 
+# Install ocserv build dependencies (including SAML dependencies)
 RUN --mount=type=cache,target=/var/cache/apk \
     set -eux; \
     apk add --update-cache \
@@ -49,12 +90,39 @@ RUN --mount=type=cache,target=/var/cache/apk \
         talloc-dev; \
     apk add --update-cache oath-toolkit-dev || echo "WARNING: oath-toolkit-dev unavailable; OTP/liboath will remain auto-detected"; \
     apk add --update-cache radcli-dev || echo "WARNING: radcli-dev unavailable; RADIUS will remain auto-detected"; \
-    apk add --update-cache libxcrypt-dev || true
+    apk add --update-cache libxcrypt-dev || true; \
+    # SAML2 dependencies
+    apk add --update-cache glib-dev libxml2-dev xmlsec-dev apr-dev
+
+# Copy lasso artifacts and SAML patches
+COPY --from=lasso-builder /out/ /lasso/
+COPY src/patches/vpn.h.patch /patches/vpn.h.patch
+COPY src/patches/common-config.h.patch /patches/common-config.h.patch
+COPY src/patches/meson_options.txt.patch /patches/meson_options.txt.patch
+COPY src/patches/meson.build.patch /patches/meson.build.patch
+COPY src/patches/src-meson.build.patch /patches/src-meson.build.patch
+COPY src/patches/config.c.patch /patches/config.c.patch
+COPY src/patches/worker-auth.c.patch /patches/worker-auth.c.patch
+COPY src/saml/saml.c /saml/saml.c
+COPY src/saml/saml.h /saml/saml.h
+COPY src/saml/lasso_compat.h /saml/lasso_compat.h
 
 COPY src/ocserv-${OCSERV_VERSION}.tar.xz /tmp/ocserv.tar.xz
 
+# Build ocserv with SAML patches
 RUN set -eux; \
     cd /tmp && tar -xf ocserv.tar.xz && cd ocserv-${OCSERV_VERSION}; \
+    # Apply SAML2 patches
+    patch -p1 < /patches/vpn.h.patch; \
+    patch -p1 < /patches/common-config.h.patch; \
+    patch -p1 < /patches/meson_options.txt.patch; \
+    patch -p1 < /patches/meson.build.patch; \
+    patch -p1 < /patches/src-meson.build.patch; \
+    patch -p1 < /patches/config.c.patch; \
+    patch -p1 < /patches/worker-auth.c.patch; \
+    cp /saml/saml.c src/auth/ && cp /saml/saml.h src/auth/ && cp /saml/lasso_compat.h src/auth/; \
+    cp -a /lasso/* /; \
+    # Build with SAML enabled
     meson setup build \
         --prefix /usr \
         --buildtype release \
@@ -71,11 +139,15 @@ RUN set -eux; \
         -Dlibwrap=auto \
         -Dseccomp=disabled \
         -Dlz4=enabled \
-        -Dlibnl=enabled; \
+        -Dlibnl=enabled \
+        -Dsaml-auth=enabled; \
     ninja -C build && DESTDIR=/out ninja -C build install; \
-    rm -rf /tmp/ocserv-*
+    # Copy lasso runtime libraries
+    mkdir -p /out/usr/lib; \
+    cp -a /usr/lib/liblasso.so* /out/usr/lib/ || true; \
+    rm -rf /tmp/ocserv-* /patches /saml /lasso
 
-# Stage 2: Runtime image
+# Stage 3: Runtime image with SAML support
 FROM ${ALPINE_IMAGE}
 
 ARG OCSERV_VERSION
@@ -85,13 +157,14 @@ ARG BUILD_DATE
 ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
 
 LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
-      org.opencontainers.image.title="ocserv-alpine" \
-      org.opencontainers.image.description="OpenConnect VPN Server Alpine image" \
-      org.opencontainers.image.version="${OCSERV_VERSION}" \
+      org.opencontainers.image.title="ocserv-alpine-saml" \
+      org.opencontainers.image.description="OpenConnect VPN Server Alpine image with SAML 2.0 authentication support" \
+      org.opencontainers.image.version="${OCSERV_VERSION}-saml" \
       org.opencontainers.image.alpine-version="${ALPINE_VERSION}" \
       org.opencontainers.image.base.name="${ALPINE_IMAGE}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.source="https://github.com/GentleKingson/ocserv-docker"
+      org.opencontainers.image.source="https://github.com/GentleKingson/ocserv-docker" \
+      org.opencontainers.image.auth.features="SAML2.0,PAM,GSSAPI,RADIUS,OTP"
 
 COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
 
@@ -118,6 +191,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
         | awk 'NF { print "so:" $1 }' \
         | grep -v 'liblasso' || true)"; \
     apk add --update-cache --virtual .ocserv-rundeps ${runDeps}; \
+    # Install lasso runtime dependencies for SAML support
+    apk add --update-cache libxml2 libxslt xmlsec glib apr1; \
     apk add --update-cache s6-overlay; \
     [ -x /init ]
 

@@ -1,0 +1,36 @@
+--- a/src/worker-auth.c
++++ b/src/worker-auth.c
+@@ -107,6 +107,9 @@
+ #ifdef SUPPORT_OIDC_AUTH
+ #define HTTP_AUTH_OIDC_PREFIX "Bearer"
+ #endif
++#ifdef HAVE_SAML
++#define HTTP_AUTH_SAML_PREFIX "SAML"
++#endif
+ 
+ static int basic_auth_handler(worker_st *ws, unsigned int http_ver,
+ 			      const char *msg);
+@@ -1659,6 +1662,23 @@
+ 		}
+ #endif
+ 
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			if (req->authorization == NULL ||
++			    req->authorization_size == 0) {
++				/* Initial request - return redirect URL */
++				ireq.auth_type |= AUTH_TYPE_SAML;
++			} else if ((req->authorization_size >
++			     (sizeof(HTTP_AUTH_SAML_PREFIX) - 1)) &&
++			    strncasecmp(
++				    req->authorization, HTTP_AUTH_SAML_PREFIX,
++				    sizeof(HTTP_AUTH_SAML_PREFIX) - 1) == 0) {
++				ireq.auth_type |= AUTH_TYPE_SAML;
++				ireq.user_name = req->authorization;
++			}
++		}
++#endif
++
+ 		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
+ 			if (req->authorization == NULL ||
+ 			    req->authorization_size == 0)
