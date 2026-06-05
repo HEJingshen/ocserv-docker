@@ -39,7 +39,6 @@ struct saml_ctx_st {
     struct saml_vhost_ctx *vctx;
     LassoLogin *login;
     LassoSamlp2AuthnRequest *request;
-    char *saml_response;
 };
 
 extern const struct auth_mod_st saml_auth_funcs;

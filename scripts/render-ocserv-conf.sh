@@ -48,6 +48,10 @@ OCSERV_NO_UDP=${OCSERV_NO_UDP:-$(env_value OCSERV_NO_UDP)}
 OCSERV_NO_UDP=${OCSERV_NO_UDP:-false}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_value OCSERV_MAX_CLIENTS)}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}
+OCSERV_ENABLE_SAML_AUTH=${OCSERV_ENABLE_SAML_AUTH:-$(env_value OCSERV_ENABLE_SAML_AUTH)}
+OCSERV_ENABLE_SAML_AUTH=${OCSERV_ENABLE_SAML_AUTH:-false}
+OCSERV_SAML_CONFIG_PATH=${OCSERV_SAML_CONFIG_PATH:-$(env_value OCSERV_SAML_CONFIG_PATH)}
+OCSERV_SAML_CONFIG_PATH=${OCSERV_SAML_CONFIG_PATH:-/etc/ocserv/saml/config.ini}
 
 [ -n "${DOMAIN:-}" ] || fail "DOMAIN is empty in ${ENV_FILE}"
 
@@ -81,6 +85,20 @@ case "${OCSERV_MAX_CLIENTS}" in
         ;;
 esac
 [ "${OCSERV_MAX_CLIENTS}" -ge 1 ] || fail "OCSERV_MAX_CLIENTS must be at least 1"
+
+case "${OCSERV_ENABLE_SAML_AUTH}" in
+    true|false)
+        ;;
+    *)
+        fail "OCSERV_ENABLE_SAML_AUTH must be true or false: ${OCSERV_ENABLE_SAML_AUTH}"
+        ;;
+esac
+
+case "${OCSERV_SAML_CONFIG_PATH}" in
+    ''|*[!A-Za-z0-9./_-]*)
+        fail "OCSERV_SAML_CONFIG_PATH contains invalid characters: ${OCSERV_SAML_CONFIG_PATH}"
+        ;;
+esac
 
 case "${DOMAIN}" in
     *[!A-Za-z0-9.-]*)
@@ -122,7 +140,9 @@ awk -v domain="${DOMAIN}" \
     -v enable_cert_auth="${OCSERV_ENABLE_CERT_AUTH}" \
     -v enable_compression="${OCSERV_ENABLE_COMPRESSION}" \
     -v no_udp="${OCSERV_NO_UDP}" \
-    -v max_clients="${OCSERV_MAX_CLIENTS}" '
+    -v max_clients="${OCSERV_MAX_CLIENTS}" \
+    -v enable_saml_auth="${OCSERV_ENABLE_SAML_AUTH}" \
+    -v saml_config_path="${OCSERV_SAML_CONFIG_PATH}" '
     {
         gsub(/\$\{DOMAIN\}/, domain)
         if ($0 ~ /^[[:space:]]*#?[[:space:]]*enable-auth[[:space:]]*=[[:space:]]*"certificate"[[:space:]]*$/) {
@@ -135,6 +155,14 @@ awk -v domain="${DOMAIN}" \
         }
         if ($0 ~ /^[[:space:]]*#?[[:space:]]*crl[[:space:]]*=[[:space:]]*\/etc\/ocserv\/ca\/crl\.pem[[:space:]]*$/) {
             print (enable_cert_auth == "true" ? "crl = /etc/ocserv/ca/crl.pem" : "#crl = /etc/ocserv/ca/crl.pem")
+            next
+        }
+        if ($0 ~ /^[[:space:]]*#?[[:space:]]*auth[[:space:]]*=[[:space:]]*"saml\[config=[^]]*\]"[[:space:]]*$/) {
+            if (enable_saml_auth == "true" && saml_config_path != "") {
+                print "auth = \"saml[config=" saml_config_path "]\""
+            } else {
+                print "#auth = \"saml[config=/etc/ocserv/saml/config.ini]\""
+            }
             next
         }
         if ($0 ~ /^[[:space:]]*#?[[:space:]]*compression[[:space:]]*=/) {
@@ -160,5 +188,5 @@ chmod 0644 "${TMP_FILE}"
 mv "${TMP_FILE}" "${OUTPUT_FILE}"
 trap - EXIT HUP INT TERM
 
-printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s OCSERV_ENABLE_CERT_AUTH=%s OCSERV_ENABLE_COMPRESSION=%s OCSERV_NO_UDP=%s\n' \
-    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}" "${OCSERV_ENABLE_CERT_AUTH}" "${OCSERV_ENABLE_COMPRESSION}" "${OCSERV_NO_UDP}"
+printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s OCSERV_ENABLE_CERT_AUTH=%s OCSERV_ENABLE_COMPRESSION=%s OCSERV_NO_UDP=%s OCSERV_ENABLE_SAML_AUTH=%s OCSERV_SAML_CONFIG_PATH=%s\n' \
+    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}" "${OCSERV_ENABLE_CERT_AUTH}" "${OCSERV_ENABLE_COMPRESSION}" "${OCSERV_NO_UDP}" "${OCSERV_ENABLE_SAML_AUTH}" "${OCSERV_SAML_CONFIG_PATH}"

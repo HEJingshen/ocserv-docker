@@ -46,6 +46,12 @@
 # is true. The 'tgt-freshness-time' if set, it would require the TGT tickets presented
 # to have been issued within the provided number of seconds. That option is used to
 # restrict logins even if the KDC provides long time TGT tickets.
+#
+# saml[config=/etc/ocserv/saml/config.ini]
+#  The saml option enables SAML 2.0 authentication using an external Identity Provider.
+#  Requires the ocserv-saml image variant. The config suboption specifies the path
+#  to the SAML INI configuration file containing SP/IdP metadata paths.
+#  See docs/saml-auth.md for detailed setup instructions.
 
 # [scope: vhost (non-reloadable)]
 #auth = "pam"
@@ -54,6 +60,7 @@
 auth = "plain[passwd=/etc/ocserv/auth/ocpasswd]"
 #auth = "certificate"
 #auth = "radius[config=/etc/radiusclient/radiusclient.conf,groupconfig=true]"
+#auth = "saml[config=/etc/ocserv/saml/config.ini]"
 
 # Specify alternative authentication methods that are sufficient
 # for authentication. That is, if set, any of the methods enabled

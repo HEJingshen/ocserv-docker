@@ -1,36 +1,59 @@
 --- a/src/worker-auth.c
 +++ b/src/worker-auth.c
-@@ -107,6 +107,9 @@
- #ifdef SUPPORT_OIDC_AUTH
- #define HTTP_AUTH_OIDC_PREFIX "Bearer"
- #endif
+@@ -109,0 +110,3 @@
 +#ifdef HAVE_SAML
-+#define HTTP_AUTH_SAML_PREFIX "SAML"
++#define SAML_RESPONSE_PARAM "SAMLResponse"
 +#endif
-
- static int basic_auth_handler(worker_st *ws, unsigned int http_ver,
-			      const char *msg);
-@@ -1659,6 +1662,23 @@
-		}
- #endif
-
-+#ifdef HAVE_SAML
-+		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
-+			if (req->authorization == NULL ||
-+			    req->authorization_size == 0) {
-+				/* Initial request - return redirect URL */
-+				ireq.auth_type |= AUTH_TYPE_SAML;
-+			} else if ((req->authorization_size >
-+			     (sizeof(HTTP_AUTH_SAML_PREFIX) - 1)) &&
-+			    strncasecmp(
-+				    req->authorization, HTTP_AUTH_SAML_PREFIX,
-+				    sizeof(HTTP_AUTH_SAML_PREFIX) - 1) == 0) {
-+				ireq.auth_type |= AUTH_TYPE_SAML;
-+				ireq.user_name = req->authorization;
-+			}
-+		}
-+#endif
+@@ -1662,0 +1666,11 @@
 +
-		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
-			if (req->authorization == NULL ||
-			    req->authorization_size == 0)
++#ifdef HAVE_SAML
++                if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++                        if (req->authorization == NULL ||
++                            req->authorization_size == 0) {
++                                /* Initial request - set auth type for redirect */
++                                ireq.auth_type |= AUTH_TYPE_SAML;
++                        }
++                        /* SAML auth uses POST body for response, not Authorization header */
++                }
++#endif
+@@ -1793,0 +1809,40 @@
++#ifdef HAVE_SAML
++                /* SAML auth continuation: extract SAMLResponse from POST body */
++                if (areq.password == NULL &&
++                    (ws->selected_auth->type & AUTH_TYPE_SAML)) {
++                        char *saml_response = NULL;
++                        char *p;
++                        unsigned int len;
++
++                        /* SAMLResponse is in form-urlencoded POST body */
++                        if (req->body != NULL && req->body_length > 0) {
++                                /* Find SAMLResponse= at form-urlencoded boundary */
++                                p = strstr(req->body, SAML_RESPONSE_PARAM "=");
++                                while (p != NULL) {
++                                        /* Verify boundary: start of body or preceded by '&' */
++                                        if (p == req->body || *(p - 1) == '&') {
++                                                p += strlen(SAML_RESPONSE_PARAM) + 1; /* skip past "SAMLResponse=" */
++                                                break;
++                                        }
++                                        p = strstr(p + 1, SAML_RESPONSE_PARAM "=");
++                                }
++                                if (p != NULL) {
++                                        len = 0;
++                                        while (p[len] != 0 && p[len] != '&') {
++                                                len++;
++                                        }
++                                        if (len > 0) {
++                                                saml_response = unescape_url(ws->req.body, p, len, NULL);
++                                        }
++                                }
++                        }
++
++                        if (saml_response == NULL) {
++                                oclog(ws, LOG_HTTP_DEBUG,
++                                      "SAML: No SAMLResponse found in POST body");
++                                goto auth_fail;
++                        }
++
++                        areq.password = saml_response;
++                }
++#endif

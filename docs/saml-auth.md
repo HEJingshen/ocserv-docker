@@ -81,7 +81,7 @@ ocserv的SAML认证使用独立的INI配置文件方式：
 **ocserv.conf 配置：**
 ```conf
 # 启用SAML认证，指定配置文件路径
-auth = "saml2[config=/etc/ocserv/saml/config.ini]"
+auth = "saml[config=/etc/ocserv/saml/config.ini]"
 ```
 
 **SAML配置文件 /etc/ocserv/saml/config.ini：**
@@ -102,7 +102,7 @@ idp-metadata-file = /etc/ocserv/saml/idp-metadata.xml
 idp-cert = /etc/ocserv/saml/idp-cert.pem
 ```
 
-> **注意**：配置字段名称为 `sp-metadata-file`、`idp-metadata-file`，而非 `saml2-sp-metadata-file`。配置通过独立的INI文件方式，在ocserv.conf中使用 `auth = "saml2[config=...]"` 指定路径。
+> **注意**：配置字段名称为 `sp-metadata-file`、`idp-metadata-file`，而非 `saml2-sp-metadata-file`。配置通过独立的INI文件方式，在ocserv.conf中使用 `auth = "saml[config=...]"` 指定路径。
 
 ### IdP集成
 
@@ -147,3 +147,62 @@ docker inspect ocserv:${VERSION}-saml | jq '.[0].Config.Labels'
 ## 贡献
 
 欢迎提交SAML相关的问题报告、配置示例和改进建议。
+
+## 安全增强功能
+
+当前SAML实现包含以下安全增强功能：
+
+### SHA-1签名算法拒绝
+
+根据 [NIST SP 800-131A Rev. 2](https://csrc.nist.gov/pubs/sp/800/131/a/r2/final) 和 [OWASP SAML安全指南](https://cheatsheetseries.owasp.org/cheatsheets/SAML_Security_Cheat_Sheet.html) 建议，实现会自动拒绝使用SHA-1签名算法的SAML断言：
+
+- 拒绝 `RSA-SHA1` 签名
+- 拒绝 `DSA-SHA1` 签名
+- 拒绝 `HMAC-SHA1` 签名
+
+这提供了应用层的安全加固，即使lasso库可能有内置保护。
+
+### 时钟偏差容忍配置
+
+通过 `clock-skew-tolerance` 配置项，可以调整SAML断言时间验证的容忍度：
+
+```ini
+# 时钟偏差容忍时间（秒）
+# 默认60秒，适用于大多数IdP
+# 如果IdP时钟偏差较大，可增加此值
+clock-skew-tolerance = 60
+```
+
+**适用场景**：
+- IdP服务器时钟与SP有较大偏差
+- 跨地域部署导致的时间同步问题
+- 高延迟网络环境
+
+### 资源管理
+
+实现正确遵循lasso库生命周期：
+- `lasso_init()` 返回值检查，确保初始化成功
+- `lasso_shutdown()` 在服务关闭时调用，释放所有资源
+
+### 文件安全
+
+SP元数据文件使用安全方式存储：
+- 存储位置：`/run/ocserv/`（tmpfs挂载）
+- 使用 `O_NOFOLLOW` 和 `O_EXCL` 标志防止symlink攻击
+- 避免使用 `/tmp` 目录的安全风险
+
+## 配置验证脚本
+
+项目包含配置验证脚本 `scripts/validate-saml-config.sh`，用于检查配置完整性：
+
+```bash
+# 运行配置验证
+docker run --rm -v ./config/saml:/etc/ocserv/saml ocserv:${VERSION}-saml \
+  /scripts/validate-saml-config.sh /etc/ocserv/saml/config.ini
+```
+
+验证内容包括：
+- 配置文件是否存在
+- 必需字段是否配置
+- 元数据/证书文件是否存在
+- XML基本结构验证

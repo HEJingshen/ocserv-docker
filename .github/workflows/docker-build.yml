@@ -11,7 +11,10 @@ on:
       - '.github/workflows/docker-build.yml'
       - 'scripts/configure-alpine-repositories.sh'
       - 'scripts/ocserv-cert-auth.sh'
+      - 'scripts/validate-saml-config.sh'
+      - 'scripts/render-ocserv-conf.sh'
       - 'docker/ocserv/s6-init.sh'
+      - 'config/saml/config.ini.template'
   pull_request:
     branches: [ "main", "master" ]
     paths:
@@ -21,7 +24,10 @@ on:
       - '.github/workflows/docker-build.yml'
       - 'scripts/configure-alpine-repositories.sh'
       - 'scripts/ocserv-cert-auth.sh'
+      - 'scripts/validate-saml-config.sh'
+      - 'scripts/render-ocserv-conf.sh'
       - 'docker/ocserv/s6-init.sh'
+      - 'config/saml/config.ini.template'
 
 permissions:
   contents: read
@@ -71,6 +77,25 @@ jobs:
         env:
           DOMAIN: ci.example.com
         run: docker compose config --quiet
+
+      - name: Validate SAML configuration script syntax
+        run: |
+          sh -n scripts/validate-saml-config.sh
+          shellcheck -s sh scripts/validate-saml-config.sh
+
+      - name: Validate render script SAML handling
+        run: |
+          # Test render script with SAML variables
+          cp .env.example .env.test
+          sed -i 's/DOMAIN=your.domain.com/DOMAIN=ci.example.com/' .env.test
+          sed -i 's/OCSERV_ENABLE_SAML_AUTH=false/OCSERV_ENABLE_SAML_AUTH=true/' .env.test
+          ENV_FILE=.env.test scripts/render-ocserv-conf.sh
+          # Verify SAML auth directive is rendered
+          grep -q 'auth = "saml\[config=/etc/ocserv/saml/config.ini\]"' config/ocserv.conf || {
+            echo "SAML auth directive not properly rendered"
+            exit 1
+          }
+          rm -f .env.test config/ocserv.conf
 
   build-images:
     needs: validate

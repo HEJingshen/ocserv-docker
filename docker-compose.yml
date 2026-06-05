@@ -53,6 +53,50 @@ services:
     environment:
       - TZ=${TZ:-Asia/Shanghai}
 
+  # SAML-enabled ocserv variant
+  # Requires: config/saml/ directory with SAML metadata files
+  # Use: docker compose --profile saml up ocserv-saml
+  ocserv-saml:
+    image: ${OCSERV_SAML_IMAGE:-kingsonho/ocserv:${OCSERV_VERSION:-1.4.2}-saml}
+    profiles:
+      - saml
+    container_name: ocserv-saml
+    restart: unless-stopped
+    mem_limit: ${OCSERV_MEM_LIMIT:-512m}
+    memswap_limit: ${OCSERV_MEMSWAP_LIMIT:-512m}
+    ports:
+      - "${OCSERV_PORT:-443}:443/tcp"
+      - "${OCSERV_PORT:-443}:443/udp"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+    volumes:
+      - ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro
+      - ./config/auth:/etc/ocserv/auth:rw
+      - ./config/client-ca/public:/etc/ocserv/ca:ro
+      - ./config/saml:/etc/ocserv/saml:ro
+      - ./config/config-per-user:/etc/ocserv/config-per-user:ro
+      - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro
+      - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro
+      - ./logs:/var/log/ocserv
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    healthcheck:
+      test: ["CMD-SHELL", "ss -tln | grep -q ':443' || exit 1"]
+      interval: ${HEALTH_INTERVAL:-30s}
+      timeout: ${HEALTH_TIMEOUT:-5s}
+      retries: ${HEALTH_RETRIES:-3}
+      start_period: ${HEALTH_START_PERIOD:-15s}
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+
   ocserv-auth:
     image: ${OCSERV_AUTH_IMAGE:-kingsonho/ocserv-auth:${OCSERV_VERSION:-1.4.2}}
     profiles:
