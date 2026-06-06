@@ -42,7 +42,7 @@
 +
 +static const char saml_assertion_valid[] =
 +	"<html>\n<head>\n<script>\n"
-+	"document.location.replace(\"/+CSCOE+/logon.html?\"+\n\"a0=0\"+\n\"&a1=\"+\n\"&a2=\"+\n\"&a3=1\");\n"
++	"document.location.replace(\"/+CSCOE+/logon.html?\"+\n\"a0=0\"+\n\"&amp;a1=\"+\n\"&amp;a2=\"+\n\"&amp;a3=1\");\n"
 +	"</script>\n</head>\n</html>";
 +
 +static const char saml_success_page[] =
