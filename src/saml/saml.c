@@ -318,8 +318,6 @@ static void saml_init_lasso_server(struct saml_vhost_ctx *vctx)
 		exit(1);
 	}
 
-	lasso_set_default_signature_method(LASSO_SIGNATURE_METHOD_RSA_SHA256);
-
 	vctx->server = lasso_server_new(config->spmeta, config->spkey, NULL,
 					 config->spcert);
 	if (vctx->server == NULL) {
