@@ -67,10 +67,10 @@ docker buildx build \
 
 ### CI/CD构建
 
-`.github/workflows/ocserv-saml.yml` 会自动构建SAML镜像变体：
+`.github/workflows/source-cache.yml` 会按路径触发 `.github/workflows/ocserv-saml.yml` reusable workflow 构建 SAML 镜像变体：
 - 触发条件：`Dockerfile.saml`、SAML源码/补丁或相关配置脚本变更
 - 标签：`${VERSION}-saml`, `latest-saml`
-- ocserv与lasso源码由workflow自动下载、缓存并进行SHA256校验
+- ocserv 与 lasso 源码由入口 workflow 自动下载、缓存并进行 SHA256 校验，再通过 artifact 提供给双架构构建
 
 ## 配置示例
 

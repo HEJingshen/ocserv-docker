@@ -1,40 +1,17 @@
 name: Build ocserv Auth Image
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [ "main", "master" ]
-    paths:
-      - 'auth/Dockerfile'
-      - 'VERSION'
-      - '.github/workflows/ocserv-auth.yml'
-      - 'docker-compose.yml'
-      - 'scripts/configure-alpine-repositories.sh'
-      - 'scripts/ocserv-cert-auth.sh'
-      - 'scripts/migrate-legacy-cert-auth.sh'
-      - 'scripts/render-ocserv-conf.sh'
-      - 'tests/test_ocserv_cert_auth.sh'
-      - 'tests/test_migrate_legacy_cert_auth.sh'
-  pull_request:
-    branches: [ "main", "master" ]
-    paths:
-      - 'auth/Dockerfile'
-      - 'VERSION'
-      - '.github/workflows/ocserv-auth.yml'
-      - 'docker-compose.yml'
-      - 'scripts/configure-alpine-repositories.sh'
-      - 'scripts/ocserv-cert-auth.sh'
-      - 'scripts/migrate-legacy-cert-auth.sh'
-      - 'scripts/render-ocserv-conf.sh'
-      - 'tests/test_ocserv_cert_auth.sh'
-      - 'tests/test_migrate_legacy_cert_auth.sh'
+  workflow_call:
+    inputs:
+      push_enabled:
+        required: true
+        type: boolean
+      ocserv_version:
+        required: true
+        type: string
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 env:
   REGISTRY: docker.io
@@ -94,18 +71,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Load ocserv version
-        id: version
-        run: |
-          OCSERV_VERSION="$(cat VERSION)"
-          echo "OCSERV_VERSION=${OCSERV_VERSION}" >> "$GITHUB_ENV"
-          echo "ocserv_version=${OCSERV_VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Login to Registry
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: inputs.push_enabled
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -129,22 +99,22 @@ jobs:
           file: auth/Dockerfile
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ env.REGISTRY }}/${{ env.OCSERV_AUTH_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ inputs.push_enabled }}
           cache-from: type=gha,scope=ocserv-auth-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=ocserv-auth-${{ matrix.platform.arch }}
           build-args: ${{ steps.build_args.outputs.args }}
-          sbom: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
-          provenance: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          sbom: ${{ inputs.push_enabled }}
+          provenance: ${{ inputs.push_enabled }}
 
       - name: Export image digest
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: inputs.push_enabled
         run: |
           mkdir -p /tmp/digests/ocserv-auth
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/ocserv-auth/${digest#sha256:}"
 
       - name: Upload image digest
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: inputs.push_enabled
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: digests-ocserv-auth-${{ matrix.platform.arch }}
@@ -156,19 +126,9 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: inputs.push_enabled
     name: Merge manifests (ocserv-auth)
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Load ocserv version
-        id: version
-        run: |
-          OCSERV_VERSION="$(cat VERSION)"
-          echo "OCSERV_VERSION=${OCSERV_VERSION}" >> "$GITHUB_ENV"
-          echo "ocserv_version=${OCSERV_VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
@@ -206,6 +166,6 @@ jobs:
           done
 
           docker buildx imagetools create \
-            -t "${IMAGE_REF}:${{ steps.version.outputs.ocserv_version }}" \
+            -t "${IMAGE_REF}:${{ inputs.ocserv_version }}" \
             -t "${IMAGE_REF}:latest" \
             "${SOURCES[@]}"

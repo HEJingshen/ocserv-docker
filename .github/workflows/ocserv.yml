@@ -1,38 +1,20 @@
 name: Build ocserv Image
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [ "main", "master" ]
-    paths:
-      - 'Dockerfile'
-      - 'VERSION'
-      - '.env.example'
-      - '.github/workflows/ocserv.yml'
-      - 'docker-compose.yml'
-      - 'scripts/configure-alpine-repositories.sh'
-      - 'scripts/render-ocserv-conf.sh'
-      - 'docker/ocserv/s6-init.sh'
-      - 'config/ocserv.conf.template'
-  pull_request:
-    branches: [ "main", "master" ]
-    paths:
-      - 'Dockerfile'
-      - 'VERSION'
-      - '.env.example'
-      - '.github/workflows/ocserv.yml'
-      - 'docker-compose.yml'
-      - 'scripts/configure-alpine-repositories.sh'
-      - 'scripts/render-ocserv-conf.sh'
-      - 'docker/ocserv/s6-init.sh'
-      - 'config/ocserv.conf.template'
+  workflow_call:
+    inputs:
+      push_enabled:
+        required: true
+        type: boolean
+      ocserv_version:
+        required: true
+        type: string
+      source_ocserv_artifact:
+        required: true
+        type: string
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 env:
   REGISTRY: docker.io
@@ -92,36 +74,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Load ocserv version
-        id: version
-        run: |
-          OCSERV_VERSION="$(cat VERSION)"
-          echo "OCSERV_VERSION=${OCSERV_VERSION}" >> "$GITHUB_ENV"
-          echo "ocserv_version=${OCSERV_VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore ocserv source cache
-        id: ocserv_source_cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - name: Download ocserv source artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: src/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz
-          key: ${{ runner.os }}-ocserv-source-${{ steps.version.outputs.ocserv_version }}-${{ env.OCSERV_TARBALL_SHA256 }}
-
-      - name: Download ocserv source
-        if: steps.ocserv_source_cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p src
-          curl -fsSL -o src/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz \
-            https://www.infradead.org/ocserv/download/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz
+          name: ${{ inputs.source_ocserv_artifact }}
+          path: src
 
       - name: Verify ocserv source
         run: |
-          echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz" | sha256sum -c -
+          echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ inputs.ocserv_version }}.tar.xz" | sha256sum -c -
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Login to Registry
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: inputs.push_enabled
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -138,7 +105,7 @@ jobs:
             echo "args<<EOF"
             echo "ALPINE_IMAGE=${{ matrix.platform.arch == 'amd64' && env.ALPINE_IMAGE_AMD64 || env.ALPINE_IMAGE_ARM64 }}"
             echo "APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine"
-            echo "OCSERV_VERSION=${{ steps.version.outputs.ocserv_version }}"
+            echo "OCSERV_VERSION=${{ inputs.ocserv_version }}"
             echo "ALPINE_VERSION=${{ env.ALPINE_VERSION }}"
             echo "BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}"
             echo "EOF"
@@ -152,22 +119,22 @@ jobs:
           file: Dockerfile
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ inputs.push_enabled }}
           cache-from: type=gha,scope=ocserv-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=ocserv-${{ matrix.platform.arch }}
           build-args: ${{ steps.build_args.outputs.args }}
-          sbom: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
-          provenance: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          sbom: ${{ inputs.push_enabled }}
+          provenance: ${{ inputs.push_enabled }}
 
       - name: Export image digest
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: inputs.push_enabled
         run: |
           mkdir -p /tmp/digests/ocserv
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/ocserv/${digest#sha256:}"
 
       - name: Upload image digest
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: inputs.push_enabled
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: digests-ocserv-${{ matrix.platform.arch }}
@@ -179,19 +146,9 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: inputs.push_enabled
     name: Merge manifests (ocserv)
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Load ocserv version
-        id: version
-        run: |
-          OCSERV_VERSION="$(cat VERSION)"
-          echo "OCSERV_VERSION=${OCSERV_VERSION}" >> "$GITHUB_ENV"
-          echo "ocserv_version=${OCSERV_VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
@@ -229,6 +186,6 @@ jobs:
           done
 
           docker buildx imagetools create \
-            -t "${IMAGE_REF}:${{ steps.version.outputs.ocserv_version }}" \
+            -t "${IMAGE_REF}:${{ inputs.ocserv_version }}" \
             -t "${IMAGE_REF}:latest" \
             "${SOURCES[@]}"

@@ -25,4 +25,4 @@ rg -n '@(master|main|latest|v[0-9]+)(\s|$)' .github/workflows
 
 最后一条命令不应返回任何匹配结果。
 
-对于 pull request，还需要确认受路径影响的 `ocserv.yml`、`ocserv-saml.yml` 和 `ocserv-auth.yml` 中 `validate` job 与 amd64/arm64 构建任务全部通过；如果调整了发布逻辑，还要额外确认各 workflow 的 `merge-manifests` 仍然只在 `main`/`master` 的非 PR 场景执行，并继续通过 digest artifacts 生成对应多架构标签，不发布带架构后缀的版本标签。
+对于 pull request，还需要确认 `source-cache.yml` 按路径调用了受影响的 `ocserv.yml`、`ocserv-saml.yml` 或 `ocserv-auth.yml` reusable workflow，并且对应 `validate` job 与 amd64/arm64 构建任务全部通过；如果调整了发布逻辑，还要额外确认各 reusable workflow 的 `merge-manifests` 仍然只在 `push_enabled` 为 true 时执行，并继续通过 digest artifacts 生成对应多架构标签，不发布带架构后缀的版本标签。

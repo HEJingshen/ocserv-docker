@@ -275,7 +275,7 @@ healthcheck:
 
 ## 五、CI/CD（GitHub Actions）
 
-镜像构建工作流按发布目标拆分为 `.github/workflows/ocserv.yml`、`.github/workflows/ocserv-saml.yml` 和 `.github/workflows/ocserv-auth.yml`。
+镜像构建使用 `.github/workflows/source-cache.yml` 作为唯一入口 workflow。入口 workflow 负责路径检测、源码缓存准备和 artifact 扇出，然后通过 `workflow_call` 调用 `.github/workflows/ocserv.yml`、`.github/workflows/ocserv-saml.yml` 和 `.github/workflows/ocserv-auth.yml` 三个 reusable workflow。
 
 ### Shell 脚本风格
 
@@ -289,46 +289,59 @@ healthcheck:
 
 | 事件 | 行为 |
 |:--|:--|
-| `push` 到 `main`/`master` | 校验 + 构建 + 推送 |
-| `pull_request` 到 `main`/`master` | 校验 + 构建（不推送） |
-| `workflow_dispatch` | 手动执行校验 + 构建；仅当当前 ref 是 `main`/`master` 时推送 |
+| `push` 到 `main`/`master` | `source-cache.yml` 按路径选择受影响镜像，校验 + 构建 + 推送 |
+| `pull_request` 到 `main`/`master` | `source-cache.yml` 按路径选择受影响镜像，校验 + 构建（不推送、不保存源码 cache） |
+| `workflow_dispatch` | 手动选择 `all` / `ocserv` / `ocserv-saml` / `ocserv-auth`；仅当当前 ref 是 `main`/`master` 时推送 |
 
 ### 构建流程
 
 ```
-1. validate job
+1. detect-changes / source-metadata job（source-cache.yml）
+       ├─ 解析本次变更涉及的镜像目标
+       ├─ 手动执行时按 target 输入选择目标
+       ├─ 解析 VERSION
+       └─ 生成 ocserv / lasso 源码 cache key 与 push_enabled
+       │
+2. prepare-sources job（source-cache.yml）
+       ├─ 仅在 ocserv 或 ocserv-saml 需要运行时执行
+       ├─ 通过 `gh cache list` 先探测 cache key，命中时才执行 `actions/cache/restore`
+       ├─ cache 未命中时下载源码包并强制 SHA256 校验
+       ├─ trusted `main`/`master` 非 PR 场景保存源码 cache，单 job writer 避免并发 409
+       └─ 上传本次 workflow run 内 source artifact 供 reusable workflow 复用
+       │
+3. validate job（reusable workflow）
        ├─ checkout
        ├─ shell 语法检查与 shellcheck
        ├─ 对应 Dockerfile 的 hadolint 检查
        └─ docker compose 配置展开校验
        │
-2. build job（amd64/arm64 并行）
+4. build job（amd64/arm64 并行）
        ├─ matrix.platform.arch: amd64, arm64
        ├─ matrix.platform.runner: amd64 使用 `ubuntu-24.04`，arm64 使用 `ubuntu-24.04-arm`
-       ├─ ocserv/ocserv-saml 通过 `actions/cache` 复用源码包下载结果并强制 SHA256 校验
-       ├─ ocserv-saml 额外缓存并校验 lasso 2.9.0 源码包
+       ├─ ocserv / ocserv-saml 下载 `prepare-sources` 生成的源码 artifact 并再次 SHA256 校验
+       ├─ ocserv-saml 额外下载并校验 lasso 2.9.0 source artifact
        ├─ Buildx 单平台构建，按 workflow + arch 分 scope 复用 GHA 构建缓存
        ├─ 仅在 `main`/`master` 非 PR 场景按 digest 推送单平台镜像并上传 digest artifact
        └─ 生成 SBOM/provenance
        │
-3. merge-manifests job
+5. merge-manifests job
        ├─ 下载 amd64/arm64 digest artifacts
        ├─ 合并 `image@sha256:<digest>` 源
        └─ 发布对应镜像的多架构版本标签和 latest 标签
        │
-4. concurrency 控制
-       └─ 同一 workflow + ref 只保留最新一次运行，自动取消旧任务
+6. concurrency 控制
+       └─ 同一入口 workflow + ref 只保留最新一次运行，自动取消旧任务
 ```
 
 ### 标签策略
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| `push` 到 `main`/`master` | 每个 workflow 先按 amd64/arm64 digest 推送临时单平台结果，再合并生成对应多架构标签；不发布带架构后缀的版本标签 |
+| `push` 到 `main`/`master` | 受影响镜像先按 amd64/arm64 digest 推送临时单平台结果，再合并生成对应多架构标签；不发布带架构后缀的版本标签 |
 | `workflow_dispatch` on `main`/`master` | 与 `push main/master` 相同 |
 | `pull_request` 或非主分支手动执行 | 仅构建测试，不推送镜像 |
 
-`ocserv.yml` 发布 `kingsonho/ocserv:<VERSION>` 和 `kingsonho/ocserv:latest`；`ocserv-saml.yml` 发布 `kingsonho/ocserv:<VERSION>-saml` 和 `kingsonho/ocserv:latest-saml`；`ocserv-auth.yml` 发布 `kingsonho/ocserv-auth:<VERSION>` 和 `kingsonho/ocserv-auth:latest`。
+`ocserv.yml` 发布 `kingsonho/ocserv:<VERSION>` 和 `kingsonho/ocserv:latest`；`ocserv-saml.yml` 发布 `kingsonho/ocserv:<VERSION>-saml` 和 `kingsonho/ocserv:latest-saml`；`ocserv-auth.yml` 发布 `kingsonho/ocserv-auth:<VERSION>` 和 `kingsonho/ocserv-auth:latest`。三个镜像 workflow 只作为 reusable workflow 被 `source-cache.yml` 调用，不再独立监听 `push` 或 `pull_request`。
 
 ---
 
@@ -370,7 +383,8 @@ healthcheck:
 │   └── test_migrate_legacy_cert_auth.sh # 迁移测试
 │
 └── .github/workflows/
-    ├── ocserv.yml                      # ocserv 多架构构建流水线
-    ├── ocserv-saml.yml                 # ocserv SAML 变体多架构构建流水线
-    └── ocserv-auth.yml                 # 证书认证工具镜像多架构构建流水线
+    ├── source-cache.yml                # 入口流水线，负责路径检测与源码缓存准备
+    ├── ocserv.yml                      # ocserv reusable 多架构构建流水线
+    ├── ocserv-saml.yml                 # ocserv SAML reusable 多架构构建流水线
+    └── ocserv-auth.yml                 # 证书认证工具镜像 reusable 多架构构建流水线
 ```
