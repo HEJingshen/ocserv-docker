@@ -639,3 +639,15 @@
  		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
  			ret = basic_auth_handler(ws, http_ver, msg);
  		} else {
+@@ -1887,5 +2389,10 @@
+ 	oclog(ws, LOG_HTTP_DEBUG, "user '%s' obtained cookie", ws->username);
+ 	ws->auth_state = S_AUTH_COOKIE;
+ 
+-	ret = post_common_handler(ws, http_ver, msg);
++#ifdef HAVE_SAML
++	if (ws->selected_auth->type & AUTH_TYPE_SAML)
++		ret = post_common_handler(ws, http_ver, NULL);
++	else
++#endif
++		ret = post_common_handler(ws, http_ver, msg);
+ 	goto cleanup;
