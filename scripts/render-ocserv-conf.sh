@@ -58,6 +58,8 @@ OCSERV_ENABLE_SAML_AUTH=${OCSERV_ENABLE_SAML_AUTH:-$(env_value OCSERV_ENABLE_SAM
 OCSERV_ENABLE_SAML_AUTH=${OCSERV_ENABLE_SAML_AUTH:-false}
 OCSERV_SAML_CONFIG_PATH=${OCSERV_SAML_CONFIG_PATH:-$(env_value OCSERV_SAML_CONFIG_PATH)}
 OCSERV_SAML_CONFIG_PATH=${OCSERV_SAML_CONFIG_PATH:-/etc/ocserv/saml/config.ini}
+OCSERV_HOSTNAME=${OCSERV_HOSTNAME:-$(env_value OCSERV_HOSTNAME)}
+OCSERV_HOSTNAME=${OCSERV_HOSTNAME:-${DOMAIN}}
 
 [ -n "${DOMAIN:-}" ] || fail "DOMAIN is empty in ${ENV_FILE}"
 
@@ -152,6 +154,7 @@ TMP_FILE=$(mktemp "${OUTPUT_DIR}/.ocserv.conf.XXXXXX") || fail "failed to create
 trap 'rm -f "${TMP_FILE}"' EXIT HUP INT TERM
 
 awk -v domain="${DOMAIN}" \
+    -v hostname="${OCSERV_HOSTNAME}" \
     -v enable_cert_auth="${OCSERV_ENABLE_CERT_AUTH}" \
     -v enable_compression="${OCSERV_ENABLE_COMPRESSION}" \
     -v no_udp="${OCSERV_NO_UDP}" \
@@ -160,6 +163,7 @@ awk -v domain="${DOMAIN}" \
     -v saml_config_path="${OCSERV_SAML_CONFIG_PATH}" '
     {
         gsub(/\$\{DOMAIN\}/, domain)
+        gsub(/\$\{HOSTNAME\}/, hostname)
         if ($0 ~ /^[[:space:]]*#?[[:space:]]*enable-auth[[:space:]]*=[[:space:]]*"certificate"[[:space:]]*$/) {
             print (enable_cert_auth == "true" ? "enable-auth = \"certificate\"" : "#enable-auth = \"certificate\"")
             next
@@ -200,10 +204,13 @@ awk -v domain="${DOMAIN}" \
 if grep -q '\${DOMAIN}' "${TMP_FILE}"; then
     fail "unrendered DOMAIN placeholder remains in generated config"
 fi
+if grep -q '\${HOSTNAME}' "${TMP_FILE}"; then
+    fail "unrendered HOSTNAME placeholder remains in generated config"
+fi
 
 chmod 0644 "${TMP_FILE}"
 mv "${TMP_FILE}" "${OUTPUT_FILE}"
 trap - EXIT HUP INT TERM
 
-printf 'Rendered %s from %s using DOMAIN=%s OCSERV_MAX_CLIENTS=%s OCSERV_ENABLE_CERT_AUTH=%s OCSERV_ENABLE_COMPRESSION=%s OCSERV_NO_UDP=%s OCSERV_ENABLE_SAML_AUTH=%s OCSERV_SAML_CONFIG_PATH=%s\n' \
-    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_MAX_CLIENTS}" "${OCSERV_ENABLE_CERT_AUTH}" "${OCSERV_ENABLE_COMPRESSION}" "${OCSERV_NO_UDP}" "${OCSERV_ENABLE_SAML_AUTH}" "${OCSERV_SAML_CONFIG_PATH}"
+printf 'Rendered %s from %s using DOMAIN=%s HOSTNAME=%s OCSERV_MAX_CLIENTS=%s OCSERV_ENABLE_CERT_AUTH=%s OCSERV_ENABLE_COMPRESSION=%s OCSERV_NO_UDP=%s OCSERV_ENABLE_SAML_AUTH=%s OCSERV_SAML_CONFIG_PATH=%s\n' \
+    "${OUTPUT_FILE}" "${TEMPLATE_FILE}" "${DOMAIN}" "${OCSERV_HOSTNAME}" "${OCSERV_MAX_CLIENTS}" "${OCSERV_ENABLE_CERT_AUTH}" "${OCSERV_ENABLE_COMPRESSION}" "${OCSERV_NO_UDP}" "${OCSERV_ENABLE_SAML_AUTH}" "${OCSERV_SAML_CONFIG_PATH}"

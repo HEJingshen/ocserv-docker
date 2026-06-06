@@ -20,4 +20,11 @@
 +#endif
  };
 
- static void check_for_duplicate_password_auth(struct perm_cfg_st *config,
+ static void check_for_duplicate_password_auth(struct perm_cfg_st *config,@@ -1015,6 +1015,8 @@
+ 	} else if (strcmp(name, "default-domain") == 0) {
+ 		READ_STRING(config->default_domain);
++	} else if (strcmp(name, "hostname") == 0) {
++		READ_STRING(config->hostname);
+ 	} else if (strcmp(name, "crl") == 0) {
+ 		READ_STRING(config->crl);
+ 	} else if (strcmp(name, "cert-user-oid") == 0) {

@@ -16,4 +16,10 @@
 +#define CONFIDENTIAL_USER_NAME_AUTH_TYPES (AUTH_TYPE_GSSAPI | AUTH_TYPE_OIDC | AUTH_TYPE_SAML)
 
  #define ACCT_TYPE_PAM (1 << 1)
- #define ACCT_TYPE_RADIUS (1 << 2)
+ #define ACCT_TYPE_RADIUS (1 << 2)@@ -248,6 +248,7 @@
+ 	char *ocsp_response; /* [scope: vhost] file with the OCSP response */
+ 	char *default_domain; /* [scope: vhost] domain to be advertised */
++	char *hostname; /* [scope: vhost] server hostname for SAML */
+ 
+ 	char **group_list; /* [scope: vhost] select_group */
+ 	unsigned int group_list_size; /* [scope: vhost] */

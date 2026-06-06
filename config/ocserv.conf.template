@@ -573,6 +573,11 @@ device = vpns
 # [scope: vhost]
 predictable-ips = false
 
+# Server's hostname. Used for SAML SSO-v2 redirect URLs.
+# Must be the external FQDN that clients use to connect (e.g. vpn.example.com).
+# [scope: vhost]
+hostname = ${HOSTNAME}
+
 # The default domain to be advertised. Multiple domains (functional on
 # openconnect clients) can be provided in a space separated list.
 # [scope: vhost]

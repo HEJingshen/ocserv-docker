@@ -272,9 +272,13 @@ replay-cache-ttl = 300
 auth = "saml[config=/etc/ocserv/saml/config.ini]"
 ```
 
-> **注意**: 确保 `default-domain` 配置正确，SSO-v2 XML 使用此值填充 URL：
+> **注意**: SAML SSO-v2 需要 `hostname` 配置正确，它用于生成 IdP 重定向 URL：
 > ```conf
-> default-domain = your-domain
+> # 服务器的外部可访问域名（如 vpn.example.com）
+> hostname = vpn.example.com
+>
+> # VPN DNS 搜索域（如 corp.example.com），推送给客户端，与 hostname 不同
+> default-domain = corp.example.com
 > ```
 
 ### Step 8: 分配用户

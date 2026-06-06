@@ -119,7 +119,7 @@
  
 +#ifdef HAVE_SAML
 +		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
-+			const char *hostname = ws->vhost->perm_config.config->hostname;
++			const char *hostname = ws->vhost->perm_config.config->default_domain;
 +			ret = str_append_printf(&str, login_start,
 +						hostname, hostname, hostname, hostname);
 +		} else
@@ -142,7 +142,7 @@
  		/* Username / Groups Form */
 +#ifdef HAVE_SAML
 +		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
-+			pmsg = ws->vhost->perm_config.config->hostname;
++			pmsg = ws->vhost->perm_config.config->default_domain;
 +		} else
 +#endif
  		if (pmsg == NULL)
@@ -150,7 +150,7 @@
  
 +#ifdef HAVE_SAML
 +		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
-+			const char *hostname = ws->vhost->perm_config.config->hostname;
++			const char *hostname = ws->vhost->perm_config.config->default_domain;
 +			ret = str_append_printf(&str, login_start,
 +						hostname, hostname, hostname, hostname);
 +		} else
@@ -179,7 +179,7 @@
  
  		if (ws->selected_auth->type & AUTH_TYPE_USERNAME_PASS) {
  			ret = str_append_str(&str, OC_LOGIN_FORM_INPUT_USER);
-@@ -516,7 +623,308 @@
+@@ -516,7 +623,296 @@
  int get_auth_handler(worker_st *ws, unsigned int http_ver)
  {
  	return get_auth_handler2(ws, http_ver, NULL, 0);
@@ -488,7 +488,7 @@
  
  /* Extract the username from a certificate into ws->cert_username.
   * Returns 0 on success, a negative GnuTLS error code on failure.
-@@ -1089,6 +1497,13 @@
+@@ -1089,6 +1485,13 @@
  		success_msg_foot = talloc_strdup(ws, ocv3_success_msg_foot);
  		success_msg_head_size = sizeof(ocv3_success_msg_head) - 1;
  		success_msg_foot_size = strlen(success_msg_foot);
@@ -502,7 +502,7 @@
  	} else {
  		success_msg_head = oc_success_msg_head;
  		success_msg_foot = NULL;
-@@ -1113,6 +1528,11 @@
+@@ -1113,6 +1516,11 @@
  		success_msg_foot_size = strlen(success_msg_foot);
  	}
  
@@ -514,20 +514,7 @@
  	oc_base64_encode((char *)ws->cookie, sizeof(ws->cookie),
  			 (char *)str_cookie, str_cookie_size);
  
-@@ -1139,4 +1559,11 @@
--	ret = cstp_puts(ws, "Content-Type: text/xml\r\n");
-+#ifdef HAVE_SAML
-+	if (ws->selected_auth->type & AUTH_TYPE_SAML && imsg == NULL) {
-+		ret = cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
-+	} else
-+#endif
-+	{
-+		ret = cstp_puts(ws, "Content-Type: text/xml\r\n");
-+	}
- 	if (ret < 0)
- 		goto fail;
- 
-@@ -1178,7 +1605,17 @@
+@@ -1178,7 +1586,17 @@
  		oclog(ws, LOG_SENSITIVE, "sent session id: %s",
  		      calc_safe_id(ws->sid, sizeof(ws->sid), safe_id,
  				   sizeof(safe_id)));
@@ -545,7 +532,7 @@
  
  	ret = cstp_printf(ws, "Set-Cookie: webvpn=%s; Secure; HttpOnly\r\n",
  			  str_cookie);
-@@ -1522,6 +1959,9 @@
+@@ -1522,6 +1940,9 @@
  #endif
  
  #define USERNAME_FIELD "username"
@@ -555,7 +542,7 @@
  #define GROUPNAME_FIELD "group%5flist"
  #define GROUPNAME_FIELD2 "group_list"
  #define GROUPNAME_FIELD_XML "group-select"
-@@ -1546,6 +1986,32 @@
+@@ -1546,6 +1967,32 @@
  	if (req->body_length > 0) {
  		oclog(ws, LOG_HTTP_DEBUG, "POST body: '%.*s'",
  		      (int)req->body_length, req->body);
@@ -588,7 +575,7 @@
  	}
  
  	if (ws->auth_state == S_AUTH_INACTIVE) {
-@@ -1635,6 +2101,28 @@
+@@ -1635,6 +2082,28 @@
  			}
  		}
  		talloc_free(groupname);
@@ -617,7 +604,7 @@
  
  #ifdef SUPPORT_OIDC_AUTH
  		if (ws->selected_auth->type & AUTH_TYPE_OIDC) {
-@@ -1804,6 +2292,31 @@
+@@ -1804,6 +2273,31 @@
  			areq.password = password;
  		}
  
@@ -649,7 +636,7 @@
  		if (areq.password != NULL) {
  			if (ws->sid_set != 0) {
  				areq.sid.data = ws->sid;
-@@ -1854,6 +2367,14 @@
+@@ -1854,6 +2348,14 @@
  		      ws->username);
  		ws->auth_state = S_AUTH_REQ;
  
@@ -664,7 +651,7 @@
  		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
  			ret = basic_auth_handler(ws, http_ver, msg);
  		} else {
-@@ -1887,17 +2408,25 @@
+@@ -1887,5 +2389,10 @@
  	oclog(ws, LOG_HTTP_DEBUG, "user '%s' obtained cookie", ws->username);
  	ws->auth_state = S_AUTH_COOKIE;
  
@@ -676,19 +663,26 @@
 +#endif
 +		ret = post_common_handler(ws, http_ver, msg);
  	goto cleanup;
+@@ -1139,7 +2389,13 @@
+-	ret = cstp_puts(ws, "Content-Type: text/xml\r\n");
++#ifdef HAVE_SAML
++	if (ws->selected_auth->type & AUTH_TYPE_SAML && imsg == NULL) {
++		ret = cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++	} else
++#endif
++	{
++		ret = cstp_puts(ws, "Content-Type: text/xml\r\n");
++	}
+ 	if (ret < 0)
+ 		goto fail;
  
- ask_auth:
- 
- 	return get_auth_handler(ws, http_ver);
- 
- auth_fail:
- 
+@@ -1899,6 +2389,9 @@
  	if (sd != -1)
  		close(sd);
++
 +#ifdef HAVE_SAML
 +	cstp_puts(ws, "Set-Cookie: webvpncontext=; expires=Thu, 01 Jan 1970 22:00:00 GMT; path=/; Secure\r\n");
 +#endif
  	oclog(ws, LOG_HTTP_DEBUG, "HTTP sending: 401 Unauthorized");
  	ret = cstp_printf(ws, "HTTP/1.%u 401 %s\r\nContent-Length: 0\r\n\r\n",
  			  http_ver, reason);
-
