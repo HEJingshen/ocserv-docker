@@ -1,59 +1,624 @@
---- a/src/worker-auth.c
-+++ b/src/worker-auth.c
-@@ -109,0 +110,3 @@
-+#ifdef HAVE_SAML
-+#define SAML_RESPONSE_PARAM "SAMLResponse"
-+#endif
-@@ -1662,0 +1666,11 @@
+--- a/src/worker-auth.c	2026-04-17 05:27:59
++++ b/src/worker-auth.c	2026-06-06 14:07:31
+@@ -84,7 +84,56 @@
+ 	"<form method=\"post\" action=\"/auth\">\n"
+ 
+ #define OC_LOGIN_END "</form></auth>\n</config-auth>"
 +
 +#ifdef HAVE_SAML
-+                if (ws->selected_auth->type & AUTH_TYPE_SAML) {
-+                        if (req->authorization == NULL ||
-+                            req->authorization_size == 0) {
-+                                /* Initial request - set auth type for redirect */
-+                                ireq.auth_type |= AUTH_TYPE_SAML;
-+                        }
-+                        /* SAML auth uses POST body for response, not Authorization header */
-+                }
++#define OC_SAML_LOGIN_START \
++	"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
++	"<config-auth client=\"vpn\" type=\"auth-request\" aggregate-auth-version=\"2\">\n" \
++	"<opaque is-for=\"sg\">\n" \
++	"<auth-method>single-sign-on-v2</auth-method>\n" \
++	"</opaque>\n" \
++	"<auth id=\"main\">\n" \
++	"<title>Login</title>\n" \
++	"<message>Please complete the authentication process.</message>\n" \
++	"<banner></banner>\n" \
++	"<sso-v2-login>https://%s/+CSCOE+/saml/sp/login</sso-v2-login>\n" \
++	"<sso-v2-login-final>https://%s/+CSCOE+/saml_ac_login.html</sso-v2-login-final>\n" \
++	"<sso-v2-logout>https://%s/+CSCOE+/saml/sp/logout</sso-v2-logout>\n" \
++	"<sso-v2-logout-final>https://%s/+CSCOE+/saml_ac_login.html</sso-v2-logout-final>\n" \
++	"<sso-v2-token-cookie-name>acSamlv2Token</sso-v2-token-cookie-name>\n" \
++	"<sso-v2-error-cookie-name>acSamlv2Error</sso-v2-error-cookie-name>\n" \
++	"<form>\n<input type=\"sso\" name=\"sso-token\"></input>\n"
++
++#define OC_SAML_LOGIN_END "</form>\n</auth>\n</config-auth>\n"
++
++#define ACS_RESPONSE_FORM \
++	"<html>\n<head>\n<script>\nfunction submit_saml() {\n" \
++	"document.cookie = \"webvpncontext=%s; Max-Age=%u; path=/; secure\";\n" \
++	"document.getElementById('samlform').submit();\n" \
++	"}\n</script>\n</head>\n<body onload=\"submit_saml()\">\n" \
++	"<form id=\"samlform\" action=\"/+webvpn+/index.html\" method=\"POST\">\n" \
++	"<input type=\"hidden\" name=\"tgroup\" value=\"\">\n" \
++	"<input type=\"hidden\" name=\"next\" value=\"\">\n" \
++	"<input type=\"hidden\" name=\"tgcookieset\" value=\"\">\n" \
++	"<input type=\"hidden\" name=\"group_list\" value=\"AC-SAML\">\n" \
++	"<input type=\"hidden\" name=\"username\" value=\"\">\n" \
++	"<input type=\"hidden\" name=\"SAMLResponse\" value=\"%s\">\n" \
++	"<input type=\"submit\" name=\"Login\" value=\"Login\" style=\"display:none;\">\n" \
++	"</form>\n</body>\n</html>\n"
+ 
++static const char saml_assertion_valid[] =
++	"<html>\n<head>\n<script>\n"
++	"document.location.replace(\"/+CSCOE+/logon.html?\"+\n\"a0=0\"+\n\"&a1=\"+\n\"&a2=\"+\n\"&a3=1\");\n"
++	"</script>\n</head>\n</html>";
++
++static const char saml_success_page[] =
++	"<html>\n<head>\n<title>Authentication successful</title>\n</head>\n"
++	"<body>\n<div>\n"
++	"<h2>AnyConnect SAML Authentication</h2>\n"
++	"<p>You have successfully authenticated. You may now close this browser tab.</p>\n"
++	"</div>\n</body>\n</html>\n";
 +#endif
-@@ -1793,0 +1809,40 @@
++
+ #define OC_LOGIN_FORM_INPUT_USER \
+ 	"<input type=\"text\" name=\"username\" label=\"Username:\" />\n"
+ 
+@@ -114,6 +163,13 @@
+ #ifdef SUPPORT_OIDC_AUTH
+ static int oidc_auth_handler(worker_st *ws, unsigned int http_ver);
+ #endif
 +#ifdef HAVE_SAML
-+                /* SAML auth continuation: extract SAMLResponse from POST body */
-+                if (areq.password == NULL &&
-+                    (ws->selected_auth->type & AUTH_TYPE_SAML)) {
-+                        char *saml_response = NULL;
-+                        char *p;
-+                        unsigned int len;
-+
-+                        /* SAMLResponse is in form-urlencoded POST body */
-+                        if (req->body != NULL && req->body_length > 0) {
-+                                /* Find SAMLResponse= at form-urlencoded boundary */
-+                                p = strstr(req->body, SAML_RESPONSE_PARAM "=");
-+                                while (p != NULL) {
-+                                        /* Verify boundary: start of body or preceded by '&' */
-+                                        if (p == req->body || *(p - 1) == '&') {
-+                                                p += strlen(SAML_RESPONSE_PARAM) + 1; /* skip past "SAMLResponse=" */
-+                                                break;
-+                                        }
-+                                        p = strstr(p + 1, SAML_RESPONSE_PARAM "=");
-+                                }
-+                                if (p != NULL) {
-+                                        len = 0;
-+                                        while (p[len] != 0 && p[len] != '&') {
-+                                                len++;
-+                                        }
-+                                        if (len > 0) {
-+                                                saml_response = unescape_url(ws->req.body, p, len, NULL);
-+                                        }
-+                                }
-+                        }
-+
-+                        if (saml_response == NULL) {
-+                                oclog(ws, LOG_HTTP_DEBUG,
-+                                      "SAML: No SAMLResponse found in POST body");
-+                                goto auth_fail;
-+                        }
-+
-+                        areq.password = saml_response;
-+                }
++static int send_saml_request_redirect(worker_st *ws, unsigned int http_ver,
++				      const char *pmsg, unsigned int pcounter);
++int post_acs_handler(worker_st *ws, unsigned int http_ver);
++int saml_post_handler(worker_st *ws, unsigned int http_ver);
++int saml_get_handler(worker_st *ws, unsigned int http_ver);
 +#endif
+ 
+ int ws_switch_auth_to(struct worker_st *ws, unsigned int auth)
+ {
+@@ -225,8 +281,16 @@
+ 			login_start = OCV3_LOGIN_START;
+ 		login_end = OCV3_LOGIN_END;
+ 	} else {
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			login_start = OC_SAML_LOGIN_START;
++			login_end = OC_SAML_LOGIN_END;
++		} else
++#endif
++		{
+ 		login_start = OC_LOGIN_START;
+ 		login_end = OC_LOGIN_END;
++		}
+ 	}
+ 
+ 	if ((ws->selected_auth->type & AUTH_TYPE_GSSAPI) &&
+@@ -238,6 +302,14 @@
+ 			return post_auth_handler(ws, http_ver);
+ 	}
+ 
++#ifdef HAVE_SAML
++	if ((ws->selected_auth->type & AUTH_TYPE_SAML) &&
++	    strncmp(ws->req.url, "/", strlen(ws->req.url)) != 0) {
++		ws->sid_set = 0;
++		return post_auth_handler(ws, http_ver);
++	}
++#endif
++
+ 	str_init(&str, ws);
+ 
+ 	oclog(ws, LOG_HTTP_DEBUG, "HTTP sending: 200 OK");
+@@ -279,11 +351,25 @@
+ 
+ 	if (ws->auth_state == S_AUTH_REQ) {
+ 		/* Password Form */
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			if (pmsg == NULL)
++				pmsg = "Please complete the authentication process.";
++		} else
++#endif
+ 		if (pmsg == NULL ||
+ 		    strncasecmp(pmsg, DEFAULT_PASSWD_LABEL,
+ 				sizeof(DEFAULT_PASSWD_LABEL) - 1) == 0)
+ 			pmsg = "Please enter your password.";
+ 
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			const char *hostname = ws->vhost->perm_config.config->default_domain;
++			ret = str_append_printf(&str, login_start,
++						hostname, hostname, hostname, hostname);
++		} else
++#endif
++		{
+ 		ret = str_append_str(&str, login_start);
+ 		if (ret < 0) {
+ 			ret = -1;
+@@ -291,6 +377,7 @@
+ 		}
+ 
+ 		ret = str_append_printf(&str, OC_LOGIN_FORM_START, pmsg);
++		}
+ 		if (ret < 0) {
+ 			ret = -1;
+ 			goto cleanup;
+@@ -316,10 +403,24 @@
+ 
+ 	} else {
+ 		/* Username / Groups Form */
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			pmsg = ws->vhost->perm_config.config->default_domain;
++		} else
++#endif
+ 		if (pmsg == NULL)
+ 			pmsg = "Please enter your username and password.";
+ 
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			const char *hostname = ws->vhost->perm_config.config->default_domain;
++			ret = str_append_printf(&str, login_start,
++						hostname, hostname, hostname, hostname);
++		} else
++#endif
++		{
+ 		ret = str_append_str(&str, login_start);
++		}
+ 		if (ret < 0) {
+ 			ret = -1;
+ 			goto cleanup;
+@@ -516,8 +617,297 @@
+ int get_auth_handler(worker_st *ws, unsigned int http_ver)
+ {
+ 	return get_auth_handler2(ws, http_ver, NULL, 0);
++}
++
++#ifdef HAVE_SAML
++int send_saml_request_redirect(worker_st *ws, unsigned int http_ver,
++			       const char *pmsg, unsigned int pcounter)
++{
++	char context[BASE64_ENCODE_RAW_LENGTH(SID_SIZE) + 1];
++	int ret;
++
++	oclog(ws, LOG_HTTP_DEBUG,
++	      "HTTP sending: 303 See Other (SAML redirect)");
++	cstp_cork(ws);
++	ret = cstp_printf(ws, "HTTP/1.%u 303 See Other\r\n", http_ver);
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "Content-Length: 0\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "Cache-Control: no-store\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "Pragma: no-cache\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "Connection: Keep-Alive\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws,
++			"Set-Cookie: webvpncontext=; expires=Thu, 01 Jan 1970 22:00:00 GMT; path=/; Secure\r\n");
++	if (ret < 0)
++		return -1;
++
++	if (ws->sid_set != 0) {
++		char safe_id[SAFE_ID_SIZE];
++
++		oc_base64_encode((char *)ws->sid, sizeof(ws->sid),
++				 (char *)context, sizeof(context));
++
++		ret = cstp_printf(ws,
++				  "Set-Cookie: webvpncontext=%s; Max-Age=%lu; Secure; HttpOnly\r\n",
++				  context,
++				  (unsigned long)WSCONFIG(ws)->cookie_timeout);
++		if (ret < 0)
++			return -1;
++
++		oclog(ws, LOG_SENSITIVE, "sent session id: %s",
++		      calc_safe_id(ws->sid, sizeof(ws->sid), safe_id,
++				   sizeof(safe_id)));
++	} else {
++		ret = cstp_puts(ws,
++				"Set-Cookie: webvpncontext=; expires=Thu, 01 Jan 1970 22:00:00 GMT; path=/; Secure; HttpOnly\r\n");
++		if (ret < 0)
++			return -1;
++	}
++
++	ret = cstp_printf(ws, "Location: %s\r\n", pmsg);
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "Set-Cookie: acsamlcap=v2; path=/; secure\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "Set-Cookie: tg=; path=/; secure\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws,
++			"Set-Cookie: acSamlv2Error=; path=/; secure\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_puts(ws, "\r\n");
++	if (ret < 0)
++		return -1;
++
++	ret = cstp_uncork(ws);
++	if (ret < 0)
++		return -1;
++
++	return 0;
++}
++
++int post_acs_handler(worker_st *ws, unsigned int http_ver)
++{
++	int ret;
++	str_st str;
++	char context[BASE64_ENCODE_RAW_LENGTH(SID_SIZE) + 1];
++	char *saml_response_start;
++	char *unescaped_saml_response = NULL;
++
++	memset(context, 0, sizeof(context));
++	str_init(&str, ws);
++
++	if (ws->req.body == NULL || ws->req.body_length == 0) {
++		oclog(ws, LOG_ERR, "SAML ACS: empty POST body");
++		ret = -1;
++		goto cleanup;
++	}
++
++	saml_response_start = strstr(ws->req.body, "SAMLResponse=");
++	if (saml_response_start == NULL) {
++		oclog(ws, LOG_ERR, "SAML ACS: no SAMLResponse in POST body");
++		ret = -1;
++		goto cleanup;
++	}
++	saml_response_start += 13;
++
++	{
++		unsigned int len = 0;
++		while (saml_response_start[len] != 0 &&
++		       saml_response_start[len] != '&')
++			len++;
++
++		if (len > 0) {
++			unescaped_saml_response =
++				unescape_url(ws->req.body, saml_response_start,
++					     len, NULL);
++		}
++	}
++
++	if (unescaped_saml_response == NULL) {
++		oclog(ws, LOG_ERR, "SAML ACS: failed to decode SAMLResponse");
++		ret = -1;
++		goto cleanup;
++	}
++
++	oclog(ws, LOG_HTTP_DEBUG, "HTTP sending: 200 OK (ACS bridge)");
++	cstp_cork(ws);
++	ret = cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	if (ws->sid_set != 0) {
++		oc_base64_encode((char *)ws->sid, sizeof(ws->sid),
++				 (char *)context, sizeof(context));
++
++		ret = cstp_printf(ws,
++				  "Set-Cookie: webvpncontext=%s; Max-Age=%lu; Secure; HttpOnly\r\n",
++				  context,
++				  (unsigned long)WSCONFIG(ws)->cookie_timeout);
++		if (ret < 0) {
++			ret = -1;
++			goto cleanup;
++		}
++	}
++
++	ret = cstp_puts(ws, "Cache-Control: no-store\r\n");
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = str_append_printf(&str, ACS_RESPONSE_FORM,
++				context,
++				(unsigned)WSCONFIG(ws)->cookie_timeout,
++				unescaped_saml_response);
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = cstp_printf(ws, "Content-Length: %u\r\n",
++			  (unsigned int)str.length);
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = cstp_puts(ws, "\r\n");
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = cstp_send(ws, str.data, str.length);
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = cstp_uncork(ws);
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = 0;
++
++ cleanup:
++	if (unescaped_saml_response != NULL)
++		talloc_free(unescaped_saml_response);
++	str_clear(&str);
++	return ret;
+ }
+ 
++int saml_post_handler(worker_st *ws, unsigned int http_ver)
++{
++	if (ws->req.body != NULL &&
++	    strstr(ws->req.body, "SAMLResponse") != NULL) {
++		ws->auth_state = S_AUTH_REQ;
++	}
++
++	return post_auth_handler(ws, http_ver);
++}
++
++int saml_get_handler(worker_st *ws, unsigned int http_ver)
++{
++	const char *logon_url = "/+CSCOE+/logon.html?a0=0&a1=&a2=&a3=1";
++	const char *login_url = "/+CSCOE+/saml_ac_login.html";
++	const char *logout_url = "/+CSCOE+/saml/sp/logout";
++	int size;
++
++	if (strncmp(ws->req.url, logon_url, strlen(logon_url)) == 0) {
++		cstp_cork(ws);
++		cstp_printf(ws, "HTTP/1.%u 302 Moved Temporarily\r\n",
++			    http_ver);
++		cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++		cstp_puts(ws, "Content-Length: 0\r\n");
++		cstp_puts(ws, "Cache-Control: no-store\r\n");
++		cstp_puts(ws, "Pragma: no-cache\r\n");
++		cstp_puts(ws, "Connection: Keep-Alive\r\n");
++		cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++		cstp_puts(ws,
++			  "Location: /+CSCOE+/saml_ac_login.html\r\n");
++		cstp_puts(ws, "\r\n");
++		cstp_uncork(ws);
++		return 0;
++	} else if (strncmp(ws->req.url, login_url,
++			    strlen(login_url)) == 0) {
++		cstp_cork(ws);
++		cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
++		cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++		cstp_puts(ws, "Cache-Control: no-store\r\n");
++		cstp_puts(ws, "Pragma: no-cache\r\n");
++		cstp_puts(ws, "Connection: Keep-Alive\r\n");
++		cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++		size = sizeof(saml_success_page) - 1;
++		cstp_printf(ws, "Content-Length: %u\r\n", (unsigned)size);
++		cstp_printf(ws, "\r\n%s", saml_success_page);
++		cstp_uncork(ws);
++		return 0;
++	} else if (strncmp(ws->req.url, logout_url,
++			    strlen(logout_url)) == 0) {
++		static const char logout_page[] =
++			"<!DOCTYPE html>\n"
++			"<html><head><title>Logged out</title></head>\n"
++			"<body><h2>SAML logout successful</h2>\n"
++			"<p>You have been logged out. You can close this tab.</p>\n"
++			"</body></html>\n";
++		cstp_cork(ws);
++		cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
++		cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++		cstp_puts(ws, "Cache-Control: no-store\r\n");
++		cstp_puts(ws, "Pragma: no-cache\r\n");
++		cstp_puts(ws, "Connection: Keep-Alive\r\n");
++		cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++		cstp_puts(ws, "Set-Cookie: webvpncontext=; "
++			       "Path=/; Secure; HttpOnly\r\n");
++		cstp_puts(ws, "Set-Cookie: acSamlv2Token=; "
++			       "Path=/; Secure\r\n");
++		cstp_puts(ws, "Set-Cookie: tg=; "
++			       "Path=/; Secure\r\n");
++		size = sizeof(logout_page) - 1;
++		cstp_printf(ws, "Content-Length: %u\r\n", (unsigned)size);
++		cstp_printf(ws, "\r\n%s", logout_page);
++		cstp_uncork(ws);
++		return 0;
++	} else {
++		return get_auth_handler(ws, http_ver);
++	}
++}
++#endif
++
+ /* Extract the username from a certificate into ws->cert_username.
+  * Returns 0 on success, a negative GnuTLS error code on failure.
+  * Keeping the return value unambiguous (never a positive SAN-type code)
+@@ -1089,6 +1479,13 @@
+ 		success_msg_foot = talloc_strdup(ws, ocv3_success_msg_foot);
+ 		success_msg_head_size = sizeof(ocv3_success_msg_head) - 1;
+ 		success_msg_foot_size = strlen(success_msg_foot);
++#ifdef HAVE_SAML
++	} else if (ws->selected_auth->type & AUTH_TYPE_SAML && imsg == NULL) {
++		success_msg_head = saml_assertion_valid;
++		success_msg_head_size = sizeof(saml_assertion_valid) - 1;
++		success_msg_foot = NULL;
++		success_msg_foot_size = 0;
++#endif
+ 	} else {
+ 		success_msg_head = oc_success_msg_head;
+ 		success_msg_foot = NULL;
+@@ -1113,6 +1510,11 @@
+ 		success_msg_foot_size = strlen(success_msg_foot);
+ 	}
+ 
++#ifdef HAVE_SAML
++	if (ws->selected_auth->type & AUTH_TYPE_SAML && imsg != NULL) {
++		strlcpy(str_cookie, imsg, str_cookie_size);
++	} else
++#endif
+ 	oc_base64_encode((char *)ws->cookie, sizeof(ws->cookie),
+ 			 (char *)str_cookie, str_cookie_size);
+ 
+@@ -1180,6 +1582,16 @@
+ 				   sizeof(safe_id)));
+ 	}
+ 
++#ifdef HAVE_SAML
++	if (ws->selected_auth->type & AUTH_TYPE_SAML && imsg == NULL) {
++		ret = cstp_printf(ws,
++				  "Set-Cookie: acSamlv2Token=%s; path=/; secure\r\n",
++				  str_cookie);
++		if (ret < 0)
++			goto fail;
++	}
++#endif
++
+ 	ret = cstp_printf(ws, "Set-Cookie: webvpn=%s; Secure; HttpOnly\r\n",
+ 			  str_cookie);
+ 	if (ret < 0)
+@@ -1522,6 +1934,9 @@
+ #endif
+ 
+ #define USERNAME_FIELD "username"
++#ifdef HAVE_SAML
++#define SSO_TOKEN_FIELD "sso-token"
++#endif
+ #define GROUPNAME_FIELD "group%5flist"
+ #define GROUPNAME_FIELD2 "group_list"
+ #define GROUPNAME_FIELD_XML "group-select"
+@@ -1546,6 +1961,32 @@
+ 	if (req->body_length > 0) {
+ 		oclog(ws, LOG_HTTP_DEBUG, "POST body: '%.*s'",
+ 		      (int)req->body_length, req->body);
++#ifdef HAVE_SAML
++		if (req->body != NULL &&
++		    strstr(req->body, "sso-token") != NULL) {
++			char *sso_token = NULL;
++			unsigned tmplen;
++			size_t nlen;
++
++			ret = parse_reply(ws, req->body, req->body_length,
++					  SSO_TOKEN_FIELD,
++					  sizeof(SSO_TOKEN_FIELD) - 1,
++					  NULL, 0, &sso_token);
++			if (ret >= 0 && sso_token != NULL) {
++				tmplen = strlen(sso_token);
++				nlen = sizeof(ws->sid);
++				ret = oc_base64_decode((uint8_t *)sso_token,
++						       tmplen, ws->sid, &nlen);
++				if (ret != 0 || nlen != sizeof(ws->sid)) {
++					ws->sid_set = 0;
++				} else {
++					ws->sid_set = 1;
++				}
++				return post_common_handler(ws, http_ver,
++							   sso_token);
++			}
++		}
++#endif
+ 	}
+ 
+ 	if (ws->auth_state == S_AUTH_INACTIVE) {
+@@ -1635,6 +2076,28 @@
+ 			}
+ 		}
+ 		talloc_free(groupname);
++
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			const char *saml_urls[] = {
++				"/+CSCOE+/saml/sp/login",
++				"/+webvpn+/index.html",
++				"/+CSCOE+/saml/sp/acs",
++			};
++			unsigned ui;
++			int url_match = 0;
++			for (ui = 0; ui < sizeof(saml_urls) / sizeof(saml_urls[0]); ui++) {
++				if (strncmp(req->url, saml_urls[ui],
++					    strlen(saml_urls[ui])) == 0) {
++					url_match = 1;
++					break;
++				}
++			}
++			if (!url_match)
++				goto ask_auth;
++			ireq.auth_type |= AUTH_TYPE_SAML;
++		}
++#endif
+ 
+ #ifdef SUPPORT_OIDC_AUTH
+ 		if (ws->selected_auth->type & AUTH_TYPE_OIDC) {
+@@ -1804,6 +2267,31 @@
+ 			areq.password = password;
+ 		}
+ 
++#ifdef HAVE_SAML
++		if (areq.password == NULL &&
++		    (ws->selected_auth->type & AUTH_TYPE_SAML)) {
++			char *p;
++			unsigned int len;
++
++			p = strstr(req->body, "SAMLResponse=");
++			if (p != NULL) {
++				p += 13;
++				len = 0;
++				while (p[len] != 0 && p[len] != '&')
++					len++;
++				if (len > 0)
++					areq.password = unescape_url(
++						ws->req.body, p, len, NULL);
++			}
++
++			if (areq.password == NULL) {
++				oclog(ws, LOG_HTTP_DEBUG,
++				      "SAML: No SAMLResponse found in POST body");
++				goto auth_fail;
++			}
++		}
++#endif
++
+ 		if (areq.password != NULL) {
+ 			if (ws->sid_set != 0) {
+ 				areq.sid.data = ws->sid;
+@@ -1854,6 +2342,14 @@
+ 		      ws->username);
+ 		ws->auth_state = S_AUTH_REQ;
+ 
++#ifdef HAVE_SAML
++		if (ws->selected_auth->type & AUTH_TYPE_SAML) {
++			ret = send_saml_request_redirect(ws, http_ver, msg,
++							 pcounter);
++			goto cleanup;
++		}
++#endif
++
+ 		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
+ 			ret = basic_auth_handler(ws, http_ver, msg);
+ 		} else {

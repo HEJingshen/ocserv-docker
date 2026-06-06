@@ -93,6 +93,9 @@ COPY src/patches/meson.build.patch /patches/meson.build.patch
 COPY src/patches/src-meson.build.patch /patches/src-meson.build.patch
 COPY src/patches/config.c.patch /patches/config.c.patch
 COPY src/patches/worker-auth.c.patch /patches/worker-auth.c.patch
+COPY src/patches/worker.h.patch /patches/worker.h.patch
+COPY src/patches/worker-http.c.patch /patches/worker-http.c.patch
+COPY src/patches/worker-http-handlers.c.patch /patches/worker-http-handlers.c.patch
 COPY src/saml/saml.c /saml/saml.c
 COPY src/saml/saml.h /saml/saml.h
 COPY src/saml/lasso_compat.h /saml/lasso_compat.h
@@ -109,7 +112,10 @@ RUN set -eux; \
     patch -p1 < /patches/meson.build.patch; \
     patch -p1 < /patches/src-meson.build.patch; \
     patch -p1 < /patches/config.c.patch; \
+    patch -p1 < /patches/worker.h.patch; \
     patch -p1 < /patches/worker-auth.c.patch; \
+    patch -p1 < /patches/worker-http.c.patch; \
+    patch -p1 < /patches/worker-http-handlers.c.patch; \
     cp /saml/saml.c src/auth/ && cp /saml/saml.h src/auth/ && cp /saml/lasso_compat.h src/auth/; \
     cp -a /lasso/* /; \
     # Build with SAML enabled

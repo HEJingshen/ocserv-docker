@@ -110,10 +110,23 @@ idp-cert = /etc/ocserv/saml/idp-cert.pem
 
 | IdP | 配置要点 |
 |:--|:--|
-| Okta | 下载Metadata XML，配置Assertion Consumer Service URL |
-| Azure AD | 使用Enterprise Application，配置SAML Reply URL |
+| Okta | 下载Metadata XML，ACS URL 设为 `https://your-domain/+CSCOE+/saml/sp/acs` |
+| Azure AD | 使用Enterprise Application，SAML Reply URL 设为 `https://your-domain/+CSCOE+/saml/sp/acs` |
 | Shibboleth | 直接使用标准SAML2元数据交换 |
 | Keycloak | 创建SAML Client，导出元数据 |
+
+### AnyConnect SSO-v2 协议
+
+本实现使用 Cisco AnyConnect **SSO-v2** 协议，支持 AnyConnect 内嵌浏览器完成 SAML 认证：
+
+1. AnyConnect 连接时收到 SSO-v2 XML，自动打开内嵌浏览器
+2. 内嵌浏览器访问 `/+CSCOE+/saml/sp/login`，被重定向到 IdP
+3. 用户在 IdP 完成认证后，浏览器 POST SAMLResponse 到 `/+CSCOE+/saml/sp/acs`
+4. ACS handler 返回桥接 HTML，自动提交 SAMLResponse 到 `/+webvpn+/index.html`
+5. ocserv 验证 SAMLResponse，设置 `acSamlv2Token` cookie
+6. AnyConnect 读取 cookie 中的 sso-token，完成 VPN 连接
+
+**SP 元数据中的 ACS URL 必须设为**: `https://your-domain/+CSCOE+/saml/sp/acs`
 
 ## 验证
 

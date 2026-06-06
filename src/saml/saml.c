@@ -1678,7 +1678,8 @@ const struct auth_mod_st saml_auth_funcs = {
 	.auth_pass = saml_auth_pass,
 	.auth_user = saml_auth_user,
 	.auth_group = NULL,
-	.group_list = NULL
+	.group_list = NULL,
+	.allows_retries = 1
 };
 
 #endif /* HAVE_SAML */

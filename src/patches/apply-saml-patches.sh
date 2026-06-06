@@ -31,9 +31,21 @@ patch -p1 -d "${SRCDIR}/src" < "${PATCHDIR}/src-meson.build.patch"
 echo "Applying config.c.patch..."
 patch -p1 -d "${SRCDIR}" < "${PATCHDIR}/config.c.patch"
 
+# Apply worker.h patch
+echo "Applying worker.h.patch..."
+patch -p1 -d "${SRCDIR}" < "${PATCHDIR}/worker.h.patch"
+
 # Apply worker-auth.c patch
 echo "Applying worker-auth.c.patch..."
 patch -p1 -d "${SRCDIR}" < "${PATCHDIR}/worker-auth.c.patch"
+
+# Apply worker-http.c patch
+echo "Applying worker-http.c.patch..."
+patch -p1 -d "${SRCDIR}" < "${PATCHDIR}/worker-http.c.patch"
+
+# Apply worker-http-handlers.c patch
+echo "Applying worker-http-handlers.c.patch..."
+patch -p1 -d "${SRCDIR}" < "${PATCHDIR}/worker-http-handlers.c.patch"
 
 # Copy SAML2 source files
 echo "Copying SAML2 source files..."

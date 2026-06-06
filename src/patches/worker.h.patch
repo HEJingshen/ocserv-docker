@@ -1,0 +1,14 @@
+--- a/src/worker.h
++++ b/src/worker.h
+@@ -355,6 +355,13 @@
+ int post_svc_handler(worker_st *ws, unsigned int http_ver);
+ 
++#ifdef HAVE_SAML
++int post_acs_handler(worker_st *ws, unsigned int http_ver);
++int saml_post_handler(worker_st *ws, unsigned int http_ver);
++int saml_get_handler(worker_st *ws, unsigned int http_ver);
++int get_saml_metadata_handler(worker_st *ws, unsigned int http_ver);
++#endif
++
+ int response_404(worker_st *ws, unsigned int http_ver);
+ int response_401(worker_st *ws, unsigned int http_ver, char *realm);

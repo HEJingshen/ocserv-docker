@@ -1,0 +1,19 @@
+--- a/src/worker-http.c
++++ b/src/worker-http.c
+@@ -59,7 +59,16 @@
+ static const struct known_urls_st known_urls[] = {
+ 	LL("/", get_auth_handler, post_auth_handler),
+ 	LL("/auth", get_auth_handler, post_auth_handler),
+ 	LL("/VPN", get_auth_handler, post_auth_handler),
++#ifdef HAVE_SAML
++	LL("/+CSCOE+/saml/sp/login", saml_get_handler, NULL),
++	LL("/+CSCOE+/saml/sp/logout", saml_get_handler, NULL),
++	LL("/+CSCOE+/saml/sp/acs", NULL, post_acs_handler),
++	LL("/+CSCOE+/logon.html?a0=0&a1=&a2=&a3=1", saml_get_handler, NULL),
++	LL("/+CSCOE+/saml_ac_login.html", saml_get_handler, NULL),
++	LL_DIR("/saml/sp/metadata", get_saml_metadata_handler, NULL),
++	LL("/+webvpn+/index.html", NULL, saml_post_handler),
++#endif
+ 	LL("/cert.pem", get_cert_handler, NULL),
+ 	LL("/cert.cer", get_cert_der_handler, NULL),
+ 	LL("/ca.pem", get_ca_handler, NULL),
