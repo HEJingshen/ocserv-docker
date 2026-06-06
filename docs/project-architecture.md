@@ -275,7 +275,7 @@ healthcheck:
 
 ## 五、CI/CD（GitHub Actions）
 
-工作流定义在 `.github/workflows/docker-build.yml`。
+镜像构建工作流按发布目标拆分为 `.github/workflows/ocserv.yml`、`.github/workflows/ocserv-saml.yml` 和 `.github/workflows/ocserv-auth.yml`。
 
 ### Shell 脚本风格
 
@@ -298,28 +298,23 @@ healthcheck:
 ```
 1. validate job
        ├─ checkout
-       ├─ shell 语法检查
-       ├─ hadolint
-       ├─ auth/Dockerfile 构建校验
+       ├─ shell 语法检查与 shellcheck
+       ├─ 对应 Dockerfile 的 hadolint 检查
        └─ docker compose 配置展开校验
        │
-2. build-images matrix job（2 x 2 并行）
-       ├─ matrix.image.type: ocserv, auth
+2. build job（amd64/arm64 并行）
        ├─ matrix.platform.arch: amd64, arm64
        ├─ matrix.platform.runner: amd64 使用 `ubuntu-24.04`，arm64 使用 `ubuntu-24.04-arm`
-       ├─ checkout
-       ├─ 按镜像类型决定是否下载 ocserv 源码（ocserv 需要，auth 跳过）
-       ├─ tags 直接通过 `env[matrix.image.name_var]` 解析镜像仓库名（不带版本或架构后缀）
-       ├─ Buildx 单平台构建
-       ├─ 缓存: GitHub Actions 缓存（按 image/platform 分 scope）
+       ├─ ocserv/ocserv-saml 通过 `actions/cache` 复用源码包下载结果并强制 SHA256 校验
+       ├─ ocserv-saml 额外缓存并校验 lasso 2.9.0 源码包
+       ├─ Buildx 单平台构建，按 workflow + arch 分 scope 复用 GHA 构建缓存
        ├─ 仅在 `main`/`master` 非 PR 场景按 digest 推送单平台镜像并上传 digest artifact
        └─ 生成 SBOM/provenance
        │
-3. merge-manifests matrix job
-       ├─ matrix.image.type: ocserv, auth
+3. merge-manifests job
        ├─ 下载 amd64/arm64 digest artifacts
        ├─ 合并 `image@sha256:<digest>` 源
-       └─ 发布多架构 `:<version>` 和 `:latest`
+       └─ 发布对应镜像的多架构版本标签和 latest 标签
        │
 4. concurrency 控制
        └─ 同一 workflow + ref 只保留最新一次运行，自动取消旧任务
@@ -329,9 +324,11 @@ healthcheck:
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| `push` 到 `main`/`master` | 每个镜像先按 amd64/arm64 digest 推送临时单平台结果，再合并生成多架构 `:<VERSION>` 与 `:latest`；不发布带架构后缀的版本标签 |
+| `push` 到 `main`/`master` | 每个 workflow 先按 amd64/arm64 digest 推送临时单平台结果，再合并生成对应多架构标签；不发布带架构后缀的版本标签 |
 | `workflow_dispatch` on `main`/`master` | 与 `push main/master` 相同 |
 | `pull_request` 或非主分支手动执行 | 仅构建测试，不推送镜像 |
+
+`ocserv.yml` 发布 `kingsonho/ocserv:<VERSION>` 和 `kingsonho/ocserv:latest`；`ocserv-saml.yml` 发布 `kingsonho/ocserv:<VERSION>-saml` 和 `kingsonho/ocserv:latest-saml`；`ocserv-auth.yml` 发布 `kingsonho/ocserv-auth:<VERSION>` 和 `kingsonho/ocserv-auth:latest`。
 
 ---
 
@@ -373,5 +370,7 @@ healthcheck:
 │   └── test_migrate_legacy_cert_auth.sh # 迁移测试
 │
 └── .github/workflows/
-    └── docker-build.yml                # CI/CD 多架构构建流水线
+    ├── ocserv.yml                      # ocserv 多架构构建流水线
+    ├── ocserv-saml.yml                 # ocserv SAML 变体多架构构建流水线
+    └── ocserv-auth.yml                 # 证书认证工具镜像多架构构建流水线
 ```

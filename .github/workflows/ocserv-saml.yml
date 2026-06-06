@@ -1,0 +1,277 @@
+name: Build ocserv SAML Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'Dockerfile.saml'
+      - 'VERSION'
+      - '.env.example'
+      - '.github/workflows/ocserv-saml.yml'
+      - 'docker-compose.yml'
+      - 'scripts/configure-alpine-repositories.sh'
+      - 'scripts/validate-saml-config.sh'
+      - 'scripts/render-ocserv-conf.sh'
+      - 'docker/ocserv/s6-init.sh'
+      - 'config/ocserv.conf.template'
+      - 'config/saml/config.ini.template'
+      - 'src/saml/**'
+      - 'src/patches/**'
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - 'Dockerfile.saml'
+      - 'VERSION'
+      - '.env.example'
+      - '.github/workflows/ocserv-saml.yml'
+      - 'docker-compose.yml'
+      - 'scripts/configure-alpine-repositories.sh'
+      - 'scripts/validate-saml-config.sh'
+      - 'scripts/render-ocserv-conf.sh'
+      - 'docker/ocserv/s6-init.sh'
+      - 'config/ocserv.conf.template'
+      - 'config/saml/config.ini.template'
+      - 'src/saml/**'
+      - 'src/patches/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: docker.io
+  OCSERV_IMAGE_NAME: kingsonho/ocserv
+  OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
+  LASSO_VERSION: "2.9.0"
+  LASSO_SOURCE_URL: https://deb.debian.org/debian/pool/main/l/lasso/lasso_2.9.0.orig.tar.gz
+  LASSO_TARBALL_SHA256: "63816c8219df48cdefeccb1acb35e04014ca6395b5263c70aacd5470ea95c351"
+  ALPINE_VERSION: "3.23.4"
+  ALPINE_IMAGE_AMD64: alpine:3.23.4@sha256:4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b
+  ALPINE_IMAGE_ARM64: alpine:3.23.4@sha256:378c4c5418f7493bd500ad21ffb43818d0689daaad43e3261859fb417d1481a0
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Check shell syntax
+        run: |
+          sh -n scripts/configure-alpine-repositories.sh
+          sh -n scripts/render-ocserv-conf.sh
+          sh -n docker/ocserv/s6-init.sh
+          sh -n scripts/validate-saml-config.sh
+
+      - name: Lint shell scripts
+        run: |
+          shellcheck -s sh scripts/configure-alpine-repositories.sh
+          shellcheck -s sh scripts/render-ocserv-conf.sh
+          shellcheck -s sh docker/ocserv/s6-init.sh
+          shellcheck -s sh scripts/validate-saml-config.sh
+
+      - name: Lint Dockerfile
+        run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile.saml
+
+      - name: Validate Compose file
+        env:
+          DOMAIN: ci.example.com
+        run: docker compose config --quiet
+
+      - name: Validate render script SAML handling
+        run: |
+          cp .env.example .env.test
+          sed -i 's/DOMAIN=your.domain.com/DOMAIN=ci.example.com/' .env.test
+          sed -i 's/OCSERV_ENABLE_SAML_AUTH=false/OCSERV_ENABLE_SAML_AUTH=true/' .env.test
+          ENV_FILE=.env.test scripts/render-ocserv-conf.sh
+          grep -q 'auth = "saml\[config=/etc/ocserv/saml/config.ini\]"' config/ocserv.conf || {
+            echo "SAML auth directive not properly rendered"
+            exit 1
+          }
+          rm -f .env.test config/ocserv.conf
+
+  build:
+    needs: validate
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 60
+    name: Build ocserv-saml (${{ matrix.platform.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Load ocserv version
+        id: version
+        run: |
+          OCSERV_VERSION="$(cat VERSION)"
+          echo "OCSERV_VERSION=${OCSERV_VERSION}" >> "$GITHUB_ENV"
+          echo "ocserv_version=${OCSERV_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore ocserv source cache
+        id: ocserv_source_cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: src/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz
+          key: ${{ runner.os }}-ocserv-source-${{ steps.version.outputs.ocserv_version }}-${{ env.OCSERV_TARBALL_SHA256 }}
+
+      - name: Download ocserv source
+        if: steps.ocserv_source_cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p src
+          curl -fsSL -o src/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz \
+            https://www.infradead.org/ocserv/download/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz
+
+      - name: Verify ocserv source
+        run: |
+          echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ steps.version.outputs.ocserv_version }}.tar.xz" | sha256sum -c -
+
+      - name: Restore lasso source cache
+        id: lasso_source_cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: src/lasso-${{ env.LASSO_VERSION }}.tar.gz
+          key: ${{ runner.os }}-lasso-source-${{ env.LASSO_VERSION }}-${{ env.LASSO_TARBALL_SHA256 }}
+
+      - name: Download lasso source
+        if: steps.lasso_source_cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p src
+          curl -fsSL -o src/lasso-${{ env.LASSO_VERSION }}.tar.gz \
+            "${{ env.LASSO_SOURCE_URL }}"
+
+      - name: Verify lasso source
+        run: |
+          echo "${{ env.LASSO_TARBALL_SHA256 }}  src/lasso-${{ env.LASSO_VERSION }}.tar.gz" | sha256sum -c -
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Login to Registry
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set build date
+        id: date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve build args
+        id: build_args
+        run: |
+          {
+            echo "args<<EOF"
+            echo "ALPINE_IMAGE=${{ matrix.platform.arch == 'amd64' && env.ALPINE_IMAGE_AMD64 || env.ALPINE_IMAGE_ARM64 }}"
+            echo "APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine"
+            echo "OCSERV_VERSION=${{ steps.version.outputs.ocserv_version }}"
+            echo "ALPINE_VERSION=${{ env.ALPINE_VERSION }}"
+            echo "BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and optionally push single-platform image digest
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: Dockerfile.saml
+          platforms: linux/${{ matrix.platform.arch }}
+          tags: ${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          cache-from: type=gha,scope=ocserv-saml-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=ocserv-saml-${{ matrix.platform.arch }}
+          build-args: ${{ steps.build_args.outputs.args }}
+          sbom: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          provenance: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+
+      - name: Export image digest
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        run: |
+          mkdir -p /tmp/digests/ocserv-saml
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/ocserv-saml/${digest#sha256:}"
+
+      - name: Upload image digest
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-ocserv-saml-${{ matrix.platform.arch }}
+          path: /tmp/digests/ocserv-saml/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-manifests:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    name: Merge manifests (ocserv-saml)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Load ocserv version
+        id: version
+        run: |
+          OCSERV_VERSION="$(cat VERSION)"
+          echo "OCSERV_VERSION=${OCSERV_VERSION}" >> "$GITHUB_ENV"
+          echo "ocserv_version=${OCSERV_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Login to Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Download amd64 image digest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: digests-ocserv-saml-amd64
+          path: /tmp/digests
+
+      - name: Download arm64 image digest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: digests-ocserv-saml-arm64
+          path: /tmp/digests
+
+      - name: Publish multi-arch manifests
+        run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.OCSERV_IMAGE_NAME }}"
+          mapfile -t DIGEST_FILES < <(find /tmp/digests -type f | sort)
+
+          if [ "${#DIGEST_FILES[@]}" -ne 2 ]; then
+            printf 'expected 2 image digests for %s, found %s\n' "${IMAGE_REF}" "${#DIGEST_FILES[@]}" >&2
+            exit 1
+          fi
+
+          SOURCES=()
+          for digest_file in "${DIGEST_FILES[@]}"; do
+            SOURCES+=("${IMAGE_REF}@sha256:$(basename "${digest_file}")")
+          done
+
+          docker buildx imagetools create \
+            -t "${IMAGE_REF}:${{ steps.version.outputs.ocserv_version }}-saml" \
+            -t "${IMAGE_REF}:latest-saml" \
+            "${SOURCES[@]}"
