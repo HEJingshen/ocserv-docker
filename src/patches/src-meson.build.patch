@@ -16,7 +16,7 @@
  endif
 
 +if saml_enabled
-+  core_deps += [lasso_dep, glib_dep, gobject_dep, apr_dep]
++  core_deps += [lasso_dep, glib_dep, gobject_dep, apr_dep, libxml_dep]
 +endif
 +
 +

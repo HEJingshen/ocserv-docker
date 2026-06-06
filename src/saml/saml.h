@@ -26,12 +26,15 @@
 #include <config.h>
 #include <sec-mod-auth.h>
 #include <common-config.h>
+#include <glib.h>
 #include <lasso/lasso.h>
 #include <lasso/xml/saml-2.0/samlp2_authn_request.h>
 
 struct saml_vhost_ctx {
     saml_cfg_st *config;
     LassoServer *server;
+    GHashTable *replay_cache;
+    GMutex replay_cache_mutex;
 };
 
 struct saml_ctx_st {
@@ -39,6 +42,7 @@ struct saml_ctx_st {
     struct saml_vhost_ctx *vctx;
     LassoLogin *login;
     LassoSamlp2AuthnRequest *request;
+    char *request_id;
 };
 
 extern const struct auth_mod_st saml_auth_funcs;

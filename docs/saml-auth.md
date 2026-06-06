@@ -154,13 +154,32 @@ docker inspect ocserv:${VERSION}-saml | jq '.[0].Config.Labels'
 
 ### SHA-1签名算法拒绝
 
-根据 [NIST SP 800-131A Rev. 2](https://csrc.nist.gov/pubs/sp/800/131/a/r2/final) 和 [OWASP SAML安全指南](https://cheatsheetseries.owasp.org/cheatsheets/SAML_Security_Cheat_Sheet.html) 建议，实现会自动拒绝使用SHA-1签名算法的SAML断言：
+根据 [NIST SP 800-131A Rev. 2](https://csrc.nist.gov/pubs/sp/800/131/a/r2/final) 和 [OWASP SAML安全指南](https://cheatsheetseries.owasp.org/cheatsheets/SAML_Security_Cheat_Sheet.html) 建议，实现会自动拒绝使用SHA-1签名或摘要算法的SAML断言：
 
 - 拒绝 `RSA-SHA1` 签名
 - 拒绝 `DSA-SHA1` 签名
 - 拒绝 `HMAC-SHA1` 签名
+- 拒绝 XML `SignatureMethod` 或 `DigestMethod` 中的 SHA-1 算法
 
 这提供了应用层的安全加固，即使lasso库可能有内置保护。
+
+### 响应绑定与防重放
+
+SAML认证仅接受 SP-initiated 响应。IdP 返回的 `Response` 和 `SubjectConfirmationData` 必须包含与本次 `AuthnRequest` ID 匹配的 `InResponseTo`，并且断言必须包含以下字段：
+
+- `Response Destination`：必须精确匹配SP的ACS URL
+- `SubjectConfirmationData Recipient`：必须精确匹配SP的ACS URL
+- `SubjectConfirmationData NotOnOrAfter`：必须存在且未过期
+- `Conditions NotOnOrAfter`：必须存在且未过期
+- `AudienceRestriction`：必须包含SP Entity ID
+
+认证通过后，模块会在进程内缓存已消费的 `Response ID`、`Assertion ID` 和 `InResponseTo`，拒绝有效期内重复提交的SAML响应。缓存默认根据断言过期时间失效，异常情况下使用 `replay-cache-ttl` 作为兜底TTL。
+
+```ini
+# 防重放缓存兜底时间（秒）
+# 默认300秒，最大86400秒
+replay-cache-ttl = 300
+```
 
 ### 时钟偏差容忍配置
 
@@ -170,6 +189,7 @@ docker inspect ocserv:${VERSION}-saml | jq '.[0].Config.Labels'
 # 时钟偏差容忍时间（秒）
 # 默认60秒，适用于大多数IdP
 # 如果IdP时钟偏差较大，可增加此值
+# 最大3600秒
 clock-skew-tolerance = 60
 ```
 

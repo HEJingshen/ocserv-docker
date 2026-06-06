@@ -1,6 +1,6 @@
 --- a/src/common-config.h
 +++ b/src/common-config.h
-@@ -61,6 +61,21 @@
+@@ -61,6 +61,22 @@
 	int gid_min;
  } pam_cfg_st;
 
@@ -17,12 +17,13 @@
 +	char *idp_sso_dest_url; /* glib (g_strdup) - IdP SSO URL, freed in vhost_deinit */
 +	char *acs_url;         /* glib (g_strdup) - ACS URL, freed in vhost_deinit */
 +	unsigned long clock_skew_tolerance; /* Clock skew tolerance in seconds (default 60) */
++	unsigned long replay_cache_ttl; /* Replay cache fallback TTL in seconds (default 300) */
 +} saml_cfg_st;
 +
  #define CHECK_TRUE(str)                                                    \
 	((str != NULL &&                                                   \
 	  (strcasecmp(str, "true") == 0 || strcasecmp(str, "yes") == 0)) ? \
-@@ -80,6 +95,8 @@
+@@ -80,6 +96,8 @@
 				const char *str);
  void *oidc_get_brackets_string(void *pool, struct perm_cfg_st *config,
 			       const char *str);
