@@ -137,7 +137,8 @@ RUN set -eux; \
         -Dlz4=enabled \
         -Dlibnl=enabled \
         -Dsaml-auth=enabled; \
-    ninja -C build && DESTDIR=/out ninja -C build install; \
+    ninja -C build; \
+    DESTDIR=/out ninja -C build install; \
     # Copy lasso runtime libraries
     mkdir -p /out/usr/lib; \
     cp -a /usr/lib/liblasso.so* /out/usr/lib/ || true; \
