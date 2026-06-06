@@ -6,8 +6,14 @@ fail() {
     exit 1
 }
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PROJECT_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR=$(
+    unset CDPATH
+    cd -- "$(dirname -- "$0")" && pwd
+)
+PROJECT_ROOT=$(
+    unset CDPATH
+    cd -- "${SCRIPT_DIR}/.." && pwd
+)
 
 ENV_FILE=${ENV_FILE:-"${PROJECT_ROOT}/.env"}
 TEMPLATE_FILE=${OCSERV_CONF_TEMPLATE:-"${PROJECT_ROOT}/config/ocserv.conf.template"}
@@ -112,12 +118,19 @@ esac
 DOMAIN_LENGTH=$(printf '%s' "${DOMAIN}" | wc -c | tr -d ' ')
 [ "${DOMAIN_LENGTH}" -le 253 ] || fail "DOMAIN is too long: ${DOMAIN}"
 
-OLD_IFS=${IFS}
-IFS=.
-set -- ${DOMAIN}
-IFS=${OLD_IFS}
+remaining_domain=${DOMAIN}
+while :; do
+    case "${remaining_domain}" in
+        *.*)
+            LABEL=${remaining_domain%%.*}
+            remaining_domain=${remaining_domain#*.}
+            ;;
+        *)
+            LABEL=${remaining_domain}
+            remaining_domain=
+            ;;
+    esac
 
-for LABEL in "$@"; do
     [ -n "${LABEL}" ] || fail "DOMAIN contains an empty label: ${DOMAIN}"
 
     LABEL_LENGTH=$(printf '%s' "${LABEL}" | wc -c | tr -d ' ')
@@ -128,6 +141,8 @@ for LABEL in "$@"; do
             fail "DOMAIN label must not start or end with a hyphen: ${LABEL}"
             ;;
     esac
+
+    [ -n "${remaining_domain}" ] || break
 done
 
 OUTPUT_DIR=$(dirname -- "${OUTPUT_FILE}")
@@ -180,6 +195,8 @@ awk -v domain="${DOMAIN}" \
     }
 ' "${TEMPLATE_FILE}" > "${TMP_FILE}"
 
+# Match the literal template placeholder.
+# shellcheck disable=SC2016
 if grep -q '\${DOMAIN}' "${TMP_FILE}"; then
     fail "unrendered DOMAIN placeholder remains in generated config"
 fi

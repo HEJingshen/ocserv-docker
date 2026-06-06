@@ -31,7 +31,8 @@ resolve_dir() {
     target=$1
     [ -d "${target}" ] || fail "directory not found: ${target}"
     (
-        CDPATH= cd -- "${target}" && pwd
+        unset CDPATH
+        cd -- "${target}" && pwd
     )
 }
 
@@ -39,8 +40,14 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PROJECT_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR=$(
+    unset CDPATH
+    cd -- "$(dirname -- "$0")" && pwd
+)
+PROJECT_ROOT=$(
+    unset CDPATH
+    cd -- "${SCRIPT_DIR}/.." && pwd
+)
 ENV_FILE="${PROJECT_ROOT}/.env"
 RENDER_SCRIPT="${PROJECT_ROOT}/scripts/render-ocserv-conf.sh"
 CONFIG_DIR="${PROJECT_ROOT}/config"
@@ -283,8 +290,8 @@ run_render() {
 
 run_manage() {
     (
-        CDPATH= cd -- "${PROJECT_ROOT}" && \
-        docker compose --profile tools run --rm ocserv-auth manage >/dev/null
+        unset CDPATH
+        cd -- "${PROJECT_ROOT}" && docker compose --profile tools run --rm ocserv-auth manage >/dev/null
     )
 }
 
