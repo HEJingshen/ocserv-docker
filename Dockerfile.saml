@@ -32,7 +32,7 @@ COPY src/lasso-2.9.0.tar.gz /tmp/lasso.tar.gz
 RUN set -eux; \
     cd /tmp && tar xzf lasso.tar.gz && cd lasso-2.9.0; \
     touch aclocal.m4 Makefile.in configure config.h.in; \
-    ./configure --prefix=/usr --disable-java --disable-perl --disable-php5 --disable-php7 --disable-gtk-doc CFLAGS="-DXMLSEC_CRYPTO=openssl"; \
+    ./configure --prefix=/usr --disable-java --disable-perl --disable-php5 --disable-php7 --disable-gtk-doc --with-default-sign-algo=rsa-sha256 CFLAGS="-DXMLSEC_CRYPTO=openssl"; \
     make -j$(nproc) && make DESTDIR=/out install; \
     rm -rf /tmp/lasso-* /tmp/*.patch
 
