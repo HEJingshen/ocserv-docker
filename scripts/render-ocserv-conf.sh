@@ -199,11 +199,11 @@ awk -v domain="${DOMAIN}" \
     }
 ' "${TEMPLATE_FILE}" > "${TMP_FILE}"
 
-# Match the literal template placeholder.
 # shellcheck disable=SC2016
 if grep -q '\${DOMAIN}' "${TMP_FILE}"; then
     fail "unrendered DOMAIN placeholder remains in generated config"
 fi
+# shellcheck disable=SC2016
 if grep -q '\${HOSTNAME}' "${TMP_FILE}"; then
     fail "unrendered HOSTNAME placeholder remains in generated config"
 fi
