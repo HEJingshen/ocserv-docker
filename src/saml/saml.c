@@ -1085,7 +1085,8 @@ static int saml_validate_response_destination(LassoSamlp2Response *response,
 		return 0;
 
 	fprintf(stderr,
-		"SAML: Invalid Destination on Response.\n");
+		"SAML: Invalid Destination on Response. Expected '%s', got '%s'\n",
+		acs_url, response->parent.Destination);
 	return -1;
 }
 

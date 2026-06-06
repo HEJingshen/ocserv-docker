@@ -1,6 +1,7 @@
 # AI / IDE tooling
 .claude/
 .plan/
+.opencode/
 CLAUDE.md
 AGENTS.md
 
