@@ -115,6 +115,207 @@ idp-cert = /etc/ocserv/saml/idp-cert.pem
 | Shibboleth | 直接使用标准SAML2元数据交换 |
 | Keycloak | 创建SAML Client，导出元数据 |
 
+## Okta SAML 配置指南
+
+本节提供 Okta 作为 Identity Provider 的完整配置步骤。
+
+### 前提条件
+
+- Okta 管理员账户（或具有应用创建权限的账户）
+- VPN 服务器域名（如 `vpn.example.com`）已配置 DNS 解析
+- VPN 服务器 443 端口（TCP/UDP）已开放
+- 已构建 SAML 版本的 ocserv Docker 镜像
+
+### Step 1: 在 Okta 创建 SAML 应用
+
+1. 登录 Okta Admin Console（`https://your-org.okta.com`）
+2. 导航到 **Applications** → **Applications**
+3. 点击 **Create App Integration**
+4. 在 **Sign-in method** 中选择 **SAML 2.0**
+5. 点击 **Next**
+
+### Step 2: 配置 General Settings
+
+| 字段 | 值 |
+|:--|:--|
+| **App name** | `VPN - your-domain.com`（如 `VPN - dev.hokingson.com`）|
+| **App logo** | 可选，上传 VPN 图标 |
+| **App visibility** | 勾选 **Display application icon to users** |
+
+点击 **Next**。
+
+### Step 3: 配置 SAML Settings（关键步骤）
+
+#### A. SAML 通用设置
+
+| 字段 | 值 | 说明 |
+|:--|:--|:--|
+| **Single sign-on URL** | `https://your-domain/+CSCOE+/saml/sp/acs` | ACS 端点，必须使用 AnyConnect SSO-v2 路径 |
+| **Recipient URL** | `https://your-domain/+CSCOE+/saml/sp/acs` | 同 Single sign-on URL |
+| **Destination URL** | `https://your-domain/+CSCOE+/saml/sp/acs` | 同 Single sign-on URL |
+| **Audience URI (SP Entity ID)** | `https://your-domain` | SP Entity ID，与 SP 元数据中的 entityID 一致 |
+| **Default RelayState** | 留空 | 不需要 |
+
+> **重要**: ACS URL 必须使用 `/+CSCOE+/saml/sp/acs` 路径，这是 Cisco AnyConnect SSO-v2 协议的标准路径。不要使用其他路径（如 `/SAML2/POST`）。
+
+#### B. 用户属性和声明（Attribute Statements）
+
+在 **Attribute Statements (Optional)** 部分添加：
+
+| Name | Name format | Value |
+|:--|:--|:--|
+| `Username` | Unspecified | `user.userName` |
+| `Email` | Unspecified | `user.email` |
+| `FirstName` | Unspecified | `user.firstName` |
+| `LastName` | Unspecified | `user.lastName` |
+
+#### C. Name ID 设置
+
+| 字段 | 值 |
+|:--|:--|
+| **Name ID format** | `EmailAddress` |
+| **Application username** | `Okta username` |
+| **Update application username on** | `Create and update` |
+
+#### D. 签名设置
+
+| 字段 | 值 | 说明 |
+|:--|:--|:--|
+| **Signature Algorithm** | `RSA-SHA256` | **必须使用 SHA256**，项目拒绝 SHA-1 |
+| **Assertion Signature** | `Sign assertion` | 签名断言 |
+| **Response Signature** | `Sign response` | 可选，推荐启用 |
+| **Digest Algorithm** | `SHA256` | **必须使用 SHA256** |
+| **Assertion Encryption** | `Unencrypted` | ocserv 不需要加密断言 |
+| **Enable Single Logout** | 不勾选 | SSO-v2 不使用 SAML SLO |
+| **Honor Force Authentication** | 勾选 | 推荐启用 |
+
+点击 **Next** → **Finish**。
+
+### Step 4: 获取 Okta IdP 元数据
+
+1. 在应用详情页，点击 **Sign On** 标签
+2. 点击 **View SAML setup instructions**
+3. 找到 **Identity Provider Metadata** 链接（格式为 `https://your-org.okta.com/app/xxxxx/sso/saml/metadata`）
+4. 下载并保存为 `config/saml/idp-metadata.xml`：
+
+```bash
+curl -fsSL -o config/saml/idp-metadata.xml \
+  "https://your-org.okta.com/app/xxxxx/sso/saml/metadata"
+```
+
+### Step 5: 生成 SP 证书和私钥
+
+```bash
+# 生成 2048 位 RSA 私钥
+openssl genrsa -out config/saml/sp-key.pem 2048
+
+# 生成 10 年有效期自签名证书，将 CN 替换为你的 VPN 域名
+openssl req -new -x509 -key config/saml/sp-key.pem \
+  -out config/saml/sp-cert.pem -days 3650 \
+  -subj "/CN=https://your-domain"
+
+# 设置私钥权限
+chmod 600 config/saml/sp-key.pem
+```
+
+### Step 6: 创建 SP 元数据文件
+
+创建 `config/saml/sp-metadata.xml`，替换域名和证书内容：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata"
+  entityID="https://your-domain">
+  <SPSSODescriptor AuthnRequestsSigned="true"
+    WantAssertionsSigned="true"
+    protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>
+<!-- 插入 sp-cert.pem 的内容（去掉 BEGIN/END 行） -->
+          </ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </KeyDescriptor>
+    <AssertionConsumerService
+      Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+      Location="https://your-domain/+CSCOE+/saml/sp/acs"
+      index="0" isDefault="true"/>
+  </SPSSODescriptor>
+</EntityDescriptor>
+```
+
+自动插入证书：
+
+```bash
+CERT=$(grep -v "BEGIN\|END" config/saml/sp-cert.pem | tr -d '\n')
+sed -i "s|<!-- 插入.*-->|${CERT}|" config/saml/sp-metadata.xml
+```
+
+### Step 7: 配置 ocserv SAML
+
+创建 `config/saml/config.ini`：
+
+```ini
+sp-metadata-file = /etc/ocserv/saml/sp-metadata.xml
+sp-keyfile = /etc/ocserv/saml/sp-key.pem
+sp-cert = /etc/ocserv/saml/sp-cert.pem
+idp-metadata-file = /etc/ocserv/saml/idp-metadata.xml
+clock-skew-tolerance = 60
+replay-cache-ttl = 300
+```
+
+在 `ocserv.conf` 中启用 SAML：
+
+```conf
+auth = "saml[config=/etc/ocserv/saml/config.ini]"
+```
+
+> **注意**: 确保 `default-domain` 配置正确，SSO-v2 XML 使用此值填充 URL：
+> ```conf
+> default-domain = your-domain
+> ```
+
+### Step 8: 分配用户
+
+1. 在 Okta 应用详情页，点击 **Assignments** 标签
+2. 点击 **Assign** → **Assign to People** 或 **Assign to Groups**
+3. 选择需要 VPN 访问权限的用户或组
+4. 点击 **Save and Go Back** → **Done**
+
+### 启动服务
+
+```bash
+docker compose --profile saml up -d ocserv-saml
+```
+
+### 验证连接
+
+1. 使用 Cisco AnyConnect 客户端连接 `https://your-domain`
+2. AnyConnect 自动打开内嵌浏览器，跳转到 Okta 登录页
+3. 输入 Okta 凭据完成认证
+4. 认证成功后 VPN 自动连接
+
+### 常见问题排查
+
+| 问题 | 原因 | 解决方法 |
+|:--|:--|:--|
+| AnyConnect 提示 "connection attempt failed" | ACS URL 配置不正确 | 确认 Okta 和 SP 元数据中 ACS URL 为 `/+CSCOE+/saml/sp/acs` |
+| Okta 报错 "The SAML assertion is invalid" | SP Entity ID 不匹配 | 确认 Okta Audience URI 与 SP 元数据 entityID 一致 |
+| 认证成功但 VPN 未连接 | sso-token 流程失败 | 检查 ocserv 日志中 SAML 相关错误 |
+| 签名验证失败 | SHA-1 算法被拒绝 | 确认 Okta Signature Algorithm 设为 RSA-SHA256 |
+| 断言过期 | 服务器时钟偏差过大 | 增加 `clock-skew-tolerance` 值（最大 3600 秒）|
+| IdP 元数据无效 | Okta 证书轮换 | 重新下载 IdP 元数据文件 |
+| 用户无法看到应用 | 未分配用户 | 在 Okta Assignments 中分配用户或组 |
+
+### Okta 参考文档
+
+- [Okta SAML 概念](https://developer.okta.com/docs/concepts/saml/)
+- [创建私有 SSO 集成](https://developer.okta.com/docs/guides/add-private-app/main/)
+- [构建 SSO 集成](https://developer.okta.com/docs/guides/build-sso-integration/saml2/main/)
+- [SAML 常见问题](https://developer.okta.com/docs/concepts/saml/faqs/)
+
 ### AnyConnect SSO-v2 协议
 
 本实现使用 Cisco AnyConnect **SSO-v2** 协议，支持 AnyConnect 内嵌浏览器完成 SAML 认证：
