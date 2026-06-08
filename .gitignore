@@ -39,5 +39,8 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
+# Backup files
+*.bak
+
 # Log files
 *.log

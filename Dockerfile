@@ -72,7 +72,8 @@ RUN set -eux; \
         -Dseccomp=disabled \
         -Dlz4=enabled \
         -Dlibnl=enabled; \
-    ninja -C build && DESTDIR=/out ninja -C build install; \
+    ninja -C build; \
+    DESTDIR=/out ninja -C build install; \
     rm -rf /tmp/ocserv-*
 
 # Stage 2: Runtime image

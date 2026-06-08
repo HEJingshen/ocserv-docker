@@ -94,7 +94,7 @@
  
 +#ifdef HAVE_SAML
 +	if ((ws->selected_auth->type & AUTH_TYPE_SAML) &&
-+	    strncmp(ws->req.url, "/", strlen(ws->req.url)) != 0) {
++	    strcmp(ws->req.url, "/") != 0) {
 +		ws->sid_set = 0;
 +		return post_auth_handler(ws, http_ver);
 +	}
@@ -180,7 +180,7 @@
  
  		if (ws->selected_auth->type & AUTH_TYPE_USERNAME_PASS) {
  			ret = str_append_str(&str, OC_LOGIN_FORM_INPUT_USER);
-@@ -516,7 +624,338 @@
+@@ -516,7 +624,452 @@
  int get_auth_handler(worker_st *ws, unsigned int http_ver)
  {
  	return get_auth_handler2(ws, http_ver, NULL, 0);
@@ -217,11 +217,6 @@
 +		return -1;
 +
 +	ret = cstp_puts(ws, "Connection: Keep-Alive\r\n");
-+	if (ret < 0)
-+		return -1;
-+
-+	ret = cstp_puts(ws,
-+			"Set-Cookie: webvpncontext=; expires=Thu, 01 Jan 1970 22:00:00 GMT; path=/; Secure\r\n");
 +	if (ret < 0)
 +		return -1;
 +
@@ -454,36 +449,109 @@
 +	const char *logon_url = "/+CSCOE+/logon.html?a0=0&a1=&a2=&a3=1";
 +	const char *login_url = "/+CSCOE+/saml_ac_login.html";
 +	const char *logout_url = "/+CSCOE+/saml/sp/logout";
++	int ret;
 +	int size;
 +
 +	if (strncmp(ws->req.url, logon_url, strlen(logon_url)) == 0) {
 +		cstp_cork(ws);
-+		cstp_printf(ws, "HTTP/1.%u 302 Moved Temporarily\r\n",
++		ret = cstp_printf(ws, "HTTP/1.%u 302 Moved Temporarily\r\n",
 +			    http_ver);
-+		cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
-+		cstp_puts(ws, "Content-Length: 0\r\n");
-+		cstp_puts(ws, "Cache-Control: no-store\r\n");
-+		cstp_puts(ws, "Pragma: no-cache\r\n");
-+		cstp_puts(ws, "Connection: Keep-Alive\r\n");
-+		cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
-+		cstp_puts(ws,
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Content-Length: 0\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Cache-Control: no-store\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Pragma: no-cache\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Connection: Keep-Alive\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws,
 +			  "Location: /+CSCOE+/saml_ac_login.html\r\n");
-+		cstp_puts(ws, "\r\n");
-+		cstp_uncork(ws);
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_uncork(ws);
++		if (ret < 0)
++			return -1;
 +		return 0;
 +	} else if (strncmp(ws->req.url, login_url,
 +			    strlen(login_url)) == 0) {
 +		cstp_cork(ws);
-+		cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
-+		cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
-+		cstp_puts(ws, "Cache-Control: no-store\r\n");
-+		cstp_puts(ws, "Pragma: no-cache\r\n");
-+		cstp_puts(ws, "Connection: Keep-Alive\r\n");
-+		cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++		ret = cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Cache-Control: no-store\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Pragma: no-cache\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Connection: Keep-Alive\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
 +		size = sizeof(saml_success_page) - 1;
-+		cstp_printf(ws, "Content-Length: %u\r\n", (unsigned)size);
-+		cstp_printf(ws, "\r\n%s", saml_success_page);
-+		cstp_uncork(ws);
++		ret = cstp_printf(ws, "Content-Length: %u\r\n", (unsigned)size);
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_printf(ws, "\r\n%s", saml_success_page);
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_uncork(ws);
++		if (ret < 0)
++			return -1;
 +		return 0;
 +	} else if (strncmp(ws->req.url, logout_url,
 +			    strlen(logout_url)) == 0) {
@@ -494,22 +562,68 @@
 +			"<p>You have been logged out. You can close this tab.</p>\n"
 +			"</body></html>\n";
 +		cstp_cork(ws);
-+		cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
-+		cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
-+		cstp_puts(ws, "Cache-Control: no-store\r\n");
-+		cstp_puts(ws, "Pragma: no-cache\r\n");
-+		cstp_puts(ws, "Connection: Keep-Alive\r\n");
-+		cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
-+		cstp_puts(ws, "Set-Cookie: webvpncontext=; "
++		ret = cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Content-Type: text/html; charset=utf-8\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Cache-Control: no-store\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Pragma: no-cache\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Connection: Keep-Alive\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Set-Cookie: webvpncontext=; "
 +			       "Path=/; Secure; HttpOnly\r\n");
-+		cstp_puts(ws, "Set-Cookie: acSamlv2Token=; "
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Set-Cookie: acSamlv2Token=; "
 +			       "Path=/; Secure\r\n");
-+		cstp_puts(ws, "Set-Cookie: tg=; "
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_puts(ws, "Set-Cookie: tg=; "
 +			       "Path=/; Secure\r\n");
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
 +		size = sizeof(logout_page) - 1;
-+		cstp_printf(ws, "Content-Length: %u\r\n", (unsigned)size);
-+		cstp_printf(ws, "\r\n%s", logout_page);
-+		cstp_uncork(ws);
++		ret = cstp_printf(ws, "Content-Length: %u\r\n", (unsigned)size);
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_printf(ws, "\r\n%s", logout_page);
++		if (ret < 0) {
++			cstp_uncork(ws);
++			return -1;
++		}
++		ret = cstp_uncork(ws);
++		if (ret < 0)
++			return -1;
 +		return 0;
 +	} else {
 +		return get_auth_handler(ws, http_ver);
@@ -519,7 +633,7 @@
  
  /* Extract the username from a certificate into ws->cert_username.
   * Returns 0 on success, a negative GnuTLS error code on failure.
-@@ -1089,6 +1528,13 @@
+@@ -1089,6 +1642,13 @@
  		success_msg_foot = talloc_strdup(ws, ocv3_success_msg_foot);
  		success_msg_head_size = sizeof(ocv3_success_msg_head) - 1;
  		success_msg_foot_size = strlen(success_msg_foot);
@@ -533,7 +647,7 @@
  	} else {
  		success_msg_head = oc_success_msg_head;
  		success_msg_foot = NULL;
-@@ -1113,6 +1559,11 @@
+@@ -1113,6 +1673,11 @@
  		success_msg_foot_size = strlen(success_msg_foot);
  	}
  
@@ -545,7 +659,7 @@
  	oc_base64_encode((char *)ws->cookie, sizeof(ws->cookie),
  			 (char *)str_cookie, str_cookie_size);
  
-@@ -1139,4 +1590,11 @@
+@@ -1139,4 +1704,11 @@
 -	ret = cstp_puts(ws, "Content-Type: text/xml\r\n");
 +#ifdef HAVE_SAML
 +	if (ws->selected_auth->type & AUTH_TYPE_SAML && imsg == NULL) {
@@ -558,7 +672,7 @@
  	if (ret < 0)
  		goto fail;
  
-@@ -1178,7 +1636,17 @@
+@@ -1178,7 +1750,17 @@
  		oclog(ws, LOG_SENSITIVE, "sent session id: %s",
  		      calc_safe_id(ws->sid, sizeof(ws->sid), safe_id,
  				   sizeof(safe_id)));
@@ -576,7 +690,7 @@
  
  	ret = cstp_printf(ws, "Set-Cookie: webvpn=%s; Secure; HttpOnly\r\n",
  			  str_cookie);
-@@ -1522,6 +1990,9 @@
+@@ -1522,6 +2104,9 @@
  #endif
  
  #define USERNAME_FIELD "username"
@@ -586,7 +700,7 @@
  #define GROUPNAME_FIELD "group%5flist"
  #define GROUPNAME_FIELD2 "group_list"
  #define GROUPNAME_FIELD_XML "group-select"
-@@ -1546,6 +2017,32 @@
+@@ -1546,6 +2131,32 @@
  	if (req->body_length > 0) {
  		oclog(ws, LOG_HTTP_DEBUG, "POST body: '%.*s'",
  		      (int)req->body_length, req->body);
@@ -619,7 +733,7 @@
  	}
  
  	if (ws->auth_state == S_AUTH_INACTIVE) {
-@@ -1635,6 +2132,28 @@
+@@ -1635,6 +2246,28 @@
  			}
  		}
  		talloc_free(groupname);
@@ -648,7 +762,7 @@
  
  #ifdef SUPPORT_OIDC_AUTH
  		if (ws->selected_auth->type & AUTH_TYPE_OIDC) {
-@@ -1804,6 +2323,31 @@
+@@ -1804,6 +2437,31 @@
  			areq.password = password;
  		}
  
@@ -680,7 +794,7 @@
  		if (areq.password != NULL) {
  			if (ws->sid_set != 0) {
  				areq.sid.data = ws->sid;
-@@ -1854,6 +2398,14 @@
+@@ -1854,6 +2512,14 @@
  		      ws->username);
  		ws->auth_state = S_AUTH_REQ;
  
@@ -695,7 +809,7 @@
  		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
  			ret = basic_auth_handler(ws, http_ver, msg);
  		} else {
-@@ -1887,17 +2439,25 @@
+@@ -1887,17 +2553,25 @@
  	oclog(ws, LOG_HTTP_DEBUG, "user '%s' obtained cookie", ws->username);
  	ws->auth_state = S_AUTH_COOKIE;
  
