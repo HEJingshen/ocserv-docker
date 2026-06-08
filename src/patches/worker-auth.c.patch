@@ -1,10 +1,11 @@
 --- a/src/worker-auth.c	2026-04-17 05:27:59
 +++ b/src/worker-auth.c	2026-06-06 14:54:27
-@@ -85,6 +85,55 @@
+@@ -85,6 +85,56 @@
  
  #define OC_LOGIN_END "</form></auth>\n</config-auth>"
  
 +#ifdef HAVE_SAML
++#include <ctype.h>
 +#define OC_SAML_LOGIN_START \
 +	"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
 +	"<config-auth client=\"vpn\" type=\"auth-request\" aggregate-auth-version=\"2\">\n" \
@@ -27,7 +28,7 @@
 +
 +#define ACS_RESPONSE_FORM \
 +	"<html>\n<head>\n<script>\nfunction submit_saml() {\n" \
-+	"document.cookie = \"webvpncontext=%s; Max-Age=%u; webvpnlogin=1; path=/; secure\";\n" \
++	"document.cookie = \"webvpncontext=%s; Max-Age=%u; webvpnlogin=1; path=/; secure; HttpOnly\";\n" \
 +	"document.getElementById('samlform').submit();\n" \
 +	"}\n</script>\n</head>\n<body onload=\"submit_saml()\">\n" \
 +	"<form id=\"samlform\" action=\"/+webvpn+/index.html\" method=\"POST\">\n" \
@@ -56,7 +57,7 @@
  #define OC_LOGIN_FORM_INPUT_USER \
  	"<input type=\"text\" name=\"username\" label=\"Username:\" />\n"
  
-@@ -114,6 +163,13 @@
+@@ -114,6 +164,13 @@
  #ifdef SUPPORT_OIDC_AUTH
  static int oidc_auth_handler(worker_st *ws, unsigned int http_ver);
  #endif
@@ -70,7 +71,7 @@
  
  int ws_switch_auth_to(struct worker_st *ws, unsigned int auth)
  {
-@@ -225,8 +281,16 @@
+@@ -225,8 +282,16 @@
  			login_start = OCV3_LOGIN_START;
  		login_end = OCV3_LOGIN_END;
  	} else {
@@ -87,7 +88,7 @@
  	}
  
  	if ((ws->selected_auth->type & AUTH_TYPE_GSSAPI) &&
-@@ -238,6 +302,14 @@
+@@ -238,6 +303,14 @@
  			return post_auth_handler(ws, http_ver);
  	}
  
@@ -102,7 +103,7 @@
  	str_init(&str, ws);
  
  	oclog(ws, LOG_HTTP_DEBUG, "HTTP sending: 200 OK");
-@@ -279,11 +351,25 @@
+@@ -279,11 +352,25 @@
  
  	if (ws->auth_state == S_AUTH_REQ) {
  		/* Password Form */
@@ -128,7 +129,7 @@
  		ret = str_append_str(&str, login_start);
  		if (ret < 0) {
  			ret = -1;
-@@ -291,6 +377,7 @@
+@@ -291,6 +378,7 @@
  		}
  
  		ret = str_append_printf(&str, OC_LOGIN_FORM_START, pmsg);
@@ -136,7 +137,7 @@
  		if (ret < 0) {
  			ret = -1;
  			goto cleanup;
-@@ -316,10 +403,24 @@
+@@ -316,10 +404,24 @@
  
  	} else {
  		/* Username / Groups Form */
@@ -161,7 +162,7 @@
  		if (ret < 0) {
  			ret = -1;
  			goto cleanup;
-@@ -334,11 +435,17 @@
+@@ -334,11 +436,17 @@
  			}
  		}
  
@@ -179,7 +180,7 @@
  
  		if (ws->selected_auth->type & AUTH_TYPE_USERNAME_PASS) {
  			ret = str_append_str(&str, OC_LOGIN_FORM_INPUT_USER);
-@@ -516,7 +623,308 @@
+@@ -516,7 +624,338 @@
  int get_auth_handler(worker_st *ws, unsigned int http_ver)
  {
  	return get_auth_handler2(ws, http_ver, NULL, 0);
@@ -324,6 +325,25 @@
 +		goto cleanup;
 +	}
 +
++	/* Validate that SAMLResponse contains only base64 characters.
++	 * SAML 2.0 POST binding requires base64 encoding; any HTML-special
++	 * characters (<, >, ", ', &) are not valid base64 and indicate
++	 * a malformed or malicious response (prevents XSS in the form below).
++	 */
++	{
++		const char *p = unescaped_saml_response;
++		while (*p != '\0') {
++			if (!isalnum((unsigned char)*p) &&
++			    *p != '+' && *p != '/' && *p != '=' &&
++			    *p != '\n' && *p != '\r' && *p != ' ') {
++				oclog(ws, LOG_ERR,
++				       "SAML ACS: invalid character in SAMLResponse");
++				ret = -1;
++				goto cleanup;
++			}
++			p++;
++		}
++	}
 +	oclog(ws, LOG_HTTP_DEBUG, "HTTP sending: 200 OK (ACS bridge)");
 +	cstp_cork(ws);
 +	ret = cstp_printf(ws, "HTTP/1.%u 200 OK\r\n", http_ver);
@@ -365,6 +385,17 @@
 +		goto cleanup;
 +	}
 +
++	ret = cstp_puts(ws, "X-Frame-Options: SAMEORIGIN\r\n");
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
++
++	ret = cstp_puts(ws, "Content-Security-Policy: default-src 'self' 'unsafe-inline'\r\n");
++	if (ret < 0) {
++		ret = -1;
++		goto cleanup;
++	}
 +	ret = str_append_printf(&str, ACS_RESPONSE_FORM,
 +				context,
 +				(unsigned)WSCONFIG(ws)->cookie_timeout,
@@ -488,7 +519,7 @@
  
  /* Extract the username from a certificate into ws->cert_username.
   * Returns 0 on success, a negative GnuTLS error code on failure.
-@@ -1089,6 +1497,13 @@
+@@ -1089,6 +1528,13 @@
  		success_msg_foot = talloc_strdup(ws, ocv3_success_msg_foot);
  		success_msg_head_size = sizeof(ocv3_success_msg_head) - 1;
  		success_msg_foot_size = strlen(success_msg_foot);
@@ -502,7 +533,7 @@
  	} else {
  		success_msg_head = oc_success_msg_head;
  		success_msg_foot = NULL;
-@@ -1113,6 +1528,11 @@
+@@ -1113,6 +1559,11 @@
  		success_msg_foot_size = strlen(success_msg_foot);
  	}
  
@@ -514,7 +545,7 @@
  	oc_base64_encode((char *)ws->cookie, sizeof(ws->cookie),
  			 (char *)str_cookie, str_cookie_size);
  
-@@ -1139,4 +1559,11 @@
+@@ -1139,4 +1590,11 @@
 -	ret = cstp_puts(ws, "Content-Type: text/xml\r\n");
 +#ifdef HAVE_SAML
 +	if (ws->selected_auth->type & AUTH_TYPE_SAML && imsg == NULL) {
@@ -527,7 +558,7 @@
  	if (ret < 0)
  		goto fail;
  
-@@ -1178,7 +1605,17 @@
+@@ -1178,7 +1636,17 @@
  		oclog(ws, LOG_SENSITIVE, "sent session id: %s",
  		      calc_safe_id(ws->sid, sizeof(ws->sid), safe_id,
  				   sizeof(safe_id)));
@@ -545,7 +576,7 @@
  
  	ret = cstp_printf(ws, "Set-Cookie: webvpn=%s; Secure; HttpOnly\r\n",
  			  str_cookie);
-@@ -1522,6 +1959,9 @@
+@@ -1522,6 +1990,9 @@
  #endif
  
  #define USERNAME_FIELD "username"
@@ -555,7 +586,7 @@
  #define GROUPNAME_FIELD "group%5flist"
  #define GROUPNAME_FIELD2 "group_list"
  #define GROUPNAME_FIELD_XML "group-select"
-@@ -1546,6 +1986,32 @@
+@@ -1546,6 +2017,32 @@
  	if (req->body_length > 0) {
  		oclog(ws, LOG_HTTP_DEBUG, "POST body: '%.*s'",
  		      (int)req->body_length, req->body);
@@ -588,7 +619,7 @@
  	}
  
  	if (ws->auth_state == S_AUTH_INACTIVE) {
-@@ -1635,6 +2101,28 @@
+@@ -1635,6 +2132,28 @@
  			}
  		}
  		talloc_free(groupname);
@@ -617,7 +648,7 @@
  
  #ifdef SUPPORT_OIDC_AUTH
  		if (ws->selected_auth->type & AUTH_TYPE_OIDC) {
-@@ -1804,6 +2292,31 @@
+@@ -1804,6 +2323,31 @@
  			areq.password = password;
  		}
  
@@ -649,7 +680,7 @@
  		if (areq.password != NULL) {
  			if (ws->sid_set != 0) {
  				areq.sid.data = ws->sid;
-@@ -1854,6 +2367,14 @@
+@@ -1854,6 +2398,14 @@
  		      ws->username);
  		ws->auth_state = S_AUTH_REQ;
  
@@ -664,7 +695,7 @@
  		if (ws->selected_auth->type & AUTH_TYPE_GSSAPI) {
  			ret = basic_auth_handler(ws, http_ver, msg);
  		} else {
-@@ -1887,17 +2408,25 @@
+@@ -1887,17 +2439,25 @@
  	oclog(ws, LOG_HTTP_DEBUG, "user '%s' obtained cookie", ws->username);
  	ws->auth_state = S_AUTH_COOKIE;
  
