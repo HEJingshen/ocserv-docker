@@ -27,6 +27,7 @@
 #include <sec-mod-auth.h>
 #include <common-config.h>
 #include <glib.h>
+#include <apr_time.h>
 #include <lasso/lasso.h>
 #include <lasso/xml/saml-2.0/samlp2_authn_request.h>
 
@@ -35,6 +36,7 @@ struct saml_vhost_ctx {
     LassoServer *server;
     GHashTable *replay_cache;
     GMutex replay_cache_mutex;
+    apr_time_t last_prune_time;
 };
 
 struct saml_ctx_st {

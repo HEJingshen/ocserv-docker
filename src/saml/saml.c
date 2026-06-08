@@ -889,10 +889,8 @@ static int saml_validate_subject_binding(
 
 static int saml_validate_subject_time_bounds(
 	LassoSaml2SubjectConfirmationData *scd,
-	unsigned long tolerance_us)
+	unsigned long tolerance_us, apr_time_t now)
 {
-	apr_time_t now = apr_time_now();
-
 	if (saml_validate_time_bound(scd->NotBefore, now, tolerance_us, 1,
 				     "SAML: Invalid timestamp in NotBefore in SubjectConfirmationData.\n",
 				     "SAML: NotBefore in SubjectConfirmationData was in the future.\n") != 0)
@@ -906,7 +904,8 @@ static int saml_validate_subject_time_bounds(
 static int saml_validate_subject_data(
 	LassoSaml2SubjectConfirmationData *scd,
 	const char *url, const char *request_id,
-	unsigned long tolerance_us, apr_time_t *not_on_or_after)
+	unsigned long tolerance_us, apr_time_t now,
+	apr_time_t *not_on_or_after)
 {
 	if (saml_validate_subject_required_fields(scd) != 0)
 		return -1;
@@ -914,7 +913,7 @@ static int saml_validate_subject_data(
 	if (saml_validate_subject_binding(scd, url, request_id) != 0)
 		return -1;
 
-	if (saml_validate_subject_time_bounds(scd, tolerance_us) != 0)
+	if (saml_validate_subject_time_bounds(scd, tolerance_us, now) != 0)
 		return -1;
 
 	if (not_on_or_after)
@@ -925,7 +924,7 @@ static int saml_validate_subject_data(
 
 static int saml_validate_subject(LassoSaml2Assertion *assertion,
 				 const char *url, const char *request_id,
-				 unsigned long tolerance_us,
+				 unsigned long tolerance_us, apr_time_t now,
 				 apr_time_t *not_on_or_after,
 				 LassoSaml2SubjectConfirmationData **out_scd)
 {
@@ -936,7 +935,7 @@ static int saml_validate_subject(LassoSaml2Assertion *assertion,
 		return -1;
 
 	if (saml_validate_subject_data(scd, url, request_id, tolerance_us,
-				       not_on_or_after) != 0)
+				       now, not_on_or_after) != 0)
 		return -1;
 
 	if (out_scd)
@@ -947,10 +946,9 @@ static int saml_validate_subject(LassoSaml2Assertion *assertion,
 
 /* Validate Assertion Conditions NotBefore/NotOnOrAfter time constraints */
 static int saml_validate_conditions(LassoSaml2Assertion *assertion,
-					  unsigned long tolerance_us)
+					  unsigned long tolerance_us,
+					  apr_time_t now)
 {
-	apr_time_t now;
-
 	if (assertion->Conditions == NULL) {
 		fprintf(stderr, "SAML: Assertion Conditions are required.\n");
 		return -1;
@@ -962,8 +960,6 @@ static int saml_validate_conditions(LassoSaml2Assertion *assertion,
 			"SAML: Conditions NotOnOrAfter is required.\n");
 		return -1;
 	}
-
-	now = apr_time_now();
 
 	if (saml_validate_time_bound(assertion->Conditions->NotBefore, now,
 				     tolerance_us, 1,
@@ -1062,8 +1058,7 @@ static int saml_store_name_id(struct saml_ctx_st *ctx)
 		return -1;
 	}
 
-	strncpy(ctx->username, name_id, sizeof(ctx->username) - 1);
-	ctx->username[sizeof(ctx->username) - 1] = '\0';
+	strlcpy(ctx->username, name_id, sizeof(ctx->username));
 	return 0;
 }
 
@@ -1140,19 +1135,20 @@ static LassoSaml2Assertion *saml_get_single_assertion(LassoSamlp2Response *respo
 
 static int saml_xml_algorithm_uses_sha1(const xmlChar *algorithm)
 {
-	char *lower;
-	int uses_sha1;
+	const char *suffix = SAML_SHA1_ALGORITHM_SUFFIX;
+	size_t alg_len, suffix_len;
 
 	if (algorithm == NULL)
 		return 0;
 
-	lower = g_ascii_strdown((const char *)algorithm, -1);
-	if (lower == NULL)
+	alg_len = strlen((const char *)algorithm);
+	suffix_len = strlen(suffix);
+	if (alg_len < suffix_len)
 		return 0;
 
-	uses_sha1 = g_str_has_suffix(lower, SAML_SHA1_ALGORITHM_SUFFIX);
-	g_free(lower);
-	return uses_sha1;
+	return g_ascii_strcasecmp(
+		(const char *)algorithm + alg_len - suffix_len,
+		suffix) == 0;
 }
 
 static int saml_xml_is_signature_or_digest_method(xmlNode *node)
@@ -1407,10 +1403,10 @@ static int saml_replay_cache_store(struct saml_ctx_st *ctx,
 				   LassoSamlp2Response *response,
 				   LassoSaml2Assertion *assertion,
 				   LassoSaml2SubjectConfirmationData *scd,
+				   apr_time_t now,
 				   apr_time_t expires_at)
 {
 	struct saml_vhost_ctx *vctx = ctx->vctx;
-	apr_time_t now = apr_time_now();
 	char *keys[3] = { NULL, NULL, NULL };
 	int rc = -1;
 
@@ -1420,7 +1416,10 @@ static int saml_replay_cache_store(struct saml_ctx_st *ctx,
 		    APR_USEC_PER_SEC;
 
 	g_mutex_lock(&vctx->replay_cache_mutex);
-	saml_replay_cache_prune_locked(vctx, now);
+	if (now - vctx->last_prune_time > (apr_time_t)30 * APR_USEC_PER_SEC) {
+		saml_replay_cache_prune_locked(vctx, now);
+		vctx->last_prune_time = now;
+	}
 
 	if (saml_replay_cache_prepare_keys(keys, response, assertion, scd) != 0)
 		goto cleanup;
@@ -1520,12 +1519,13 @@ static int saml_validate_assertion_context(
 	struct saml_ctx_st *ctx,
 	LassoSaml2Assertion *assertion,
 	unsigned long tolerance_us,
+	apr_time_t now,
 	struct saml_validated_response *validated)
 {
 	apr_time_t subject_expires_at = 0;
 	apr_time_t conditions_expires_at;
 
-	if (saml_validate_conditions(assertion, tolerance_us) != 0)
+	if (saml_validate_conditions(assertion, tolerance_us, now) != 0)
 		return -1;
 	conditions_expires_at =
 	    saml_parse_timestamp(assertion->Conditions->NotOnOrAfter);
@@ -1534,7 +1534,7 @@ static int saml_validate_assertion_context(
 		return -1;
 
 	if (saml_validate_subject(assertion, ctx->vctx->config->acs_url,
-				  ctx->request_id, tolerance_us,
+				  ctx->request_id, tolerance_us, now,
 				  &subject_expires_at, &validated->scd) != 0)
 		return -1;
 
@@ -1547,6 +1547,7 @@ static int saml_validate_assertion_context(
 
 static int saml_validate_processed_response(
 	struct saml_ctx_st *ctx,
+	apr_time_t now,
 	struct saml_validated_response *validated)
 {
 	unsigned long tolerance_us;
@@ -1567,12 +1568,13 @@ static int saml_validate_processed_response(
 
 	tolerance_us = ctx->vctx->config->clock_skew_tolerance * 1000000;
 	return saml_validate_assertion_context(ctx, validated->assertion,
-					       tolerance_us, validated);
+					       tolerance_us, now, validated);
 }
 
 static int saml_validate_authn_response(
 	struct saml_ctx_st *ctx,
 	const char *saml_response,
+	apr_time_t now,
 	struct saml_validated_response *validated)
 {
 	if (saml_process_authn_response(ctx, saml_response) != 0)
@@ -1581,7 +1583,7 @@ static int saml_validate_authn_response(
 	if (saml_store_name_id(ctx) != 0)
 		return -1;
 
-	return saml_validate_processed_response(ctx, validated);
+	return saml_validate_processed_response(ctx, now, validated);
 }
 
 static int saml_auth_pass(void *_ctx, const char *saml_response,
@@ -1589,17 +1591,20 @@ static int saml_auth_pass(void *_ctx, const char *saml_response,
 {
 	struct saml_ctx_st *ctx = _ctx;
 	struct saml_validated_response validated = { 0 };
+	apr_time_t now;
 
 	(void)pass_len;
+
+	now = apr_time_now();
 
 	if (saml_reject_sha1_xml_algorithms(saml_response) != 0)
 		goto auth_fail;
 
-	if (saml_validate_authn_response(ctx, saml_response, &validated) != 0)
+	if (saml_validate_authn_response(ctx, saml_response, now, &validated) != 0)
 		goto auth_fail;
 
 	if (saml_replay_cache_store(ctx, validated.response, validated.assertion,
-				    validated.scd,
+				    validated.scd, now,
 				    validated.replay_expires_at) != 0)
 		goto auth_fail;
 
