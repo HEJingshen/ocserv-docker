@@ -1,6 +1,6 @@
 --- a/src/worker-auth.c	2026-06-09 00:29:20
 +++ b/src/worker-auth.c	2026-06-09 00:34:29
-@@ -85,6 +85,56 @@
+@@ -85,6 +85,55 @@
  
  #define OC_LOGIN_END "</form></auth>\n</config-auth>"
  
@@ -28,7 +28,6 @@
 +
 +#define ACS_RESPONSE_FORM \
 +	"<html>\n<head>\n<script>\nfunction submit_saml() {\n" \
-+	"document.cookie = \"webvpncontext=%s; Max-Age=%u; webvpnlogin=1; path=/; secure; HttpOnly\";\n" \
 +	"document.getElementById('samlform').submit();\n" \
 +	"}\n</script>\n</head>\n<body onload=\"submit_saml()\">\n" \
 +	"<form id=\"samlform\" action=\"/+webvpn+/index.html\" method=\"POST\">\n" \
@@ -180,7 +179,7 @@
  
  		if (ws->selected_auth->type & AUTH_TYPE_USERNAME_PASS) {
  			ret = str_append_str(&str, OC_LOGIN_FORM_INPUT_USER);
-@@ -518,6 +626,421 @@
+@@ -518,6 +626,419 @@
  	return get_auth_handler2(ws, http_ver, NULL, 0);
  }
  
@@ -230,7 +229,7 @@
 +				 (char *)context, sizeof(context));
 +
 +		ret = cstp_printf(ws,
-+				  "Set-Cookie: webvpncontext=%s; Max-Age=%lu; Secure; HttpOnly\r\n",
++				  "Set-Cookie: webvpncontext=%s; Max-Age=%lu; Path=/; Secure; HttpOnly\r\n",
 +				  context,
 +				  (unsigned long)WSCONFIG(ws)->cookie_timeout);
 +		if (ret < 0)
@@ -355,7 +354,7 @@
 +				 (char *)context, sizeof(context));
 +
 +		ret = cstp_printf(ws,
-+				  "Set-Cookie: webvpncontext=%s; Max-Age=%lu; Secure; HttpOnly\r\n",
++				  "Set-Cookie: webvpncontext=%s; Max-Age=%lu; Path=/; Secure; HttpOnly\r\n",
 +				  context,
 +				  (unsigned long)WSCONFIG(ws)->cookie_timeout);
 +		if (ret < 0) {
@@ -389,8 +388,6 @@
 +		goto cleanup;
 +	}
 +	ret = str_append_printf(&str, ACS_RESPONSE_FORM,
-+				context,
-+				(unsigned)WSCONFIG(ws)->cookie_timeout,
 +				unescaped_saml_response);
 +	if (ret < 0) {
 +		ret = -1;

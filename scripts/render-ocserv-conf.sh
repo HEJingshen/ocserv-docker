@@ -147,6 +147,46 @@ while :; do
     [ -n "${remaining_domain}" ] || break
 done
 
+# Validate OCSERV_HOSTNAME (FQDN — same rules as DOMAIN)
+case "${OCSERV_HOSTNAME}" in
+    *[!A-Za-z0-9.-]*)
+        fail "OCSERV_HOSTNAME contains invalid characters: ${OCSERV_HOSTNAME}"
+        ;;
+    .*|*.|*..*)
+        fail "OCSERV_HOSTNAME must not start/end with a dot or contain consecutive dots: ${OCSERV_HOSTNAME}"
+        ;;
+esac
+
+OCSERV_HOSTNAME_LENGTH=$(printf '%s' "${OCSERV_HOSTNAME}" | wc -c | tr -d ' ')
+[ "${OCSERV_HOSTNAME_LENGTH}" -le 253 ] || fail "OCSERV_HOSTNAME is too long: ${OCSERV_HOSTNAME}"
+
+remaining_hostname=${OCSERV_HOSTNAME}
+while :; do
+    case "${remaining_hostname}" in
+        *.*)
+            HLABEL=${remaining_hostname%%.*}
+            remaining_hostname=${remaining_hostname#*.}
+            ;;
+        *)
+            HLABEL=${remaining_hostname}
+            remaining_hostname=
+            ;;
+    esac
+
+    [ -n "${HLABEL}" ] || fail "OCSERV_HOSTNAME contains an empty label: ${OCSERV_HOSTNAME}"
+
+    HLABEL_LENGTH=$(printf '%s' "${HLABEL}" | wc -c | tr -d ' ')
+    [ "${HLABEL_LENGTH}" -le 63 ] || fail "OCSERV_HOSTNAME label is too long: ${HLABEL}"
+
+    case "${HLABEL}" in
+        -*|*-)
+            fail "OCSERV_HOSTNAME label must not start or end with a hyphen: ${HLABEL}"
+            ;;
+    esac
+
+    [ -n "${remaining_hostname}" ] || break
+done
+
 OUTPUT_DIR=$(dirname -- "${OUTPUT_FILE}")
 [ -d "${OUTPUT_DIR}" ] || fail "output directory not found: ${OUTPUT_DIR}"
 
