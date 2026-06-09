@@ -36,6 +36,7 @@
 #include <errno.h>    /* for strerror() */
 #include <limits.h>
 #include <unistd.h>   /* for unlink() */
+#include "log.h"      /* for oc_syslog() */
 
 /* inih is bundled with ocserv */
 #include "inih/ini.h"
@@ -438,7 +439,7 @@ static int saml_prepare_authn_request(struct saml_ctx_st *ctx,
 	ret = lasso_login_init_authn_request(ctx->login, vctx->config->idpname,
 					   LASSO_HTTP_METHOD_REDIRECT);
 	if (ret != 0) {
-		fprintf(stderr, "SAML: Lasso error: [%i] %s\n", ret,
+		oc_syslog(LOG_ERR, "SAML: Lasso error: [%i] %s", ret,
 			lasso_strerror(ret));
 		return -1;
 	}
@@ -446,7 +447,7 @@ static int saml_prepare_authn_request(struct saml_ctx_st *ctx,
 	ctx->request =
 	    LASSO_SAMLP2_AUTHN_REQUEST(LASSO_PROFILE(ctx->login)->request);
 	if (ctx->request->NameIDPolicy == NULL) {
-		fprintf(stderr, "SAML: Error creating login request\n");
+		oc_syslog(LOG_ERR, "SAML: Error creating login request");
 		return -1;
 	}
 
@@ -464,19 +465,19 @@ static int saml_prepare_authn_request(struct saml_ctx_st *ctx,
 	    = g_strdup(LASSO_SAML2_CONSENT_IMPLICIT);
 
 	if (LASSO_SAMLP2_REQUEST_ABSTRACT(ctx->request)->ID == NULL) {
-		fprintf(stderr, "SAML: AuthnRequest ID was not generated\n");
+		oc_syslog(LOG_ERR, "SAML: AuthnRequest ID was not generated");
 		return -1;
 	}
 	ctx->request_id =
 	    g_strdup(LASSO_SAMLP2_REQUEST_ABSTRACT(ctx->request)->ID);
 	if (ctx->request_id == NULL) {
-		fprintf(stderr, "SAML: allocation failure\n");
+		oc_syslog(LOG_ERR, "SAML: allocation failure");
 		return -1;
 	}
 
 	ret = lasso_login_build_authn_request_msg(ctx->login);
 	if (ret != 0) {
-		fprintf(stderr, "SAML: Failed building authn request: [%i] %s\n",
+		oc_syslog(LOG_ERR, "SAML: Failed building authn request: [%i] %s",
 			ret, lasso_strerror(ret));
 		return -1;
 	}
@@ -497,7 +498,7 @@ static int saml_auth_init(void **_ctx, void *pool, void *_vctx,
 
 	ctx->login = lasso_login_new(vctx->server);
 	if (ctx->login == NULL) {
-		fprintf(stderr, "SAML: lasso_login_new() failed\n");
+		oc_syslog(LOG_ERR, "SAML: lasso_login_new() failed");
 		talloc_free(ctx);
 		return ERR_AUTH_FAIL;
 	}
@@ -554,7 +555,7 @@ static int saml_days_in_month(int year, int month)
 static int saml_validate_timestamp_length(const char *timestamp, size_t len)
 {
 	if (timestamp == NULL || (len != 20 && (len < 22 || len > 27))) {
-		fprintf(stderr, "SAML: Invalid timestamp length.\n");
+		oc_syslog(LOG_ERR, "SAML: Invalid timestamp length.");
 		return -1;
 	}
 
@@ -566,7 +567,7 @@ static int saml_validate_timestamp_separators(const char *timestamp)
 	if (timestamp[4] != '-' || timestamp[7] != '-' ||
 	    timestamp[10] != 'T' || timestamp[13] != ':' ||
 	    timestamp[16] != ':') {
-		fprintf(stderr, "SAML: Invalid timestamp separator format.\n");
+		oc_syslog(LOG_ERR, "SAML: Invalid timestamp separator format.");
 		return -1;
 	}
 
@@ -579,20 +580,20 @@ static int saml_validate_timestamp_utc_suffix(const char *timestamp, size_t len)
 
 	if (len == 20) {
 		if (timestamp[19] != 'Z') {
-			fprintf(stderr, "SAML: Timestamp was not in UTC.\n");
+			oc_syslog(LOG_ERR, "SAML: Timestamp was not in UTC.");
 			return -1;
 		}
 		return 0;
 	}
 
 	if (timestamp[19] != '.' || timestamp[len - 1] != 'Z') {
-		fprintf(stderr, "SAML: Invalid fractional timestamp format.\n");
+		oc_syslog(LOG_ERR, "SAML: Invalid fractional timestamp format.");
 		return -1;
 	}
 
 	frac_len = len - 21;
 	if (frac_len == 0 || frac_len > 6) {
-		fprintf(stderr, "SAML: Invalid timestamp fractional precision.\n");
+		oc_syslog(LOG_ERR, "SAML: Invalid timestamp fractional precision.");
 		return -1;
 	}
 
@@ -613,7 +614,7 @@ static int saml_validate_timestamp_digits(const char *timestamp, size_t len)
 		if (saml_timestamp_is_format_char(i, len))
 			continue;
 		if (!isdigit((unsigned char)timestamp[i])) {
-			fprintf(stderr, "SAML: Timestamp contains non-digit data.\n");
+			oc_syslog(LOG_ERR, "SAML: Timestamp contains non-digit data.");
 			return -1;
 		}
 	}
@@ -698,7 +699,7 @@ static int saml_validate_timestamp_range(const apr_time_exp_t *time_exp,
 
 	if (saml_validate_timestamp_date_range(time_exp) != 0 ||
 	    saml_validate_timestamp_time_range(time_exp) != 0) {
-		fprintf(stderr, "SAML: Timestamp values out of range.\n");
+		oc_syslog(LOG_ERR, "SAML: Timestamp values out of range.");
 		return -1;
 	}
 
@@ -722,7 +723,7 @@ static apr_time_t saml_parse_timestamp(const char *timestamp)
 
 	rc = apr_time_exp_gmt_get(&res, &time_exp);
 	if (rc != APR_SUCCESS) {
-		fprintf(stderr, "SAML: Error converting timestamp \"%s\".\n",
+		oc_syslog(LOG_ERR, "SAML: Error converting timestamp \"%s\".",
 			timestamp);
 		return 0;
 	}
@@ -742,7 +743,7 @@ static int saml_validate_time_bound(const char *timestamp, apr_time_t now,
 
 	t = saml_parse_timestamp(timestamp);
 	if (t == 0) {
-		fprintf(stderr, "%s", invalid_msg);
+		oc_syslog(LOG_ERR, "%s", invalid_msg);
 		return -1;
 	}
 
@@ -753,7 +754,7 @@ static int saml_validate_time_bound(const char *timestamp, apr_time_t now,
 		return 0;
 	}
 
-	fprintf(stderr, "%s", range_msg);
+	oc_syslog(LOG_ERR, "%s", range_msg);
 	return -1;
 }
 
@@ -762,17 +763,17 @@ static int saml_require_nonempty(const char *value, const char *msg)
 	if (value != NULL && value[0] != '\0')
 		return 0;
 
-	fprintf(stderr, "%s", msg);
+	oc_syslog(LOG_ERR, "%s", msg);
 	return -1;
 }
 
 static LassoSaml2Subject *saml_get_valid_subject(LassoSaml2Assertion *assertion)
 {
 	if (assertion->Subject == NULL) {
-		fprintf(stderr, "SAML: Subject is required.\n");
+		oc_syslog(LOG_ERR, "SAML: Subject is required.");
 		return NULL;
 	} else if (!LASSO_IS_SAML2_SUBJECT(assertion->Subject)) {
-		fprintf(stderr, "SAML: Wrong type of Subject node.\n");
+		oc_syslog(LOG_ERR, "SAML: Wrong type of Subject node.");
 		return NULL;
 	}
 
@@ -783,11 +784,11 @@ static LassoSaml2SubjectConfirmation *
 saml_get_valid_subject_confirmation(LassoSaml2Subject *subject)
 {
 	if (subject->SubjectConfirmation == NULL) {
-		fprintf(stderr, "SAML: SubjectConfirmation is required.\n");
+		oc_syslog(LOG_ERR, "SAML: SubjectConfirmation is required.");
 		return NULL;
 	} else if (!LASSO_IS_SAML2_SUBJECT_CONFIRMATION
 		(subject->SubjectConfirmation)) {
-		fprintf(stderr, "SAML: Wrong type of SubjectConfirmation node.\n");
+		oc_syslog(LOG_ERR, "SAML: Wrong type of SubjectConfirmation node.");
 		return NULL;
 	}
 
@@ -799,7 +800,7 @@ static int saml_validate_subject_confirmation_method(
 {
 	if (sc->Method == NULL ||
 	    strcmp(sc->Method, SAML_BEARER_CONFIRMATION_METHOD) != 0) {
-		fprintf(stderr, "SAML: Invalid Method in SubjectConfirmation.\n");
+		oc_syslog(LOG_ERR, "SAML: Invalid Method in SubjectConfirmation.");
 		return -1;
 	}
 
@@ -813,12 +814,12 @@ saml_get_valid_subject_confirmation_data(LassoSaml2SubjectConfirmation *sc)
 
 	scd = sc->SubjectConfirmationData;
 	if (scd == NULL) {
-		fprintf(stderr,
-			"SAML: SubjectConfirmationData is required for bearer confirmation.\n");
+		oc_syslog(LOG_ERR,
+			"SAML: SubjectConfirmationData is required for bearer confirmation.");
 		return NULL;
 	} else if (!LASSO_IS_SAML2_SUBJECT_CONFIRMATION_DATA(scd)) {
-		fprintf(stderr,
-			"SAML: Wrong type of SubjectConfirmationData node.\n");
+		oc_syslog(LOG_ERR,
+			"SAML: Wrong type of SubjectConfirmationData node.");
 		return NULL;
 	}
 
@@ -873,14 +874,14 @@ static int saml_validate_subject_binding(
 	const char *url, const char *request_id)
 {
 	if (request_id == NULL || strcmp(scd->InResponseTo, request_id) != 0) {
-		fprintf(stderr,
-			"SAML: SubjectConfirmationData InResponseTo did not match request ID.\n");
+		oc_syslog(LOG_ERR,
+			"SAML: SubjectConfirmationData InResponseTo did not match request ID.");
 		return -1;
 	}
 
 	if (strcmp(scd->Recipient, url) != 0) {
-		fprintf(stderr,
-			"SAML: Wrong Recipient in SubjectConfirmationData.\n");
+		oc_syslog(LOG_ERR,
+			"SAML: Wrong Recipient in SubjectConfirmationData.");
 		return -1;
 	}
 
@@ -950,14 +951,14 @@ static int saml_validate_conditions(LassoSaml2Assertion *assertion,
 					  apr_time_t now)
 {
 	if (assertion->Conditions == NULL) {
-		fprintf(stderr, "SAML: Assertion Conditions are required.\n");
+		oc_syslog(LOG_ERR, "SAML: Assertion Conditions are required.");
 		return -1;
 	}
 
 	if (assertion->Conditions->NotOnOrAfter == NULL ||
 	    assertion->Conditions->NotOnOrAfter[0] == '\0') {
-		fprintf(stderr,
-			"SAML: Conditions NotOnOrAfter is required.\n");
+		oc_syslog(LOG_ERR,
+			"SAML: Conditions NotOnOrAfter is required.");
 		return -1;
 	}
 
@@ -1011,13 +1012,13 @@ static GList *saml_get_required_audience_restrictions(
 
 	if (assertion->Conditions == NULL || sp_entity_id == NULL ||
 	    sp_entity_id[0] == '\0') {
-		fprintf(stderr, "SAML: Cannot validate AudienceRestriction.\n");
+		oc_syslog(LOG_ERR, "SAML: Cannot validate AudienceRestriction.");
 		return NULL;
 	}
 
 	ar_list = assertion->Conditions->AudienceRestriction;
 	if (ar_list == NULL) {
-		fprintf(stderr, "SAML: AudienceRestriction is required.\n");
+		oc_syslog(LOG_ERR, "SAML: AudienceRestriction is required.");
 		return NULL;
 	}
 
@@ -1036,8 +1037,8 @@ static int saml_validate_audience(LassoSaml2Assertion *assertion,
 	if (saml_audience_restrictions_contain(ar_list, sp_entity_id))
 		return 0;
 
-	fprintf(stderr,
-		"SAML: SP Entity ID '%s' not found in AudienceRestriction.\n",
+	oc_syslog(LOG_ERR,
+		"SAML: SP Entity ID '%s' not found in AudienceRestriction.",
 		sp_entity_id);
 	return -1;
 }
@@ -1047,14 +1048,14 @@ static int saml_store_name_id(struct saml_ctx_st *ctx)
 	const char *name_id;
 
 	if (LASSO_PROFILE(ctx->login)->nameIdentifier == NULL) {
-		fprintf(stderr,
-			"SAML: No acceptable name identifier found in SAML 2.0 response.\n");
+		oc_syslog(LOG_ERR,
+			"SAML: No acceptable name identifier found in SAML 2.0 response.");
 		return -1;
 	}
 
 	name_id = LASSO_SAML2_NAME_ID(LASSO_PROFILE(ctx->login)->nameIdentifier)->content;
 	if (name_id == NULL || name_id[0] == '\0') {
-		fprintf(stderr, "SAML: NameID content is empty or NULL.\n");
+		oc_syslog(LOG_ERR, "SAML: NameID content is empty or NULL.");
 		return -1;
 	}
 
@@ -1066,21 +1067,21 @@ static int saml_validate_response_destination(LassoSamlp2Response *response,
 					      const char *acs_url)
 {
 	if (response->parent.ID == NULL || response->parent.ID[0] == '\0') {
-		fprintf(stderr, "SAML: Response ID is required.\n");
+		oc_syslog(LOG_ERR, "SAML: Response ID is required.");
 		return -1;
 	}
 
 	if (response->parent.Destination == NULL ||
 	    response->parent.Destination[0] == '\0') {
-		fprintf(stderr, "SAML: Response Destination is required.\n");
+		oc_syslog(LOG_ERR, "SAML: Response Destination is required.");
 		return -1;
 	}
 
 	if (strcmp(response->parent.Destination, acs_url) == 0)
 		return 0;
 
-	fprintf(stderr,
-		"SAML: Invalid Destination on Response. Expected '%s', got '%s'\n",
+	oc_syslog(LOG_ERR,
+		"SAML: Invalid Destination on Response. Expected '%s', got '%s'",
 		acs_url, response->parent.Destination);
 	return -1;
 }
@@ -1090,14 +1091,14 @@ static int saml_validate_response_in_response_to(LassoSamlp2Response *response,
 {
 	if (response->parent.InResponseTo == NULL ||
 	    response->parent.InResponseTo[0] == '\0') {
-		fprintf(stderr, "SAML: Response InResponseTo is required.\n");
+		oc_syslog(LOG_ERR, "SAML: Response InResponseTo is required.");
 		return -1;
 	}
 
 	if (request_id == NULL ||
 	    strcmp(response->parent.InResponseTo, request_id) != 0) {
-		fprintf(stderr,
-			"SAML: Response InResponseTo did not match request ID.\n");
+		oc_syslog(LOG_ERR,
+			"SAML: Response InResponseTo did not match request ID.");
 		return -1;
 	}
 
@@ -1111,22 +1112,22 @@ static LassoSaml2Assertion *saml_get_single_assertion(LassoSamlp2Response *respo
 
 	assertion_count = g_list_length(response->Assertion);
 	if (assertion_count == 0) {
-		fprintf(stderr, "SAML: No assertion in response.\n");
+		oc_syslog(LOG_ERR, "SAML: No assertion in response.");
 		return NULL;
 	}
 
 	if (assertion_count > 1) {
-		fprintf(stderr, "SAML: More than one assertion in response.\n");
+		oc_syslog(LOG_ERR, "SAML: More than one assertion in response.");
 		return NULL;
 	}
 
 	assertion = g_list_first(response->Assertion)->data;
 	if (!LASSO_IS_SAML2_ASSERTION(assertion)) {
-		fprintf(stderr, "SAML: Wrong type of assertion node.\n");
+		oc_syslog(LOG_ERR, "SAML: Wrong type of assertion node.");
 		return NULL;
 	}
 	if (assertion->ID == NULL || assertion->ID[0] == '\0') {
-		fprintf(stderr, "SAML: Assertion ID is required.\n");
+		oc_syslog(LOG_ERR, "SAML: Assertion ID is required.");
 		return NULL;
 	}
 
@@ -1180,8 +1181,8 @@ static int saml_xml_reject_sha1_node(xmlNode *node)
 {
 	for (; node != NULL; node = node->next) {
 		if (saml_xml_method_node_uses_sha1(node)) {
-			fprintf(stderr,
-				"SAML: Rejected SHA-1 XML signature or digest algorithm.\n");
+			oc_syslog(LOG_ERR,
+				"SAML: Rejected SHA-1 XML signature or digest algorithm.");
 			return -1;
 		}
 
@@ -1202,7 +1203,7 @@ static guchar *saml_decode_response(const char *saml_response,
 
 	decoded = g_base64_decode(saml_response, decoded_len);
 	if (decoded == NULL || *decoded_len == 0) {
-		fprintf(stderr, "SAML: Failed decoding SAML response.\n");
+		oc_syslog(LOG_ERR, "SAML: Failed decoding SAML response.");
 		if (decoded)
 			g_free(decoded);
 		return NULL;
@@ -1220,7 +1221,7 @@ static xmlDocPtr saml_parse_decoded_response(guchar *decoded,
 			    NULL, XML_PARSE_NONET | XML_PARSE_NOERROR |
 				  XML_PARSE_NOWARNING);
 	if (doc == NULL) {
-		fprintf(stderr, "SAML: Failed parsing decoded SAML response XML.\n");
+		oc_syslog(LOG_ERR, "SAML: Failed parsing decoded SAML response XML.");
 		return NULL;
 	}
 
@@ -1262,8 +1263,8 @@ static int saml_reject_sha1_signature(LassoSaml2Assertion *assertion)
 	    assertion->sign_method != LASSO_SIGNATURE_METHOD_HMAC_SHA1)
 		return 0;
 
-	fprintf(stderr,
-		"SAML: Rejected SHA-1 signature algorithm (enum value %d)\n",
+	oc_syslog(LOG_ERR,
+		"SAML: Rejected SHA-1 signature algorithm (enum value %d)",
 		assertion->sign_method);
 	return -1;
 }
@@ -1286,7 +1287,7 @@ static void saml_replay_cache_prune_locked(struct saml_vhost_ctx *vctx,
 static char *saml_replay_cache_make_key(const char *prefix, const char *id)
 {
 	if (id == NULL || id[0] == '\0') {
-		fprintf(stderr, "SAML: Missing identifier for replay cache.\n");
+		oc_syslog(LOG_ERR, "SAML: Missing identifier for replay cache.");
 		return NULL;
 	}
 
@@ -1297,12 +1298,12 @@ static int saml_replay_cache_key_is_available(struct saml_vhost_ctx *vctx,
 					      const char *key)
 {
 	if (key == NULL) {
-		fprintf(stderr, "SAML: allocation failure\n");
+		oc_syslog(LOG_ERR, "SAML: allocation failure");
 		return 0;
 	}
 
 	if (g_hash_table_contains(vctx->replay_cache, key)) {
-		fprintf(stderr, "SAML: Replayed SAML identifier rejected.\n");
+		oc_syslog(LOG_ERR, "SAML: Replayed SAML identifier rejected.");
 		return 0;
 	}
 
@@ -1331,7 +1332,7 @@ static int saml_replay_cache_insert_key_locked(struct saml_vhost_ctx *vctx,
 
 	stored_expires_at = g_new(apr_time_t, 1);
 	if (stored_expires_at == NULL) {
-		fprintf(stderr, "SAML: allocation failure\n");
+		oc_syslog(LOG_ERR, "SAML: allocation failure");
 		return -1;
 	}
 
@@ -1376,7 +1377,7 @@ static int saml_replay_cache_keys_are_complete(char **keys, size_t key_count)
 
 	for (i = 0; i < key_count; i++) {
 		if (keys[i] == NULL) {
-			fprintf(stderr, "SAML: allocation failure\n");
+			oc_syslog(LOG_ERR, "SAML: allocation failure");
 			return 0;
 		}
 	}
@@ -1458,8 +1459,8 @@ static int saml_process_authn_response(struct saml_ctx_st *ctx,
 	rc = lasso_login_process_authn_response_msg(ctx->login,
 						    (gchar *)saml_response);
 	if (rc != 0) {
-		fprintf(stderr, "SAML: Error processing authn response\n");
-		fprintf(stderr, "SAML: Lasso error: [%i] %s\n", rc,
+		oc_syslog(LOG_ERR, "SAML: Error processing authn response");
+		oc_syslog(LOG_ERR, "SAML: Lasso error: [%i] %s", rc,
 			lasso_strerror(rc));
 		return -1;
 	}
@@ -1474,7 +1475,7 @@ static LassoSamlp2Response *saml_get_valid_response_node(
 
 	response = LASSO_SAMLP2_RESPONSE(LASSO_PROFILE(ctx->login)->response);
 	if (response == NULL || !LASSO_IS_SAMLP2_RESPONSE(response)) {
-		fprintf(stderr, "SAML: Wrong type of response node.\n");
+		oc_syslog(LOG_ERR, "SAML: Wrong type of response node.");
 		return NULL;
 	}
 
