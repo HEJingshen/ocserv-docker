@@ -111,6 +111,10 @@ static unsigned int saml_expand_brackets(void *pool, const char *str,
 
 		out[pos].name = talloc_strndup(pool, p, len);
 		out[pos].value = talloc_strndup(pool, p2, len2);
+		if (out[pos].name == NULL || out[pos].value == NULL) {
+			fprintf(stderr, "SAML: allocation failure\n");
+			exit(EXIT_FAILURE);
+		}
 		pos++;
 		p = p2 + len2;
 		while (isspace((unsigned char)*p) || *p == ',')
@@ -140,6 +144,10 @@ void *saml_get_brackets_string(void *pool, struct perm_cfg_st *config,
 	for (i = 0; i < vals_size; i++) {
 		if (strcasecmp(vals[i].name, "config") == 0) {
 			additional->config = talloc_strdup(pool, vals[i].value);
+			if (additional->config == NULL) {
+				fprintf(stderr, "SAML: allocation failure\n");
+				exit(EXIT_FAILURE);
+			}
 		}
 	}
 
@@ -262,6 +270,10 @@ static void saml_load_idp_name(struct saml_vhost_ctx *vctx)
 
 	vctx->config->idpname = g_strdup((char *)idp_list->data);
 	g_list_free(idp_list);
+	if (vctx->config->idpname == NULL) {
+		fprintf(stderr, "SAML: allocation failure\n");
+		exit(EXIT_FAILURE);
+	}
 }
 
 static void saml_load_idp_endpoints(struct saml_vhost_ctx *vctx)
@@ -283,8 +295,13 @@ static void saml_load_sp_entity_id(struct saml_vhost_ctx *vctx)
 
 	/* Extract SP Entity ID - LassoServer inherits from LassoProvider */
 	sp = LASSO_PROVIDER(vctx->server);
-	if (sp && sp->ProviderID)
+	if (sp && sp->ProviderID) {
 		config->sp_entity_id = g_strdup(sp->ProviderID);
+		if (config->sp_entity_id == NULL) {
+			fprintf(stderr, "SAML: allocation failure\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 }
 
 static void saml_validate_idp_runtime_config(saml_cfg_st *config)
@@ -521,8 +538,14 @@ static int saml_auth_msg(void *_ctx, void *pool, passwd_msg_st * pst)
 	char *redirect_url;
 
 	redirect_url = LASSO_PROFILE(ctx->login)->msg_url;
+	if (redirect_url == NULL) {
+		oc_syslog(LOG_ERR, "SAML: No redirect URL available from Lasso login profile");
+		return -1;
+	}
 
-	pst->msg_str = talloc_strdup(pool, (char *)redirect_url);
+	pst->msg_str = talloc_strdup(pool, redirect_url);
+	if (pst->msg_str == NULL)
+		return -1;
 
 	pst->counter = 0;
 
