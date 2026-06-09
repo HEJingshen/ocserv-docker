@@ -41,6 +41,9 @@
 /* inih is bundled with ocserv */
 #include "inih/ini.h"
 
+/* ============================================================
+ * Configuration & INI Parsing
+ * ============================================================ */
 #define SAML_DEFAULT_CLOCK_SKEW_TOLERANCE 60
 #define SAML_MAX_CLOCK_SKEW_TOLERANCE 3600
 #define SAML_DEFAULT_REPLAY_CACHE_TTL 300
@@ -256,6 +259,9 @@ static void saml_load_ini_config(saml_cfg_st *config, void *pool)
 	saml_validate_ini_required_fields(config);
 }
 
+/* ============================================================
+ * Lasso Server & IdP Initialization
+ * ============================================================ */
 static void saml_load_idp_name(struct saml_vhost_ctx *vctx)
 {
 	GList *idp_list;
@@ -355,6 +361,9 @@ static void saml_init_lasso_server(struct saml_vhost_ctx *vctx)
 	saml_load_idp_runtime_config(vctx);
 }
 
+/* ============================================================
+ * VHost Initialization & SP Metadata
+ * ============================================================ */
 static void saml_copy_sp_metadata(const char *source_file)
 {
 	const char *dest_file = SAML_SP_METADATA_RUNTIME_FILE;
@@ -436,6 +445,9 @@ static void saml_vhost_init(void **_vctx, void *pool, void *additional)
 	saml_copy_sp_metadata(config->spmeta);
 }
 
+/* ============================================================
+ * Authentication Core - init, msg, pass, user
+ * ============================================================ */
 static void saml_auth_ctx_free(struct saml_ctx_st *ctx)
 {
 	if (ctx == NULL)
@@ -552,6 +564,9 @@ static int saml_auth_msg(void *_ctx, void *pool, passwd_msg_st * pst)
 	return 0;
 }
 
+/* ============================================================
+ * ISO 8601 Timestamp Parsing & Validation
+ * ============================================================ */
 static int saml_timestamp_two_digits(const char *timestamp, size_t pos)
 {
 	return (timestamp[pos] - '0') * 10 + (timestamp[pos + 1] - '0');
@@ -754,6 +769,9 @@ static apr_time_t saml_parse_timestamp(const char *timestamp)
 	return res;
 }
 
+/* ============================================================
+ * Time-bound Validation Helpers
+ * ============================================================ */
 static int saml_validate_time_bound(const char *timestamp, apr_time_t now,
 				    unsigned long tolerance_us, int is_not_before,
 				    const char *invalid_msg,
@@ -790,6 +808,9 @@ static int saml_require_nonempty(const char *value, const char *msg)
 	return -1;
 }
 
+/* ============================================================
+ * SAML Subject Validation
+ * ============================================================ */
 static LassoSaml2Subject *saml_get_valid_subject(LassoSaml2Assertion *assertion)
 {
 	if (assertion->Subject == NULL) {
@@ -969,6 +990,10 @@ static int saml_validate_subject(LassoSaml2Assertion *assertion,
 }
 
 /* Validate Assertion Conditions NotBefore/NotOnOrAfter time constraints */
+
+/* ============================================================
+ * SAML Conditions & Audience Validation
+ * ============================================================ */
 static int saml_validate_conditions(LassoSaml2Assertion *assertion,
 					  unsigned long tolerance_us,
 					  apr_time_t now)
@@ -1066,6 +1091,9 @@ static int saml_validate_audience(LassoSaml2Assertion *assertion,
 	return -1;
 }
 
+/* ============================================================
+ * Name ID Extraction
+ * ============================================================ */
 static int saml_store_name_id(struct saml_ctx_st *ctx)
 {
 	const char *name_id;
@@ -1086,6 +1114,9 @@ static int saml_store_name_id(struct saml_ctx_st *ctx)
 	return 0;
 }
 
+/* ============================================================
+ * SAML Response Validation
+ * ============================================================ */
 static int saml_validate_response_destination(LassoSamlp2Response *response,
 					      const char *acs_url)
 {
@@ -1157,6 +1188,9 @@ static LassoSaml2Assertion *saml_get_single_assertion(LassoSamlp2Response *respo
 	return assertion;
 }
 
+/* ============================================================
+ * SHA-1 Algorithm Rejection (Defense-in-Depth)
+ * ============================================================ */
 static int saml_xml_algorithm_uses_sha1(const xmlChar *algorithm)
 {
 	const char *suffix = SAML_SHA1_ALGORITHM_SUFFIX;
@@ -1292,6 +1326,9 @@ static int saml_reject_sha1_signature(LassoSaml2Assertion *assertion)
 	return -1;
 }
 
+/* ============================================================
+ * Replay Cache
+ * ============================================================ */
 static void saml_replay_cache_prune_locked(struct saml_vhost_ctx *vctx,
 					   apr_time_t now)
 {
@@ -1459,6 +1496,9 @@ static int saml_replay_cache_store(struct saml_ctx_st *ctx,
 	return rc;
 }
 
+/* ============================================================
+ * Authentication Response Processing Pipeline
+ * ============================================================ */
 static void saml_auth_fail(struct saml_ctx_st *ctx)
 {
 	if (ctx->login) {
@@ -1653,6 +1693,9 @@ void saml_auth_deinit(void *_ctx)
 	saml_auth_ctx_free(_ctx);
 }
 
+/* ============================================================
+ * Cleanup, Deinitialization & Module Registration
+ * ============================================================ */
 static void saml_replay_cache_deinit(struct saml_vhost_ctx *vctx)
 {
 	if (vctx->replay_cache == NULL)
