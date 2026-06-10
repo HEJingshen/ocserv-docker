@@ -5,7 +5,7 @@ SCRIPT_DIR=$(
     unset CDPATH
     cd -- "$(dirname -- "$0")" && pwd
 )
-# shellcheck source=scripts/common.sh
+# shellcheck source=scripts/common.sh disable=SC1091
 . "${SCRIPT_DIR}/common.sh"
 
 ENV_FILE=${ENV_FILE:-"${PROJECT_ROOT}/.env"}
