@@ -15,6 +15,7 @@ RUN set -eux; \
 
 RUN --mount=type=cache,target=/var/cache/apk \
     set -eux; \
+    apk upgrade; \
     apk add --update-cache \
         bash \
         ca-certificates \
