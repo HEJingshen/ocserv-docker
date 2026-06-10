@@ -1,19 +1,12 @@
 #!/bin/sh
 set -eu
 
-fail() {
-    printf 'ERROR: %s\n' "$*" >&2
-    exit 1
-}
-
 SCRIPT_DIR=$(
     unset CDPATH
     cd -- "$(dirname -- "$0")" && pwd
 )
-PROJECT_ROOT=$(
-    unset CDPATH
-    cd -- "${SCRIPT_DIR}/.." && pwd
-)
+# shellcheck source=scripts/common.sh
+. "${SCRIPT_DIR}/common.sh"
 
 ENV_FILE=${ENV_FILE:-"${PROJECT_ROOT}/.env"}
 TEMPLATE_FILE=${OCSERV_CONF_TEMPLATE:-"${PROJECT_ROOT}/config/ocserv.conf.template"}
@@ -47,45 +40,25 @@ if [ -z "${DOMAIN}" ]; then
     DOMAIN=$(env_value DOMAIN)
 fi
 OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-$(env_value OCSERV_ENABLE_CERT_AUTH)}
-OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-false}
+OCSERV_ENABLE_CERT_AUTH=${OCSERV_ENABLE_CERT_AUTH:-false}  # default: keep in sync with .env.example
 OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-$(env_value OCSERV_ENABLE_COMPRESSION)}
-OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-false}
+OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-false}  # default: keep in sync with .env.example
 OCSERV_NO_UDP=${OCSERV_NO_UDP:-$(env_value OCSERV_NO_UDP)}
-OCSERV_NO_UDP=${OCSERV_NO_UDP:-false}
+OCSERV_NO_UDP=${OCSERV_NO_UDP:-false}  # default: keep in sync with .env.example
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_value OCSERV_MAX_CLIENTS)}
-OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}
+OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}  # default: keep in sync with .env.example
 OCSERV_ENABLE_SAML_AUTH=${OCSERV_ENABLE_SAML_AUTH:-$(env_value OCSERV_ENABLE_SAML_AUTH)}
-OCSERV_ENABLE_SAML_AUTH=${OCSERV_ENABLE_SAML_AUTH:-false}
+OCSERV_ENABLE_SAML_AUTH=${OCSERV_ENABLE_SAML_AUTH:-false}  # default: keep in sync with .env.example
 OCSERV_SAML_CONFIG_PATH=${OCSERV_SAML_CONFIG_PATH:-$(env_value OCSERV_SAML_CONFIG_PATH)}
-OCSERV_SAML_CONFIG_PATH=${OCSERV_SAML_CONFIG_PATH:-/etc/ocserv/saml/config.ini}
+OCSERV_SAML_CONFIG_PATH=${OCSERV_SAML_CONFIG_PATH:-/etc/ocserv/saml/config.ini}  # default: keep in sync with .env.example
 OCSERV_HOSTNAME=${OCSERV_HOSTNAME:-$(env_value OCSERV_HOSTNAME)}
 OCSERV_HOSTNAME=${OCSERV_HOSTNAME:-${DOMAIN}}
 
 [ -n "${DOMAIN:-}" ] || fail "DOMAIN is empty in ${ENV_FILE}"
 
-case "${OCSERV_ENABLE_CERT_AUTH}" in
-    true|false)
-        ;;
-    *)
-        fail "OCSERV_ENABLE_CERT_AUTH must be true or false: ${OCSERV_ENABLE_CERT_AUTH}"
-        ;;
-esac
-
-case "${OCSERV_ENABLE_COMPRESSION}" in
-    true|false)
-        ;;
-    *)
-        fail "OCSERV_ENABLE_COMPRESSION must be true or false: ${OCSERV_ENABLE_COMPRESSION}"
-        ;;
-esac
-
-case "${OCSERV_NO_UDP}" in
-    true|false)
-        ;;
-    *)
-        fail "OCSERV_NO_UDP must be true or false: ${OCSERV_NO_UDP}"
-        ;;
-esac
+validate_bool OCSERV_ENABLE_CERT_AUTH "${OCSERV_ENABLE_CERT_AUTH}"
+validate_bool OCSERV_ENABLE_COMPRESSION "${OCSERV_ENABLE_COMPRESSION}"
+validate_bool OCSERV_NO_UDP "${OCSERV_NO_UDP}"
 
 case "${OCSERV_MAX_CLIENTS}" in
     ''|*[!0-9]*)
@@ -94,13 +67,7 @@ case "${OCSERV_MAX_CLIENTS}" in
 esac
 [ "${OCSERV_MAX_CLIENTS}" -ge 1 ] || fail "OCSERV_MAX_CLIENTS must be at least 1"
 
-case "${OCSERV_ENABLE_SAML_AUTH}" in
-    true|false)
-        ;;
-    *)
-        fail "OCSERV_ENABLE_SAML_AUTH must be true or false: ${OCSERV_ENABLE_SAML_AUTH}"
-        ;;
-esac
+validate_bool OCSERV_ENABLE_SAML_AUTH "${OCSERV_ENABLE_SAML_AUTH}"
 
 case "${OCSERV_SAML_CONFIG_PATH}" in
     ''|*[!A-Za-z0-9./_-]*)
@@ -108,84 +75,16 @@ case "${OCSERV_SAML_CONFIG_PATH}" in
         ;;
 esac
 
+validate_fqdn DOMAIN "${DOMAIN}"
+
+# Reject the placeholder value from .env.example
 case "${DOMAIN}" in
-    *[!A-Za-z0-9.-]*)
-        fail "DOMAIN contains invalid characters: ${DOMAIN}"
-        ;;
-    .*|*.|*..*)
-        fail "DOMAIN must not start/end with a dot or contain consecutive dots: ${DOMAIN}"
+    your.domain.com)
+        fail "DOMAIN is still set to the placeholder value 'your.domain.com'"
         ;;
 esac
 
-DOMAIN_LENGTH=$(printf '%s' "${DOMAIN}" | wc -c | tr -d ' ')
-[ "${DOMAIN_LENGTH}" -le 253 ] || fail "DOMAIN is too long: ${DOMAIN}"
-
-remaining_domain=${DOMAIN}
-while :; do
-    case "${remaining_domain}" in
-        *.*)
-            LABEL=${remaining_domain%%.*}
-            remaining_domain=${remaining_domain#*.}
-            ;;
-        *)
-            LABEL=${remaining_domain}
-            remaining_domain=
-            ;;
-    esac
-
-    [ -n "${LABEL}" ] || fail "DOMAIN contains an empty label: ${DOMAIN}"
-
-    LABEL_LENGTH=$(printf '%s' "${LABEL}" | wc -c | tr -d ' ')
-    [ "${LABEL_LENGTH}" -le 63 ] || fail "DOMAIN label is too long: ${LABEL}"
-
-    case "${LABEL}" in
-        -*|*-)
-            fail "DOMAIN label must not start or end with a hyphen: ${LABEL}"
-            ;;
-    esac
-
-    [ -n "${remaining_domain}" ] || break
-done
-
-# Validate OCSERV_HOSTNAME (FQDN — same rules as DOMAIN)
-case "${OCSERV_HOSTNAME}" in
-    *[!A-Za-z0-9.-]*)
-        fail "OCSERV_HOSTNAME contains invalid characters: ${OCSERV_HOSTNAME}"
-        ;;
-    .*|*.|*..*)
-        fail "OCSERV_HOSTNAME must not start/end with a dot or contain consecutive dots: ${OCSERV_HOSTNAME}"
-        ;;
-esac
-
-OCSERV_HOSTNAME_LENGTH=$(printf '%s' "${OCSERV_HOSTNAME}" | wc -c | tr -d ' ')
-[ "${OCSERV_HOSTNAME_LENGTH}" -le 253 ] || fail "OCSERV_HOSTNAME is too long: ${OCSERV_HOSTNAME}"
-
-remaining_hostname=${OCSERV_HOSTNAME}
-while :; do
-    case "${remaining_hostname}" in
-        *.*)
-            HLABEL=${remaining_hostname%%.*}
-            remaining_hostname=${remaining_hostname#*.}
-            ;;
-        *)
-            HLABEL=${remaining_hostname}
-            remaining_hostname=
-            ;;
-    esac
-
-    [ -n "${HLABEL}" ] || fail "OCSERV_HOSTNAME contains an empty label: ${OCSERV_HOSTNAME}"
-
-    HLABEL_LENGTH=$(printf '%s' "${HLABEL}" | wc -c | tr -d ' ')
-    [ "${HLABEL_LENGTH}" -le 63 ] || fail "OCSERV_HOSTNAME label is too long: ${HLABEL}"
-
-    case "${HLABEL}" in
-        -*|*-)
-            fail "OCSERV_HOSTNAME label must not start or end with a hyphen: ${HLABEL}"
-            ;;
-    esac
-
-    [ -n "${remaining_hostname}" ] || break
-done
+validate_fqdn OCSERV_HOSTNAME "${OCSERV_HOSTNAME}"
 
 OUTPUT_DIR=$(dirname -- "${OUTPUT_FILE}")
 [ -d "${OUTPUT_DIR}" ] || fail "output directory not found: ${OUTPUT_DIR}"
@@ -224,6 +123,11 @@ awk -v domain="${DOMAIN}" \
             }
             next
         }
+        # plain auth and SAML auth are mutually exclusive
+        if ($0 ~ /^[[:space:]]*#?[[:space:]]*auth[[:space:]]*=[[:space:]]*"plain\[passwd=\/etc\/ocserv\/auth\/ocpasswd\]"[[:space:]]*$/) {
+            print (enable_saml_auth == "true" ? "#auth = \"plain[passwd=/etc/ocserv/auth/ocpasswd]\"" : "auth = \"plain[passwd=/etc/ocserv/auth/ocpasswd]\"")
+            next
+        }
         if ($0 ~ /^[[:space:]]*#?[[:space:]]*compression[[:space:]]*=/) {
             print "compression = " enable_compression
             next
@@ -249,6 +153,13 @@ if grep -q '\${HOSTNAME}' "${TMP_FILE}"; then
 fi
 
 chmod 0644 "${TMP_FILE}"
+
+# Verify at least one auth method is active
+_has_auth=false
+grep -qE '^[[:space:]]*auth[[:space:]]*=' "${TMP_FILE}" && _has_auth=true
+grep -qE '^[[:space:]]*enable-auth[[:space:]]*=' "${TMP_FILE}" && _has_auth=true
+[ "${_has_auth}" = true ] || fail "no auth method enabled: at least one of plain auth, SAML auth, or certificate auth must be active"
+
 mv "${TMP_FILE}" "${OUTPUT_FILE}"
 trap - EXIT HUP INT TERM
 
