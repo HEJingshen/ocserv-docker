@@ -15,9 +15,15 @@
 #  it must be signed by the CA certificate as specified in 'ca-cert' and
 #  it must not be listed in the CRL, as specified by the 'crl' option.
 #
-# pam[gid-min=1000]:
-#  This enabled PAM authentication of the user. The gid-min option is used
-# by auto-select-group option, in order to select the minimum valid group ID.
+# pam[service=ocserv,gid-min=1000]:
+#   Enables PAM (Pluggable Authentication Modules) for user authentication.
+#
+#   Options:
+#     service  - Specifies the PAM service name (default: 'ocserv').
+#                Allows different virtual hosts to use separate PAM stacks.
+#     gid-min  - Sets the minimum group ID considered valid when using the
+#                auto-select-group feature. Groups with a GID below this
+#                value will be ignored.
 #
 # plain[passwd=/etc/ocserv/auth/ocpasswd,otp=/etc/ocserv/users.otp]
 #  The plain option requires specifying a password file which contains
@@ -46,12 +52,6 @@
 # is true. The 'tgt-freshness-time' if set, it would require the TGT tickets presented
 # to have been issued within the provided number of seconds. That option is used to
 # restrict logins even if the KDC provides long time TGT tickets.
-#
-# saml[config=/etc/ocserv/saml/config.ini]
-#  The saml option enables SAML 2.0 authentication using an external Identity Provider.
-#  Requires the ocserv-saml image variant. The config suboption specifies the path
-#  to the SAML INI configuration file containing SP/IdP metadata paths.
-#  See docs/saml-auth.md for detailed setup instructions.
 
 # [scope: vhost (non-reloadable)]
 #auth = "pam"
@@ -60,7 +60,6 @@
 auth = "plain[passwd=/etc/ocserv/auth/ocpasswd]"
 #auth = "certificate"
 #auth = "radius[config=/etc/radiusclient/radiusclient.conf,groupconfig=true]"
-#auth = "saml[config=/etc/ocserv/saml/config.ini]"
 
 # Specify alternative authentication methods that are sufficient
 # for authentication. That is, if set, any of the methods enabled
@@ -216,6 +215,16 @@ server-key = /etc/ocserv/privkey.pem
 # This option is global and cannot be set at vhost level.
 # [scope: global]
 isolate-workers = false
+
+# Apply a per-worker heap cap (RLIMIT_DATA) as defense-in-depth against
+# memory-exhaustion attacks. The limit is computed at worker startup as
+# the observed data-segment baseline plus 64 MB headroom. Enabled by
+# default; set to false only if the deduced cap proves too tight.
+# Docker provides its own memory limits, but this remains a useful
+# defense-in-depth at the process level.
+# This option is global and cannot be set at vhost level.
+# [scope: global]
+#limit-worker-memory = true
 
 # A banner to be displayed on clients after connection
 # [scope: vhost]
@@ -546,6 +555,13 @@ pid-file = /var/run/ocserv.pid
 # [scope: global (non-reloadable)]
 log-level = 2
 
+# Syslog facility to use when logging to syslog.
+# Allowed values: daemon (default), user, auth, authpriv, local0..local7.
+# Choosing a local facility lets you direct ocserv messages to a dedicated
+# log file via rsyslog/syslog-ng without affecting other daemon logs.
+# [scope: global (non-reloadable)]
+#syslog-facility = daemon
+
 # Set the protocol-defined priority (SO_PRIORITY) for packets to
 # be sent. That is a number from 0 to 6 with 0 being the lowest
 # priority. Alternatively this can be used to set the IP Type-
@@ -554,10 +570,9 @@ log-level = 2
 # [scope: vhost user]
 net-priority = 4
 
-# Set the VPN worker process into a specific cgroup. This is Linux
-# specific and can be set per user/group or globally.
-# [scope: vhost user]
-#cgroup = "cpuset,cpu:test"
+# The 'cgroup' option (previously for cgroups v1) has been removed in
+# ocserv 1.5.0. Use systemd resource controls instead; see
+# systemd.resource-control(5).
 
 #
 # Network settings
@@ -573,10 +588,10 @@ device = vpns
 # [scope: vhost]
 predictable-ips = false
 
-# Server's hostname. Used for SAML SSO-v2 redirect URLs.
-# Must be the external FQDN that clients use to connect (e.g. vpn.example.com).
+# Server's hostname. Must be the external FQDN that clients use to connect.
+# Used for SSO redirect URLs and other server-identifying purposes.
 # [scope: vhost]
-hostname = ${HOSTNAME}
+#hostname = vpn.example.com
 
 # The default domain to be advertised. Multiple domains (functional on
 # openconnect clients) can be provided in a space separated list.

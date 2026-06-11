@@ -35,7 +35,7 @@
 | 源码 | 从 `src/ocserv-${OCSERV_VERSION}.tar.xz` 本地文件解压（不联网下载） |
 | 构建 | `meson setup` → `ninja` → `DESTDIR=/out ninja install`，产物输出到 `/out` |
 | 镜像 | 生产默认使用版本号标签，`latest` 作为最新版本标签别名发布 |
-| apk 源 | 默认配置 `mirrors.tuna.tsinghua.edu.cn`，CI 显式使用 Alpine 官方源 |
+| apk 源 | 默认使用 Alpine 官方源（`dl-cdn.alpinelinux.org`），可通过 `APK_MIRROR` 构建参数覆盖 |
 
 ### 阶段二：Runtime
 
@@ -49,15 +49,11 @@
 
 ### Alpine 基线
 
-`Dockerfile` 和 `auth/Dockerfile` 均通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签；`auth` 镜像会通过仓库配置脚本启用 `main` 与 `community`，以安装交互式证书管理所需的 `fzf`。
-
-**SAML镜像变体**：`Dockerfile.saml` 使用相同Alpine基线，额外编译 liblasso 2.9.0（包含CVE-2025-47151等安全修复）和SAML认证模块。详细配置说明参见 [SAML认证文档](saml-auth.md)。
+`Dockerfile` 通过 `ARG ALPINE_IMAGE=alpine:3.23.4` 选择基础镜像。CI 的 amd64 和 arm64 构建分别传入官方 Alpine 平台 digest，本地开发默认使用版本标签。
 
 | 镜像 | 用途 | 关键能力 |
 |:--|:--|:--|
 | `ocserv` | 默认生产标签 `kingsonho/ocserv:${OCSERV_VERSION}`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT、s6 |
-| `ocserv-saml` | SAML认证标签 `kingsonho/ocserv:${OCSERV_VERSION}-saml`，`latest-saml` 指向该版本标签 | **SAML 2.0** + PAM、GSSAPI、RADIUS、OTP、plain auth |
-| `ocserv-auth` | 默认工具标签 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，`latest` 指向该版本标签；本地备用 `ocserv-auth:local` | Bash 证书管理脚本、`certtool`/OpenSSL、`flock` 锁、`fzf` 交互菜单 |
 
 ### 镜像元数据（LABELs）
 
@@ -69,7 +65,6 @@
 | `org.opencontainers.image.version` | `${OCSERV_VERSION}` | ocserv 版本，发布构建从根目录 `VERSION` 注入 |
 | `org.opencontainers.image.created` | `<BUILD_DATE>` | 构建时间 |
 | `org.opencontainers.image.source` | GitHub 仓库地址 | 源码来源 |
-| `org.opencontainers.image.auth.features` | `SAML2.0,PAM,...` | **SAML镜像专属**：支持的认证方式列表 |
 
 ### s6-overlay 服务定义
 
@@ -163,13 +158,21 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
-| `OCSERV_VERSION` | `1.4.2` | ocserv 镜像版本；仓库根目录 `VERSION` 是发布构建的权威来源 |
+| `OCSERV_VERSION` | `1.5.0` | ocserv 镜像版本；仓库根目录 `VERSION` 是发布构建的权威来源 |
 | `OCSERV_IMAGE` | `kingsonho/ocserv:${OCSERV_VERSION}` | 可选完整 ocserv 服务镜像覆盖；自定义仓库或本地镜像时使用 |
-| `OCSERV_AUTH_IMAGE` | `kingsonho/ocserv-auth:${OCSERV_VERSION}` | 可选完整证书工具镜像覆盖；如需本地构建版本可改为 `ocserv-auth:local` |
 | `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
 | `TZ` | `Asia/Shanghai` | 时区设置 |
+| `OCSERV_ENABLE_COMPRESSION` | `false` | 是否启用 ocserv 数据压缩 |
+| `OCSERV_NO_UDP` | `false` | 是否禁用 UDP（DTLS）连接 |
+| `OCSERV_MAX_CLIENTS` | `32` | 最大同时连接客户端数 |
+| `OCSERV_MEM_LIMIT` | `512m` | 容器内存限制 |
+| `OCSERV_MEMSWAP_LIMIT` | `512m` | 容器内存+Swap 限制 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
 | `LOG_MAX_FILE` | `3` | 日志文件保留数量 |
+| `HEALTH_INTERVAL` | `30s` | 健康检查间隔 |
+| `HEALTH_TIMEOUT` | `5s` | 健康检查超时 |
+| `HEALTH_RETRIES` | `3` | 健康检查失败重试次数 |
+| `HEALTH_START_PERIOD` | `15s` | 容器启动后健康检查宽限期 |
 
 > **安全提示**：`.env` 文件已添加到 `.gitignore`，避免敏感信息（如密码）泄露到版本控制。
 
@@ -186,10 +189,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 `ocserv` 不会自动展开配置文件中的环境变量，因此项目使用 `scripts/render-ocserv-conf.sh` 在部署前渲染配置：
 
 ```
-.env DOMAIN ──▶ config/ocserv.conf.template ──▶ config/ocserv.conf
+.env DOMAIN ──▶ config/ocserv.conf.template ──▶ /etc/ocserv/ocserv.conf
 ```
 
-脚本会读取 `.env`，校验 `DOMAIN`，将模板中的 `${DOMAIN}` 替换为实际域名，并生成被容器只读挂载的 `config/ocserv.conf`。这让 `DOMAIN` 同时控制证书挂载路径和 ocserv 的 `default-domain`。
+脚本会读取 `.env`，校验 `DOMAIN`，将模板中的 `${DOMAIN}` 替换为实际域名，并生成到 `/etc/ocserv/ocserv.conf`（被容器只读挂载）。这让 `DOMAIN` 同时控制证书挂载路径和 ocserv 的 `default-domain`。
 
 ### 权限与设备
 
@@ -203,15 +206,13 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 宿主机路径 | 容器路径 | 模式 | 作用 |
 |:--|:--|:--|:--|
-| `./config/ocserv.conf` | `/etc/ocserv/ocserv.conf` | `ro`（只读） | 渲染后的主配置文件 |
+| `/etc/ocserv/ocserv.conf` | `/etc/ocserv/ocserv.conf` | `ro`（只读） | 渲染后的主配置文件 |
+| `/etc/ocserv/auth` | `/etc/ocserv/auth` | `rw`（读写） | 用户密码目录（ocpasswd） |
 | `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` | `/etc/ocserv/fullchain.pem` | `ro`（只读） | TLS 证书（公钥） |
 | `/etc/letsencrypt/live/${DOMAIN}/privkey.pem` | `/etc/ocserv/privkey.pem` | `ro`（只读） | TLS 私钥 |
-| `./config/auth` | `/etc/ocserv/auth` | 读写 | 用户密码目录，支持 `ocpasswd` 原子替换密码文件 |
-| `./config/client-ca/public` | `/etc/ocserv/ca` | `ro`（只读） | 客户端证书 CA 与 CRL |
-| `./config/config-per-user` | `/etc/ocserv/config-per-user` | `ro`（只读） | 每用户配置 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
-`ocserv-auth` 工具容器通过 `tools` profile 按需运行，默认从 Docker Hub 拉取 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，额外挂载 `./config/client-ca/private` 和 `./config/user-certs` 以保存 CA 私钥、当前签发证书索引、吊销记录、禁用标记和用户 P12 交付文件。该工具镜像同样基于 Alpine，并通过仓库配置脚本启用 `community` 仓库，以保留 `fzf` 支持的交互式证书撤销菜单。用户目录不长期保存 `*-key.pem` 或 `*-cert.pem`；吊销用户会写入持久禁用标记，`manage` 不会自动重发证书；恢复证书必须显式运行 `reissue`。CA 私钥不挂载到长期运行的 `ocserv` 容器。`scripts/oca` 是宿主机上的短命令包装入口，只封装 `docker compose --profile tools run --rm ocserv-auth`，不改变 Compose profile、挂载、容器入口或安全模型。`scripts/ocu` 只封装长期运行的 `ocserv` 容器内 `ocpasswd` 用户密码管理命令；`scripts/occ` 只封装 `occtl` 运行时控制命令。二者都不改变容器权限、Compose 配置或挂载关系。开发或离线场景如需改用本地构建镜像，可在 `.env` 中覆盖 `OCSERV_AUTH_IMAGE=ocserv-auth:local`。
+`prepare-ocserv-config.sh` 会自动创建 `/etc/ocserv` 和 `/etc/ocserv/auth` 目录（需要 sudo 权限）。`scripts/occ` 封装 `occtl` 运行时控制命令，不改变容器权限、Compose 配置或挂载关系。
 
 ### 日志轮转
 
@@ -275,14 +276,14 @@ healthcheck:
 
 ## 五、CI/CD（GitHub Actions）
 
-镜像构建使用 `.github/workflows/source-cache.yml` 作为唯一入口 workflow。入口 workflow 负责路径检测、源码缓存准备和 artifact 扇出，然后通过 `workflow_call` 调用 `.github/workflows/ocserv.yml`、`.github/workflows/ocserv-saml.yml` 和 `.github/workflows/ocserv-auth.yml` 三个 reusable workflow。
+镜像构建使用 `.github/workflows/source-cache.yml` 作为唯一入口 workflow。入口 workflow 负责源码缓存准备和 artifact 扇出，然后通过 `workflow_call` 调用 `.github/workflows/ocserv.yml` reusable workflow。
 
 ### Shell 脚本风格
 
 仓库 shell 脚本按解释器能力明确分组：
 
-- 纯 POSIX 脚本使用 `#!/bin/sh` 和 `set -eu`，并在 CI 中通过 `sh -n` 检查；运行期入口、配置渲染脚本、迁移脚本和 shell 测试都归入这一类。
-- 需要 Bash 特性的脚本使用 `#!/usr/bin/env bash` 和 `set -euo pipefail`，并在 CI 中通过 `bash -n` 检查；当前仅 `install-docker.sh` 与 `scripts/ocserv-cert-auth.sh` 归入这一类。
+- 纯 POSIX 脚本使用 `#!/bin/sh` 和 `set -eu`，并在 CI 中通过 `sh -n` 检查；运行期入口、配置渲染脚本都归入这一类。
+- 需要 Bash 特性的脚本使用 `#!/usr/bin/env bash` 和 `set -euo pipefail`，并在 CI 中通过 `bash -n` 检查；当前 `install-docker.sh` 和 `scripts/occ` 归入这一类。
 - 新增 `.sh` 文件必须先选择上述一类，并同步更新静态测试中的脚本分类表。
 
 ### 触发条件
@@ -291,19 +292,16 @@ healthcheck:
 |:--|:--|
 | `push` 到 `main`/`master` | `source-cache.yml` 按路径选择受影响镜像，校验 + 构建 + 推送 |
 | `pull_request` 到 `main`/`master` | `source-cache.yml` 按路径选择受影响镜像，校验 + 构建（不推送、不保存源码 cache） |
-| `workflow_dispatch` | 手动选择 `all` / `ocserv` / `ocserv-saml` / `ocserv-auth`；仅当当前 ref 是 `main`/`master` 时推送 |
+| `workflow_dispatch` | 手动选择 `ocserv`；仅当当前 ref 是 `main`/`master` 时推送 |
 
 ### 构建流程
 
 ```
-1. detect-changes / source-metadata job（source-cache.yml）
-       ├─ 解析本次变更涉及的镜像目标
-       ├─ 手动执行时按 target 输入选择目标
+1. source-metadata job（source-cache.yml）
        ├─ 解析 VERSION
-       └─ 生成 ocserv / lasso 源码 cache key 与 push_enabled
+       └─ 生成 ocserv 源码 cache key 与 push_enabled
        │
 2. prepare-sources job（source-cache.yml）
-       ├─ 仅在 ocserv 或 ocserv-saml 需要运行时执行
        ├─ 通过 `gh cache list` 先探测 cache key，命中时才执行 `actions/cache/restore`
        ├─ cache 未命中时下载源码包并强制 SHA256 校验
        ├─ trusted `main`/`master` 非 PR 场景保存源码 cache，单 job writer 避免并发 409
@@ -318,8 +316,7 @@ healthcheck:
 4. build job（amd64/arm64 并行）
        ├─ matrix.platform.arch: amd64, arm64
        ├─ matrix.platform.runner: amd64 使用 `ubuntu-24.04`，arm64 使用 `ubuntu-24.04-arm`
-       ├─ ocserv / ocserv-saml 下载 `prepare-sources` 生成的源码 artifact 并再次 SHA256 校验
-       ├─ ocserv-saml 额外下载并校验 lasso 2.9.0 source artifact
+       ├─ 下载 `prepare-sources` 生成的源码 artifact 并再次 SHA256 校验
        ├─ Buildx 单平台构建，按 workflow + arch 分 scope 复用 GHA 构建缓存
        ├─ 仅在 `main`/`master` 非 PR 场景按 digest 推送单平台镜像并上传 digest artifact
        └─ 生成 SBOM/provenance
@@ -337,11 +334,11 @@ healthcheck:
 
 | 推送场景 | 生成的标签 |
 |:--|:--|
-| `push` 到 `main`/`master` | 受影响镜像先按 amd64/arm64 digest 推送临时单平台结果，再合并生成对应多架构标签；不发布带架构后缀的版本标签 |
+| `push` 到 `main`/`master` | 先按 amd64/arm64 digest 推送临时单平台结果，再合并生成 `kingsonho/ocserv:<VERSION>` 和 `kingsonho/ocserv:latest` 多架构标签 |
 | `workflow_dispatch` on `main`/`master` | 与 `push main/master` 相同 |
 | `pull_request` 或非主分支手动执行 | 仅构建测试，不推送镜像 |
 
-`ocserv.yml` 发布 `kingsonho/ocserv:<VERSION>` 和 `kingsonho/ocserv:latest`；`ocserv-saml.yml` 发布 `kingsonho/ocserv:<VERSION>-saml` 和 `kingsonho/ocserv:latest-saml`；`ocserv-auth.yml` 发布 `kingsonho/ocserv-auth:<VERSION>` 和 `kingsonho/ocserv-auth:latest`。三个镜像 workflow 只作为 reusable workflow 被 `source-cache.yml` 调用，不再独立监听 `push` 或 `pull_request`。
+`ocserv.yml` 只作为 reusable workflow 被 `source-cache.yml` 调用，不再独立监听 `push` 或 `pull_request`。
 
 ---
 
@@ -354,15 +351,11 @@ healthcheck:
 ├── docker/
 │   └── ocserv/s6-init.sh               # ocserv 容器启动前初始化脚本
 ├── scripts/
+│   ├── common.sh                        # 共享工具库（fail、validate_bool、validate_fqdn）
+│   ├── configure-alpine-repositories.sh # Docker 构建阶段配置 Alpine apk 源
 │   ├── prepare-ocserv-config.sh        # 交互式准备 .env、目录权限并渲染 ocserv.conf
 │   ├── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
-│   ├── migrate-legacy-cert-auth.sh     # 从旧版 ocserv-auth 迁移
-│   ├── ocserv-cert-auth.sh             # 证书管理主脚本
-│   ├── oca                             # ocserv-auth 宿主机短命令包装入口
-│   ├── ocu                             # ocpasswd 用户密码管理短命令入口
 │   └── occ                             # occtl 运行时控制短命令入口
-├── auth/
-│   └── Dockerfile                      # ocserv-auth 工具镜像
 ├── .env.example                        # 环境变量模板（提交到 Git）
 ├── .env                                # 实际环境变量（不提交，包含敏感配置）
 │
@@ -371,20 +364,9 @@ healthcheck:
 │
 ├── config/                             # 配置文件目录
 │   ├── ocserv.conf.template            # ocserv 完整配置模板
-│   ├── ocserv.conf                     # 渲染后的 ocserv 主配置
-│   ├── auth/ocpasswd                   # 用户密码文件
-│   ├── client-ca/public/               # 客户端证书 CA 与 CRL
-│   ├── client-ca/private/              # CA 私钥、签发证书索引和吊销记录（仅工具容器挂载）
-│   ├── user-certs/                     # 用户 p12 交付文件
-│   └── config-per-user/                # 每用户配置
-│
-├── tests/
-│   ├── test_ocserv_cert_auth.sh        # 证书认证测试
-│   └── test_migrate_legacy_cert_auth.sh # 迁移测试
+│   └── ocserv.conf                     # 渲染后的 ocserv 主配置
 │
 └── .github/workflows/
-    ├── source-cache.yml                # 入口流水线，负责路径检测与源码缓存准备
-    ├── ocserv.yml                      # ocserv reusable 多架构构建流水线
-    ├── ocserv-saml.yml                 # ocserv SAML reusable 多架构构建流水线
-    └── ocserv-auth.yml                 # 证书认证工具镜像 reusable 多架构构建流水线
+    ├── source-cache.yml                # 入口流水线，负责源码缓存准备
+    └── ocserv.yml                      # ocserv reusable 多架构构建流水线
 ```

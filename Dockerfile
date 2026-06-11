@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# Dockerfile for ocserv (standard build without SAML support)
-# For SAML 2.0 authentication support, use Dockerfile.saml
+# Dockerfile for ocserv
 #
 
 ARG ALPINE_IMAGE=alpine:3.23.4
@@ -10,7 +9,7 @@ ARG ALPINE_IMAGE=alpine:3.23.4
 FROM ${ALPINE_IMAGE} AS builder
 
 ARG OCSERV_VERSION
-ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+ARG APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
 
 COPY scripts/configure-alpine-repositories.sh /usr/local/bin/configure-alpine-repositories
 
@@ -83,7 +82,7 @@ ARG OCSERV_VERSION
 ARG ALPINE_IMAGE=alpine:3.23.4
 ARG ALPINE_VERSION=3.23.4
 ARG BUILD_DATE
-ARG APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+ARG APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine
 
 LABEL maintainer="72605370+GentleKingson@users.noreply.github.com" \
       org.opencontainers.image.title="ocserv-alpine" \
@@ -118,7 +117,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
         | tr ',' '\n' \
         | sort -u \
         | awk 'NF { print "so:" $1 }' \
-        | grep -v 'liblasso' || true)"; \
+        || true)"; \
     apk add --update-cache --virtual .ocserv-rundeps ${runDeps}; \
     apk add --update-cache s6-overlay; \
     [ -x /init ]
@@ -126,7 +125,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
 ENV PATH="/command:${PATH}"
 
 RUN set -eux; \
-    mkdir -p /etc/ocserv /run/ocserv /var/log/ocserv \
+    mkdir -p /etc/ocserv /etc/ocserv/config-per-user /run/ocserv /var/log/ocserv \
              /etc/s6-overlay/s6-rc.d/ocserv-init \
              /etc/s6-overlay/s6-rc.d/ocserv \
              /etc/s6-overlay/s6-rc.d/ocserv/dependencies.d \

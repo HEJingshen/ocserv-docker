@@ -13,8 +13,10 @@
 - [二、部署 ocserv](#二部署-ocserv)
 - [三、自行构建镜像](#三自行构建镜像)
 - [四、配置参考](#四配置参考)
+  - [4.3 环境变量一览](#43-环境变量一览)
 - [五、故障排查](#五故障排查)
 - [六、功能模块指南](#六功能模块指南)
+  - [6.4 配置脚本](#64-配置脚本)
 
 ---
 
@@ -89,7 +91,15 @@ sudo certbot certonly --standalone -d your.domain.com
 - `DOMAIN`：你的服务器域名
 - `OCSERV_PORT`：仅在不想使用默认 `443` 时修改
 
-脚本会自动创建必需目录并生成 `config/ocserv.conf`。基础部署变量以 [../.env.example](../.env.example) 为准。
+脚本行为：
+
+- 若 `.env` 不存在，从 `.env.example` 复制；若已存在，检测 `.env.example` 中新增变量并警告
+- 创建 `/etc/ocserv/` 和 `/etc/ocserv/auth/` 目录（权限 700），创建空 `ocpasswd` 文件（权限 600）
+- 使用 `${EDITOR:-vi}` 打开 `.env` 供编辑（`--no-edit` 参数可跳过编辑，适用于 CI/自动化）
+- 验证 `DOMAIN` 不为占位符值
+- 调用 `render-ocserv-conf.sh` 渲染配置到 `/etc/ocserv/ocserv.conf`
+
+基础部署变量以 [../.env.example](../.env.example) 为准。
 
 启动前建议做一次快速检查：
 
@@ -107,136 +117,24 @@ docker compose up -d
 
 ### 2.3 创建用户
 
+配置和密码文件存储在宿主机 `/etc/ocserv` 目录。`prepare-ocserv-config.sh` 会自动创建 `/etc/ocserv/auth/` 目录和空的 `ocpasswd` 文件。
+
 ```bash
 docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
 ```
 
-也可以使用仓库内置短命令创建密码用户：
-
-```bash
-./scripts/ocu add username
-```
-
-首次使用证书工具前，建议至少先创建一个密码用户。
-
-默认证书工具镜像默认为 `kingsonho/ocserv-auth:${OCSERV_VERSION}`，版本来自 `.env` 中的 `OCSERV_VERSION`。首次使用前可先预拉取：
-
-```bash
-docker compose --profile tools pull ocserv-auth
-```
-
-### 2.4 客户端证书认证（可选登录方式）
-
-证书工具的完整 Compose 命令可以直接使用；如果希望命令更短，也可以使用仓库内置包装脚本：
-
-```bash
-./scripts/oca init-ca
-./scripts/oca manage
-./scripts/oca status
-./scripts/oca revoke username
-./scripts/oca reissue username
-./scripts/oca menu
-```
-
-`scripts/oca` 只是在宿主机上封装 `docker compose --profile tools run --rm ocserv-auth`，不会修改容器权限、挂载或工具入口。它会自动切换到仓库根目录执行，因此也可以从其他目录用绝对路径调用。
-
-如果想在 shell 中直接输入短命令，可以先确认本机没有同名命令：
-
-```bash
-type oca
-type ocu
-type occ
-```
-
-然后按当前 shell 写入别名，例如 zsh 使用 `~/.zshrc`，bash 使用 `~/.bashrc`：
-
-```bash
-alias oca='/absolute/path/to/ocserv-docker/scripts/oca'
-alias ocu='/absolute/path/to/ocserv-docker/scripts/ocu'
-alias occ='/absolute/path/to/ocserv-docker/scripts/occ'
-```
-
-写入后重新打开 shell，或执行 `source ~/.zshrc` / `source ~/.bashrc` 让别名生效。`oca` 负责证书管理，`ocu` 只负责 `ocpasswd` 密码用户管理，`occ` 只负责 `occtl` 运行时控制。下方仍保留完整命令，适合脚本化、排障和不想设置 alias 的场景。
-
-启用客户端证书登录前，先初始化 CA：
-
-```bash
-docker compose --profile tools run --rm ocserv-auth init-ca
-```
-
-生成或续期全部用户证书：
-
-```bash
-docker compose --profile tools run --rm ocserv-auth manage
-```
-
-通常无需重启 `ocserv`；生成或续期的主要是客户端证书与 P12 交付物。
-
-查看证书状态：
-
-```bash
-docker compose --profile tools run --rm ocserv-auth status
-```
-
-`status` 是只读检查，不会自动创建或修复 CA/证书文件。输出会显示用户证书的到期时间；如果颁发 CA 缺失、不可读、已过期，或证书链校验失败，对应用户会显示为 `invalid-chain`，而不是 `valid`。
-
-吊销指定用户证书：
-
-```bash
-docker compose --profile tools run --rm ocserv-auth revoke username
-```
-
-如需立即让吊销列表生效，执行：
-
-```bash
-docker exec ocserv occtl reload
-```
-
-如果不急，也可以等待 `ocserv` 自动检测 `crl.pem` 变化。
-
-重新签发已吊销用户证书：
-
-```bash
-docker compose --profile tools run --rm ocserv-auth reissue username
-```
-
-通常无需重启 `ocserv`；新证书会在后续客户端连接时使用。
-
-从旧 `ocserv-auth` 迁移：
-
-```bash
-./scripts/migrate-legacy-cert-auth.sh --legacy-root /path/to/old/ocserv-auth
-./scripts/migrate-legacy-cert-auth.sh --legacy-root /path/to/old/ocserv-auth --apply
-./scripts/migrate-legacy-cert-auth.sh --legacy-root /path/to/old/ocserv-auth --apply --backup-dir /path/to/backup
-```
-
-默认先 dry-run，不加 `--apply` 不会修改文件。执行迁移时会自动备份当前证书相关目录，并自动开启 `OCSERV_ENABLE_CERT_AUTH=true`、重新渲染配置和执行 `ocserv-auth manage`。
-
-用户证书与 P12 交付物变化通常不需要重启服务；CRL 变化优先使用 `occtl reload`。只有首次启用证书认证，或迁移后首次切换到 `OCSERV_ENABLE_CERT_AUTH=true` 时，才需要重建或重启 `ocserv` 以加载新的认证配置。
-
-迁移后可用以下命令验证：
-
-迁移会启用证书认证配置，因此需要重建或重启 `ocserv` 以加载新的认证配置：
-
-```bash
-docker compose --profile tools run --rm ocserv-auth status
-docker compose up -d --force-recreate ocserv
-docker inspect --format='{{.State.Health.Status}}' ocserv
-```
-
-更多证书管理细节建议结合脚本帮助和实际输出操作。
-
-### 2.5 验证服务
+### 2.4 验证服务
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' ocserv
 docker compose logs -f ocserv
-docker exec ocserv occtl show users
+./scripts/occ status
+./scripts/occ users
 ```
 
-预期健康状态为 `healthy`。
+预期健康状态为 `healthy`。`./scripts/occ` 是 `occtl` 的快捷封装，也可直接使用 `docker exec ocserv occtl` 命令。
 
-### 2.6 常用命令
+### 2.5 常用命令
 
 | 操作 | 命令 |
 |:--|:--|
@@ -244,18 +142,11 @@ docker exec ocserv occtl show users
 | 停止 | `docker compose down` |
 | 重启 | `docker compose restart` |
 | 查看日志 | `docker compose logs -f ocserv` |
-| 创建用户 | `./scripts/ocu add username` 或 `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username` |
-| 删除用户 | `./scripts/ocu delete username` 或 `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username` |
+| 创建用户 | `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username` |
+| 删除用户 | `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username` |
 | 在线用户 | `./scripts/occ users` 或 `docker exec ocserv occtl show users` |
 | 服务状态 | `./scripts/occ status` 或 `docker exec ocserv occtl show status` |
 | 重载配置 | `./scripts/occ reload` 或 `docker exec ocserv occtl reload` |
-
-删除密码用户只会更新 `ocpasswd`，不会自动吊销客户端证书。如果已启用证书认证，并且需要让该用户的现有客户端证书失效，请继续执行：
-
-```bash
-./scripts/oca revoke username
-./scripts/occ reload
-```
 
 ---
 
@@ -263,7 +154,7 @@ docker exec ocserv occtl show users
 
 ### 3.1 准备构建素材
 
-构建前至少准备 ocserv 源码包：
+构建前准备 ocserv 源码包：
 
 ```bash
 OCSERV_VERSION="$(cat VERSION)"
@@ -291,13 +182,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --push .
 ```
 
-### 3.3 构建证书工具镜像（可选，本地备用）
-
-```bash
-docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
-```
-
-如果要在部署时使用本地构建镜像，请把 `OCSERV_AUTH_IMAGE=ocserv-auth:local` 写入 `.env`。默认情况下，Compose 会按 `OCSERV_VERSION` 拉取 Docker Hub 上的版本标签。升级 ocserv 时先更新仓库根目录 `VERSION`，再同步 `OCSERV_TARBALL_SHA256`。更多构建和镜像实现细节见 [project-architecture.md](./project-architecture.md)。
+升级 ocserv 时先更新仓库根目录 `VERSION`，再同步 `OCSERV_TARBALL_SHA256`。更多构建和镜像实现细节见 [project-architecture.md](./project-architecture.md)。
 
 ---
 
@@ -307,6 +192,12 @@ docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
 
 - 基础部署至少要改 `DOMAIN`
 - 如果改过 `.env`，需要重新执行 `./scripts/render-ocserv-conf.sh`
+- `render-ocserv-conf.sh` 也支持独立运行，可通过环境变量覆盖 `.env` 中的值：
+
+  ```bash
+  sudo DOMAIN=new.example.com OCSERV_MAX_CLIENTS=64 ./scripts/render-ocserv-conf.sh
+  ```
+
 - `ocserv` 默认对外端口由 `OCSERV_PORT` 控制
 
 ### 4.2 变量与配置入口
@@ -314,6 +205,27 @@ docker buildx build -f auth/Dockerfile -t ocserv-auth:local .
 - 基础部署变量：见 [../.env.example](../.env.example)
 - Compose、配置渲染、挂载和实现原理：见 [project-architecture.md](./project-architecture.md)
 - ocserv 主配置模板：见 [../config/ocserv.conf.template](../config/ocserv.conf.template)
+
+### 4.3 环境变量一览
+
+| 变量 | 默认值 | 说明 |
+|:--|:--|:--|
+| `TZ` | `Asia/Shanghai` | 容器时区 |
+| `DOMAIN` | — | **必填**。服务器域名，控制证书路径和 ocserv `default-domain` |
+| `OCSERV_PORT` | `443` | 宿主机映射端口（容器内固定 443） |
+| `OCSERV_VERSION` | `1.5.0` | 镜像版本标签；发布构建以 `VERSION` 文件为准 |
+| `OCSERV_IMAGE` | `kingsonho/ocserv:${OCSERV_VERSION}` | 可选完整镜像覆盖（自定义仓库或本地构建时使用） |
+| `OCSERV_ENABLE_COMPRESSION` | `false` | 是否启用 ocserv 数据压缩 |
+| `OCSERV_NO_UDP` | `false` | 是否禁用 UDP（DTLS）连接 |
+| `OCSERV_MAX_CLIENTS` | `32` | 最大同时连接客户端数 |
+| `OCSERV_MEM_LIMIT` | `512m` | 容器内存限制 |
+| `OCSERV_MEMSWAP_LIMIT` | `512m` | 容器内存+Swap 限制 |
+| `LOG_MAX_SIZE` | `10m` | 容器日志单文件最大大小 |
+| `LOG_MAX_FILE` | `3` | 容器日志保留文件数 |
+| `HEALTH_INTERVAL` | `30s` | 健康检查间隔 |
+| `HEALTH_TIMEOUT` | `5s` | 健康检查超时 |
+| `HEALTH_RETRIES` | `3` | 健康检查失败重试次数 |
+| `HEALTH_START_PERIOD` | `15s` | 容器启动后健康检查宽限期 |
 
 ---
 
@@ -368,6 +280,16 @@ docker exec ocserv occtl show users
 ### 6.3 Docker 安装脚本
 
 `install-docker.sh` 用于快速安装 Docker 与 Compose，支持多发行版和镜像源自动选择。
+
+### 6.4 配置脚本
+
+| 脚本 | 用途 |
+|:--|:--|
+| `scripts/common.sh` | 共享工具库（`fail`、`validate_bool`、`validate_fqdn`），供其他脚本 source |
+| `scripts/prepare-ocserv-config.sh` | 交互式准备 `.env`、创建目录权限、渲染配置；支持 `--no-edit` 参数 |
+| `scripts/render-ocserv-conf.sh` | 从 `.env` 读取变量，将 `ocserv.conf.template` 渲染为 `/etc/ocserv/ocserv.conf` |
+| `scripts/occ` | `occtl` CLI 封装，支持 `users`/`status`/`reload` 子命令 |
+| `scripts/configure-alpine-repositories.sh` | Docker 构建阶段配置 Alpine apk 源（自动检测版本、生成仓库 URL） |
 
 ---
 
