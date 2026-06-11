@@ -49,7 +49,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
+  OCSERV_TARBALL_SHA256: "42ced08958b9576ab134fcb7bdc7f8df5e13214fd147855f99021fedcf0eedbe"
 
 jobs:
   source-metadata:
