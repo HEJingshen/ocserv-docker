@@ -35,4 +35,3 @@ ocserv-*/
 # Keep only scripts needed by Dockerfile COPY.
 scripts/*
 !scripts/configure-alpine-repositories.sh
-!scripts/ocserv-cert-auth.sh

@@ -6,63 +6,39 @@ on:
       target:
         description: Image workflow to run
         required: true
-        default: all
+        default: ocserv
         type: choice
         options:
-          - all
           - ocserv
-          - ocserv-saml
-          - ocserv-auth
   push:
-    branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
-      - 'Dockerfile.saml'
       - 'VERSION'
       - '.env.example'
       - '.github/workflows/source-cache.yml'
       - '.github/workflows/ocserv.yml'
-      - '.github/workflows/ocserv-saml.yml'
-      - '.github/workflows/ocserv-auth.yml'
-      - 'auth/Dockerfile'
       - 'docker-compose.yml'
+      - 'scripts/common.sh'
       - 'scripts/configure-alpine-repositories.sh'
+      - 'scripts/prepare-ocserv-config.sh'
       - 'scripts/render-ocserv-conf.sh'
-      - 'scripts/validate-saml-config.sh'
-      - 'scripts/ocserv-cert-auth.sh'
-      - 'scripts/migrate-legacy-cert-auth.sh'
       - 'docker/ocserv/s6-init.sh'
       - 'config/ocserv.conf.template'
-      - 'config/saml/config.ini.template'
-      - 'src/saml/**'
-      - 'src/patches/**'
-      - 'tests/test_ocserv_cert_auth.sh'
-      - 'tests/test_migrate_legacy_cert_auth.sh'
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - 'Dockerfile'
-      - 'Dockerfile.saml'
       - 'VERSION'
       - '.env.example'
       - '.github/workflows/source-cache.yml'
       - '.github/workflows/ocserv.yml'
-      - '.github/workflows/ocserv-saml.yml'
-      - '.github/workflows/ocserv-auth.yml'
-      - 'auth/Dockerfile'
       - 'docker-compose.yml'
+      - 'scripts/common.sh'
       - 'scripts/configure-alpine-repositories.sh'
+      - 'scripts/prepare-ocserv-config.sh'
       - 'scripts/render-ocserv-conf.sh'
-      - 'scripts/validate-saml-config.sh'
-      - 'scripts/ocserv-cert-auth.sh'
-      - 'scripts/migrate-legacy-cert-auth.sh'
       - 'docker/ocserv/s6-init.sh'
       - 'config/ocserv.conf.template'
-      - 'config/saml/config.ini.template'
-      - 'src/saml/**'
-      - 'src/patches/**'
-      - 'tests/test_ocserv_cert_auth.sh'
-      - 'tests/test_migrate_legacy_cert_auth.sh'
 
 permissions:
   contents: read
@@ -73,102 +49,15 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
-  LASSO_VERSION: "2.9.0"
-  LASSO_SOURCE_URL: https://deb.debian.org/debian/pool/main/l/lasso/lasso_2.9.0.orig.tar.gz
-  LASSO_TARBALL_SHA256: "63816c8219df48cdefeccb1acb35e04014ca6395b5263c70aacd5470ea95c351"
+  OCSERV_TARBALL_SHA256: "42ced08958b9576ab134fcb7bdc7f8df5e13214fd147855f99021fedcf0eedbe"
 
 jobs:
-  detect-changes:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      run_ocserv: ${{ steps.detect.outputs.run_ocserv }}
-      run_ocserv_saml: ${{ steps.detect.outputs.run_ocserv_saml }}
-      run_ocserv_auth: ${{ steps.detect.outputs.run_ocserv_auth }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Detect changed image targets
-        id: detect
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          DISPATCH_TARGET: ${{ inputs.target || 'all' }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-
-          run_ocserv=false
-          run_ocserv_saml=false
-          run_ocserv_auth=false
-
-          case "${DISPATCH_TARGET}" in
-            all)
-              if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-                run_ocserv=true
-                run_ocserv_saml=true
-                run_ocserv_auth=true
-              fi
-              ;;
-            ocserv)
-              run_ocserv=true
-              ;;
-            ocserv-saml)
-              run_ocserv_saml=true
-              ;;
-            ocserv-auth)
-              run_ocserv_auth=true
-              ;;
-          esac
-
-          if [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
-            if [ -n "${BASE_SHA}" ] && ! printf '%s' "${BASE_SHA}" | grep -Eq '^0+$'; then
-              git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" > changed-files.txt
-            else
-              git diff-tree --no-commit-id --name-only -r "${HEAD_SHA}" > changed-files.txt
-            fi
-
-            while IFS= read -r path; do
-              case "${path}" in
-                VERSION|docker-compose.yml|scripts/configure-alpine-repositories.sh|scripts/render-ocserv-conf.sh|.github/workflows/source-cache.yml)
-                  run_ocserv=true
-                  run_ocserv_saml=true
-                  run_ocserv_auth=true
-                  ;;
-                .env.example|docker/ocserv/s6-init.sh|config/ocserv.conf.template)
-                  run_ocserv=true
-                  run_ocserv_saml=true
-                  ;;
-                Dockerfile|.github/workflows/ocserv.yml)
-                  run_ocserv=true
-                  ;;
-                Dockerfile.saml|.github/workflows/ocserv-saml.yml|scripts/validate-saml-config.sh|config/saml/config.ini.template|src/saml/*|src/patches/*)
-                  run_ocserv_saml=true
-                  ;;
-                auth/Dockerfile|.github/workflows/ocserv-auth.yml|scripts/ocserv-cert-auth.sh|scripts/migrate-legacy-cert-auth.sh|tests/test_ocserv_cert_auth.sh|tests/test_migrate_legacy_cert_auth.sh)
-                  run_ocserv_auth=true
-                  ;;
-              esac
-            done < changed-files.txt
-          fi
-
-          {
-            echo "run_ocserv=${run_ocserv}"
-            echo "run_ocserv_saml=${run_ocserv_saml}"
-            echo "run_ocserv_auth=${run_ocserv_auth}"
-          } >> "$GITHUB_OUTPUT"
-
   source-metadata:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       ocserv_version: ${{ steps.metadata.outputs.ocserv_version }}
       ocserv_cache_key: ${{ steps.metadata.outputs.ocserv_cache_key }}
-      lasso_cache_key: ${{ steps.metadata.outputs.lasso_cache_key }}
       push_enabled: ${{ steps.metadata.outputs.push_enabled }}
     steps:
       - name: Checkout
@@ -179,7 +68,6 @@ jobs:
         run: |
           OCSERV_VERSION="$(cat VERSION)"
           OCSERV_CACHE_KEY="${RUNNER_OS}-ocserv-source-${OCSERV_VERSION}-${OCSERV_TARBALL_SHA256}"
-          LASSO_CACHE_KEY="${RUNNER_OS}-lasso-source-${LASSO_VERSION}-${LASSO_TARBALL_SHA256}"
           PUSH_ENABLED=false
           if [ "${{ github.event_name }}" != "pull_request" ] && { [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/master" ]; }; then
             PUSH_ENABLED=true
@@ -188,15 +76,12 @@ jobs:
           {
             echo "ocserv_version=${OCSERV_VERSION}"
             echo "ocserv_cache_key=${OCSERV_CACHE_KEY}"
-            echo "lasso_cache_key=${LASSO_CACHE_KEY}"
             echo "push_enabled=${PUSH_ENABLED}"
           } >> "$GITHUB_OUTPUT"
 
   prepare-sources:
     needs:
-      - detect-changes
       - source-metadata
-    if: needs.detect-changes.outputs.run_ocserv == 'true' || needs.detect-changes.outputs.run_ocserv_saml == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -208,10 +93,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OCSERV_CACHE_KEY: ${{ needs.source-metadata.outputs.ocserv_cache_key }}
-          LASSO_CACHE_KEY: ${{ needs.source-metadata.outputs.lasso_cache_key }}
           CACHE_REF: refs/heads/${{ github.base_ref || github.ref_name }}
           DEFAULT_CACHE_REF: refs/heads/${{ github.event.repository.default_branch }}
-          NEED_LASSO: ${{ needs.detect-changes.outputs.run_ocserv_saml }}
         run: |
           set -euo pipefail
 
@@ -235,14 +118,9 @@ jobs:
           }
 
           ocserv_cache_hit="$(probe_cache "${OCSERV_CACHE_KEY}")"
-          lasso_cache_hit=false
-          if [ "${NEED_LASSO}" = "true" ]; then
-            lasso_cache_hit="$(probe_cache "${LASSO_CACHE_KEY}")"
-          fi
 
           {
             echo "ocserv_cache_hit=${ocserv_cache_hit}"
-            echo "lasso_cache_hit=${lasso_cache_hit}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Restore ocserv source cache
@@ -264,35 +142,13 @@ jobs:
         run: |
           echo "${{ env.OCSERV_TARBALL_SHA256 }}  src/ocserv-${{ needs.source-metadata.outputs.ocserv_version }}.tar.xz" | sha256sum -c -
 
-      - name: Restore lasso source cache
-        id: lasso_source_cache
-        if: needs.detect-changes.outputs.run_ocserv_saml == 'true' && steps.source_cache_probe.outputs.lasso_cache_hit == 'true'
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: src/lasso-${{ env.LASSO_VERSION }}.tar.gz
-          key: ${{ needs.source-metadata.outputs.lasso_cache_key }}
-
-      - name: Download lasso source
-        if: needs.detect-changes.outputs.run_ocserv_saml == 'true' && steps.lasso_source_cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p src
-          curl -fsSL -o src/lasso-${{ env.LASSO_VERSION }}.tar.gz \
-            "${{ env.LASSO_SOURCE_URL }}"
-
-      - name: Verify lasso source
-        if: needs.detect-changes.outputs.run_ocserv_saml == 'true'
-        run: |
-          echo "${{ env.LASSO_TARBALL_SHA256 }}  src/lasso-${{ env.LASSO_VERSION }}.tar.gz" | sha256sum -c -
-
       - name: Probe source caches before save
         id: source_cache_save_probe
-        if: needs.source-metadata.outputs.push_enabled == 'true' && (steps.ocserv_source_cache.outputs.cache-hit != 'true' || (needs.detect-changes.outputs.run_ocserv_saml == 'true' && steps.lasso_source_cache.outputs.cache-hit != 'true'))
+        if: needs.source-metadata.outputs.push_enabled == 'true' && steps.ocserv_source_cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           OCSERV_CACHE_KEY: ${{ needs.source-metadata.outputs.ocserv_cache_key }}
-          LASSO_CACHE_KEY: ${{ needs.source-metadata.outputs.lasso_cache_key }}
           CACHE_REF: refs/heads/${{ github.ref_name }}
-          NEED_LASSO: ${{ needs.detect-changes.outputs.run_ocserv_saml }}
         run: |
           set -euo pipefail
 
@@ -308,14 +164,9 @@ jobs:
           }
 
           ocserv_cache_exists="$(probe_cache "${OCSERV_CACHE_KEY}")"
-          lasso_cache_exists=false
-          if [ "${NEED_LASSO}" = "true" ]; then
-            lasso_cache_exists="$(probe_cache "${LASSO_CACHE_KEY}")"
-          fi
 
           {
             echo "ocserv_cache_exists=${ocserv_cache_exists}"
-            echo "lasso_cache_exists=${lasso_cache_exists}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Save ocserv source cache
@@ -325,21 +176,10 @@ jobs:
           path: src/ocserv-${{ needs.source-metadata.outputs.ocserv_version }}.tar.xz
           key: ${{ needs.source-metadata.outputs.ocserv_cache_key }}
 
-      - name: Save lasso source cache
-        if: needs.source-metadata.outputs.push_enabled == 'true' && needs.detect-changes.outputs.run_ocserv_saml == 'true' && steps.lasso_source_cache.outputs.cache-hit != 'true' && steps.source_cache_save_probe.outputs.lasso_cache_exists != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: src/lasso-${{ env.LASSO_VERSION }}.tar.gz
-          key: ${{ needs.source-metadata.outputs.lasso_cache_key }}
-
       - name: Stage source artifacts
         run: |
           mkdir -p /tmp/source-ocserv
           cp "src/ocserv-${{ needs.source-metadata.outputs.ocserv_version }}.tar.xz" /tmp/source-ocserv/
-          if [ "${{ needs.detect-changes.outputs.run_ocserv_saml }}" = "true" ]; then
-            mkdir -p /tmp/source-lasso
-            cp "src/lasso-${{ env.LASSO_VERSION }}.tar.gz" /tmp/source-lasso/
-          fi
 
       - name: Upload ocserv source artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -349,49 +189,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Upload lasso source artifact
-        if: needs.detect-changes.outputs.run_ocserv_saml == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: source-lasso
-          path: /tmp/source-lasso/*
-          if-no-files-found: error
-          retention-days: 1
-
   ocserv:
     needs:
-      - detect-changes
       - source-metadata
       - prepare-sources
-    if: always() && needs.detect-changes.outputs.run_ocserv == 'true' && needs.source-metadata.result == 'success' && needs.prepare-sources.result == 'success'
+    if: always() && needs.source-metadata.result == 'success' && needs.prepare-sources.result == 'success'
     uses: ./.github/workflows/ocserv.yml
     with:
       push_enabled: ${{ needs.source-metadata.outputs.push_enabled == 'true' }}
       ocserv_version: ${{ needs.source-metadata.outputs.ocserv_version }}
       source_ocserv_artifact: source-ocserv
-    secrets: inherit
-
-  ocserv-saml:
-    needs:
-      - detect-changes
-      - source-metadata
-      - prepare-sources
-    if: always() && needs.detect-changes.outputs.run_ocserv_saml == 'true' && needs.source-metadata.result == 'success' && needs.prepare-sources.result == 'success'
-    uses: ./.github/workflows/ocserv-saml.yml
-    with:
-      push_enabled: ${{ needs.source-metadata.outputs.push_enabled == 'true' }}
-      ocserv_version: ${{ needs.source-metadata.outputs.ocserv_version }}
-      source_ocserv_artifact: source-ocserv
-      source_lasso_artifact: source-lasso
-    secrets: inherit
-
-  ocserv-auth:
-    needs:
-      - detect-changes
-      - source-metadata
-    if: needs.detect-changes.outputs.run_ocserv_auth == 'true' && needs.source-metadata.result == 'success'
-    uses: ./.github/workflows/ocserv-auth.yml
-    with:
-      push_enabled: ${{ needs.source-metadata.outputs.push_enabled == 'true' }}
-      ocserv_version: ${{ needs.source-metadata.outputs.ocserv_version }}
     secrets: inherit

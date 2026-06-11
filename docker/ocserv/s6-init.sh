@@ -5,7 +5,7 @@ echo "=== ocserv initialization start ==="
 
 if [ ! -f /etc/ocserv/ocserv.conf ]; then
     echo "ERROR: /etc/ocserv/ocserv.conf not found"
-    echo "  Mount config via -v ./config/ocserv.conf:/etc/ocserv/ocserv.conf:ro"
+    echo "  Run prepare-ocserv-config.sh first, or mount config to /etc/ocserv/ocserv.conf"
     exit 1
 fi
 

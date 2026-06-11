@@ -19,7 +19,7 @@ permissions:
 env:
   REGISTRY: docker.io
   OCSERV_IMAGE_NAME: kingsonho/ocserv
-  OCSERV_TARBALL_SHA256: "e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5"
+  OCSERV_TARBALL_SHA256: "42ced08958b9576ab134fcb7bdc7f8df5e13214fd147855f99021fedcf0eedbe"
   ALPINE_VERSION: "3.23.4"
   ALPINE_IMAGE_AMD64: alpine:3.23.4@sha256:4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b
   ALPINE_IMAGE_ARM64: alpine:3.23.4@sha256:378c4c5418f7493bd500ad21ffb43818d0689daaad43e3261859fb417d1481a0
@@ -40,12 +40,16 @@ jobs:
       - name: Check shell syntax
         run: |
           sh -n scripts/configure-alpine-repositories.sh
+          sh -n scripts/common.sh
+          sh -n scripts/prepare-ocserv-config.sh
           sh -n scripts/render-ocserv-conf.sh
           sh -n docker/ocserv/s6-init.sh
 
       - name: Lint shell scripts
         run: |
           shellcheck -s sh scripts/configure-alpine-repositories.sh
+          shellcheck -s sh scripts/common.sh
+          shellcheck -s sh scripts/prepare-ocserv-config.sh
           shellcheck -s sh scripts/render-ocserv-conf.sh
           shellcheck -s sh docker/ocserv/s6-init.sh
 
@@ -104,7 +108,6 @@ jobs:
           {
             echo "args<<EOF"
             echo "ALPINE_IMAGE=${{ matrix.platform.arch == 'amd64' && env.ALPINE_IMAGE_AMD64 || env.ALPINE_IMAGE_ARM64 }}"
-            echo "APK_MIRROR=https://dl-cdn.alpinelinux.org/alpine"
             echo "OCSERV_VERSION=${{ inputs.ocserv_version }}"
             echo "ALPINE_VERSION=${{ env.ALPINE_VERSION }}"
             echo "BUILD_DATE=${{ steps.date.outputs.BUILD_DATE }}"

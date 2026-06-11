@@ -25,13 +25,6 @@ ocserv-*/
 
 # Runtime data
 logs/
-config/ocserv.conf
-config/auth/ocpasswd
-
-# Runtime directories (created by docker-compose)
-config/client-ca/
-config/config-per-user/
-config/user-certs/
 
 # Python cache
 __pycache__/
