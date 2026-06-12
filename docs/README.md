@@ -65,14 +65,14 @@ sudo apt install certbot
 sudo certbot certonly --standalone -d your.domain.com
 ```
 
-默认证书路径：
+证书路径在 `.env` 中通过 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 配置（必填）。Let's Encrypt 用户设置为：
 
 ```text
-/etc/letsencrypt/live/your.domain.com/fullchain.pem
-/etc/letsencrypt/live/your.domain.com/privkey.pem
+TLS_CERT_FILE=/etc/letsencrypt/live/your.domain.com/fullchain.pem
+TLS_KEY_FILE=/etc/letsencrypt/live/your.domain.com/privkey.pem
 ```
 
-仅测试时可用自签名证书，但客户端通常会弹出证书警告。需要时可用 `docker-compose.override.yml` 覆盖证书挂载。
+也支持自签名或其他 CA 签发的证书，只需将这两个变量指向对应的宿主机文件路径即可。
 
 ---
 
@@ -89,15 +89,17 @@ sudo certbot certonly --standalone -d your.domain.com
 至少修改：
 
 - `DOMAIN`：你的服务器域名
+- `TLS_CERT_FILE`：TLS 证书链文件路径（必填）
+- `TLS_KEY_FILE`：TLS 私钥文件路径（必填）
 - `OCSERV_PORT`：仅在不想使用默认 `443` 时修改
 
 脚本行为：
 
 - 若 `.env` 不存在，从 `.env.example` 复制；若已存在，检测 `.env.example` 中新增变量并警告
-- 创建 `/etc/ocserv/` 和 `/etc/ocserv/auth/` 目录（权限 700），创建空 `ocpasswd` 文件（权限 600）
+- 创建 `${OCSERV_CONF_DIR}/` 和 `${OCSERV_CONF_DIR}/auth/` 目录（权限 700），创建空 `ocpasswd` 文件（权限 600）
 - 使用 `${EDITOR:-vi}` 打开 `.env` 供编辑（`--no-edit` 参数可跳过编辑，适用于 CI/自动化）
 - 验证 `DOMAIN` 不为占位符值
-- 调用 `render-ocserv-conf.sh` 渲染配置到 `/etc/ocserv/ocserv.conf`
+- 调用 `render-ocserv-conf.sh` 渲染配置到 `${OCSERV_CONF_DIR}/ocserv.conf`
 
 基础部署变量以 [../.env.example](../.env.example) 为准。
 
@@ -105,8 +107,8 @@ sudo certbot certonly --standalone -d your.domain.com
 
 ```bash
 docker compose config
-DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+source .env
+sudo ls -l "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
 ```
 
 ### 2.2 启动服务
@@ -158,7 +160,7 @@ docker compose logs -f ocserv
 
 ```bash
 OCSERV_VERSION="$(cat VERSION)"
-OCSERV_TARBALL_SHA256=e35d748a5244b10be3a92ad4df95a534c8280c43680eecaf3cb1b20d2a22b1a5
+OCSERV_TARBALL_SHA256=42ced08958b9576ab134fcb7bdc7f8df5e13214fd147855f99021fedcf0eedbe
 mkdir -p src
 curl -L -o "src/ocserv-${OCSERV_VERSION}.tar.xz" \
   "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz"
@@ -211,7 +213,10 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
 | `TZ` | `Asia/Shanghai` | 容器时区 |
-| `DOMAIN` | — | **必填**。服务器域名，控制证书路径和 ocserv `default-domain` |
+| `DOMAIN` | — | **必填**。服务器域名，控制 ocserv `default-domain` |
+| `OCSERV_CONF_DIR` | `/etc/ocserv` | 宿主机配置目录路径 |
+| `TLS_CERT_FILE` | — | **必填**。宿主机 TLS 证书链文件完整路径 |
+| `TLS_KEY_FILE` | — | **必填**。宿主机 TLS 私钥文件完整路径 |
 | `OCSERV_PORT` | `443` | 宿主机映射端口（容器内固定 443） |
 | `OCSERV_VERSION` | `1.5.0` | 镜像版本标签；发布构建以 `VERSION` 文件为准 |
 | `OCSERV_IMAGE` | `kingsonho/ocserv:${OCSERV_VERSION}` | 可选完整镜像覆盖（自定义仓库或本地构建时使用） |
@@ -238,8 +243,8 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```bash
 docker compose logs ocserv
 docker compose config
-DOMAIN=$(awk -F= '/^DOMAIN=/{print $2}' .env)
-sudo ls -l "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+source .env
+sudo ls -l "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
 OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
 sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
 ```

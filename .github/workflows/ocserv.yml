@@ -59,6 +59,8 @@ jobs:
       - name: Validate Compose file
         env:
           DOMAIN: ci.example.com
+          TLS_CERT_FILE: /tmp/fullchain.pem
+          TLS_KEY_FILE: /tmp/privkey.pem
         run: docker compose config --quiet
 
   build:

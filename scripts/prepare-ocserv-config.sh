@@ -17,7 +17,8 @@ esac
 
 ENV_FILE="${PROJECT_ROOT}/.env"
 ENV_EXAMPLE_FILE="${PROJECT_ROOT}/.env.example"
-OCSERV_CONF_DIR="/etc/ocserv"
+OCSERV_CONF_DIR=${OCSERV_CONF_DIR:-$(awk -F= '/^OCSERV_CONF_DIR=/{print $2; exit}' "${ENV_FILE}" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d "'\"")}
+OCSERV_CONF_DIR="${OCSERV_CONF_DIR:-/etc/ocserv}"
 OCSERV_AUTH_DIR="${OCSERV_CONF_DIR}/auth"
 LOG_DIR="${PROJECT_ROOT}/logs"
 EDITOR_CMD=${EDITOR:-vi}
@@ -76,6 +77,16 @@ if [ "${SKIP_EDIT}" = false ]; then
         your.domain.com)
             fail "DOMAIN is still set to the placeholder value 'your.domain.com'. Please set a real domain."
             ;;
+    esac
+
+    # Check for empty TLS certificate paths
+    _tls_cert=$(awk -F= '/^TLS_CERT_FILE=/{print $2; exit}' "${ENV_FILE}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d "'\"")
+    _tls_key=$(awk -F= '/^TLS_KEY_FILE=/{print $2; exit}' "${ENV_FILE}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d "'\"")
+    case "${_tls_cert}" in
+        '') fail "TLS_CERT_FILE is empty. Set the full path to your TLS certificate chain." ;;
+    esac
+    case "${_tls_key}" in
+        '') fail "TLS_KEY_FILE is empty. Set the full path to your TLS private key." ;;
     esac
 else
     printf 'Skipping editor (--no-edit). Edit %s manually if needed.\n' "${ENV_FILE}"

@@ -158,6 +158,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 变量 | 默认值 | 说明 |
 |:--|:--|:--|
+| `DOMAIN` | — | **必填**。服务器域名 |
+| `OCSERV_CONF_DIR` | `/etc/ocserv` | 宿主机配置目录路径 |
+| `TLS_CERT_FILE` | — | **必填**。宿主机 TLS 证书链文件完整路径 |
+| `TLS_KEY_FILE` | — | **必填**。宿主机 TLS 私钥文件完整路径 |
 | `OCSERV_VERSION` | `1.5.0` | ocserv 镜像版本；仓库根目录 `VERSION` 是发布构建的权威来源 |
 | `OCSERV_IMAGE` | `kingsonho/ocserv:${OCSERV_VERSION}` | 可选完整 ocserv 服务镜像覆盖；自定义仓库或本地镜像时使用 |
 | `OCSERV_PORT` | `443` | ocserv 宿主机端口 |
@@ -192,7 +196,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 .env DOMAIN ──▶ config/ocserv.conf.template ──▶ /etc/ocserv/ocserv.conf
 ```
 
-脚本会读取 `.env`，校验 `DOMAIN`，将模板中的 `${DOMAIN}` 替换为实际域名，并生成到 `/etc/ocserv/ocserv.conf`（被容器只读挂载）。这让 `DOMAIN` 同时控制证书挂载路径和 ocserv 的 `default-domain`。
+脚本会读取 `.env`，校验 `DOMAIN`，将模板中的 `${DOMAIN}` 替换为实际域名，并生成到 `${OCSERV_CONF_DIR}/ocserv.conf`（被容器只读挂载）。这让 `DOMAIN` 同时控制 ocserv 的 `default-domain`。
 
 ### 权限与设备
 
@@ -206,13 +210,13 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 | 宿主机路径 | 容器路径 | 模式 | 作用 |
 |:--|:--|:--|:--|
-| `/etc/ocserv/ocserv.conf` | `/etc/ocserv/ocserv.conf` | `ro`（只读） | 渲染后的主配置文件 |
-| `/etc/ocserv/auth` | `/etc/ocserv/auth` | `rw`（读写） | 用户密码目录（ocpasswd） |
-| `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` | `/etc/ocserv/fullchain.pem` | `ro`（只读） | TLS 证书（公钥） |
-| `/etc/letsencrypt/live/${DOMAIN}/privkey.pem` | `/etc/ocserv/privkey.pem` | `ro`（只读） | TLS 私钥 |
+| `${OCSERV_CONF_DIR}/ocserv.conf` | `/etc/ocserv/ocserv.conf` | `ro`（只读） | 渲染后的主配置文件 |
+| `${OCSERV_CONF_DIR}/auth` | `/etc/ocserv/auth` | `rw`（读写） | 用户密码目录（ocpasswd） |
+| `${TLS_CERT_FILE}` | `/etc/ocserv/fullchain.pem` | `ro`（只读） | TLS 证书（公钥） |
+| `${TLS_KEY_FILE}` | `/etc/ocserv/privkey.pem` | `ro`（只读） | TLS 私钥 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
-`prepare-ocserv-config.sh` 会自动创建 `/etc/ocserv` 和 `/etc/ocserv/auth` 目录（需要 sudo 权限）。`scripts/occ` 封装 `occtl` 运行时控制命令，不改变容器权限、Compose 配置或挂载关系。
+`prepare-ocserv-config.sh` 会自动创建 `${OCSERV_CONF_DIR}` 和 `${OCSERV_CONF_DIR}/auth` 目录（需要 sudo 权限）。`scripts/occ` 封装 `occtl` 运行时控制命令，不改变容器权限、Compose 配置或挂载关系。
 
 ### 日志轮转
 

@@ -10,7 +10,6 @@ SCRIPT_DIR=$(
 
 ENV_FILE=${ENV_FILE:-"${PROJECT_ROOT}/.env"}
 TEMPLATE_FILE=${OCSERV_CONF_TEMPLATE:-"${PROJECT_ROOT}/config/ocserv.conf.template"}
-OUTPUT_FILE=${OCSERV_CONF_OUTPUT:-"/etc/ocserv/ocserv.conf"}
 
 [ -f "${ENV_FILE}" ] || fail "env file not found: ${ENV_FILE}. Copy .env.example to .env first."
 [ -f "${TEMPLATE_FILE}" ] || fail "template file not found: ${TEMPLATE_FILE}"
@@ -34,6 +33,10 @@ env_value() {
         END { print value }
     ' "${ENV_FILE}"
 }
+
+OCSERV_CONF_DIR=${OCSERV_CONF_DIR:-$(env_value OCSERV_CONF_DIR)}
+OCSERV_CONF_DIR="${OCSERV_CONF_DIR:-/etc/ocserv}"
+OUTPUT_FILE=${OCSERV_CONF_OUTPUT:-"${OCSERV_CONF_DIR}/ocserv.conf"}
 
 DOMAIN=${DOMAIN:-}
 if [ -z "${DOMAIN}" ]; then
@@ -66,6 +69,12 @@ case "${DOMAIN}" in
         fail "DOMAIN is still set to the placeholder value 'your.domain.com'"
         ;;
 esac
+
+# Validate TLS certificate paths
+TLS_CERT_FILE=${TLS_CERT_FILE:-$(env_value TLS_CERT_FILE)}
+TLS_KEY_FILE=${TLS_KEY_FILE:-$(env_value TLS_KEY_FILE)}
+[ -n "${TLS_CERT_FILE}" ] || fail "TLS_CERT_FILE is empty in ${ENV_FILE}"
+[ -n "${TLS_KEY_FILE}" ] || fail "TLS_KEY_FILE is empty in ${ENV_FILE}"
 
 OUTPUT_DIR=$(dirname -- "${OUTPUT_FILE}")
 mkdir -p "${OUTPUT_DIR}" 2>/dev/null || fail "cannot create output directory: ${OUTPUT_DIR} (run with sudo)"

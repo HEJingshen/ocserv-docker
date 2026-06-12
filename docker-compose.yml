@@ -26,10 +26,10 @@ services:
 
     # 挂载配置与证书（只读保护）
     volumes:
-      - /etc/ocserv/ocserv.conf:/etc/ocserv/ocserv.conf:ro
-      - /etc/ocserv/auth:/etc/ocserv/auth:rw
-      - /etc/letsencrypt/live/${DOMAIN}/fullchain.pem:/etc/ocserv/fullchain.pem:ro
-      - /etc/letsencrypt/live/${DOMAIN}/privkey.pem:/etc/ocserv/privkey.pem:ro
+      - ${OCSERV_CONF_DIR:-/etc/ocserv}/ocserv.conf:/etc/ocserv/ocserv.conf:ro
+      - ${OCSERV_CONF_DIR:-/etc/ocserv}/auth:/etc/ocserv/auth:rw
+      - ${TLS_CERT_FILE}:/etc/ocserv/fullchain.pem:ro
+      - ${TLS_KEY_FILE}:/etc/ocserv/privkey.pem:ro
       - ./logs:/var/log/ocserv  # 持久化日志目录
 
     # 容器日志轮转（防止 stdout/stderr 撑爆磁盘）
