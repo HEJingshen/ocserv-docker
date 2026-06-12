@@ -96,9 +96,10 @@ TLS_KEY_FILE=/etc/letsencrypt/live/your.domain.com/privkey.pem
 脚本行为：
 
 - 若 `.env` 不存在，从 `.env.example` 复制；若已存在，检测 `.env.example` 中新增变量并警告
-- 创建 `${OCSERV_CONF_DIR}/` 和 `${OCSERV_CONF_DIR}/auth/` 目录（权限 700），创建空 `ocpasswd` 文件（权限 600）
 - 使用 `${EDITOR:-vi}` 打开 `.env` 供编辑（`--no-edit` 参数可跳过编辑，适用于 CI/自动化）
 - 验证 `DOMAIN` 不为占位符值
+- 验证 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 指向已存在的普通文件
+- 编辑完成后读取最终 `${OCSERV_CONF_DIR}`，创建 `${OCSERV_CONF_DIR}/` 和 `${OCSERV_CONF_DIR}/auth/` 目录（权限 700），创建空 `ocpasswd` 文件（权限 600）
 - 调用 `render-ocserv-conf.sh` 渲染配置到 `${OCSERV_CONF_DIR}/ocserv.conf`
 
 基础部署变量以 [../.env.example](../.env.example) 为准。
@@ -107,7 +108,7 @@ TLS_KEY_FILE=/etc/letsencrypt/live/your.domain.com/privkey.pem
 
 ```bash
 docker compose config
-source .env
+set -a; . .env; set +a
 sudo ls -l "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
 ```
 
@@ -119,10 +120,10 @@ docker compose up -d
 
 ### 2.3 创建用户
 
-配置和密码文件存储在宿主机 `/etc/ocserv` 目录。`prepare-ocserv-config.sh` 会自动创建 `/etc/ocserv/auth/` 目录和空的 `ocpasswd` 文件。
+配置和密码文件默认存储在宿主机 `/etc/ocserv` 目录；如果修改了 `OCSERV_CONF_DIR`，则存储在该目录。容器内部路径固定为 `/etc/ocserv`，`prepare-ocserv-config.sh` 会自动创建 `${OCSERV_CONF_DIR}/auth/` 目录和空的 `ocpasswd` 文件。
 
 ```bash
-docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username
+./scripts/occ add-user username
 ```
 
 ### 2.4 验证服务
@@ -134,7 +135,7 @@ docker compose logs -f ocserv
 ./scripts/occ users
 ```
 
-预期健康状态为 `healthy`。`./scripts/occ` 是 `occtl` 的快捷封装，也可直接使用 `docker exec ocserv occtl` 命令。
+预期健康状态为 `healthy`。`./scripts/occ` 是 `occtl` 的快捷封装，也可直接使用 `docker exec ocserv occtl -s /run/ocserv/occtl.socket` 命令。
 
 ### 2.5 常用命令
 
@@ -144,11 +145,11 @@ docker compose logs -f ocserv
 | 停止 | `docker compose down` |
 | 重启 | `docker compose restart` |
 | 查看日志 | `docker compose logs -f ocserv` |
-| 创建用户 | `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd username` |
-| 删除用户 | `docker exec -it -u 0 ocserv ocpasswd -c /etc/ocserv/auth/ocpasswd -d username` |
-| 在线用户 | `./scripts/occ users` 或 `docker exec ocserv occtl show users` |
-| 服务状态 | `./scripts/occ status` 或 `docker exec ocserv occtl show status` |
-| 重载配置 | `./scripts/occ reload` 或 `docker exec ocserv occtl reload` |
+| 创建用户 | `./scripts/occ add-user username` |
+| 删除用户 | `./scripts/occ delete-user username` |
+| 在线用户 | `./scripts/occ users` 或 `docker exec ocserv occtl -s /run/ocserv/occtl.socket show users` |
+| 服务状态 | `./scripts/occ status` 或 `docker exec ocserv occtl -s /run/ocserv/occtl.socket show status` |
+| 重载配置 | `./scripts/occ reload` 或 `docker exec ocserv occtl -s /run/ocserv/occtl.socket reload` |
 
 ---
 
@@ -232,6 +233,8 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 | `HEALTH_RETRIES` | `3` | 健康检查失败重试次数 |
 | `HEALTH_START_PERIOD` | `15s` | 容器启动后健康检查宽限期 |
 
+`scripts/occ` 还支持以下可选环境变量：`OCSERV_CONTAINER`（默认 `ocserv`）、`OCCTL_SOCKET`（默认 `/run/ocserv/occtl.socket`）和 `OCPASSWD_FILE`（默认 `/etc/ocserv/auth/ocpasswd`）。这些变量只影响 `scripts/occ` 在容器内执行 `occtl`/`ocpasswd` 的目标。
+
 ---
 
 ## 五、故障排查
@@ -243,7 +246,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```bash
 docker compose logs ocserv
 docker compose config
-source .env
+set -a; . .env; set +a
 sudo ls -l "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
 OCSERV_PORT=$(awk -F= '/^OCSERV_PORT=/{print $2}' .env)
 sudo ss -tlnp | grep ":${OCSERV_PORT:-443}"
@@ -266,8 +269,8 @@ sudo ss -ulnp | grep ":${OCSERV_PORT:-443}"
 
 ```bash
 docker stats --no-stream ocserv
-docker exec ocserv occtl show status
-docker exec ocserv occtl show users
+docker exec ocserv occtl -s /run/ocserv/occtl.socket show status
+docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
 ```
 
 ---
@@ -290,10 +293,10 @@ docker exec ocserv occtl show users
 
 | 脚本 | 用途 |
 |:--|:--|
-| `scripts/common.sh` | 共享工具库（`fail`、`validate_bool`、`validate_fqdn`），供其他脚本 source |
+| `scripts/common.sh` | 共享工具库（`.env` 读取、路径校验、`fail`、`validate_bool`、`validate_fqdn`），供其他脚本 source |
 | `scripts/prepare-ocserv-config.sh` | 交互式准备 `.env`、创建目录权限、渲染配置；支持 `--no-edit` 参数 |
 | `scripts/render-ocserv-conf.sh` | 从 `.env` 读取变量，将 `ocserv.conf.template` 渲染为 `/etc/ocserv/ocserv.conf` |
-| `scripts/occ` | `occtl` CLI 封装，支持 `users`/`status`/`reload` 子命令 |
+| `scripts/occ` | `occtl`/`ocpasswd` CLI 封装，支持 `users`/`status`/`reload`/`add-user`/`delete-user` 子命令 |
 | `scripts/configure-alpine-repositories.sh` | Docker 构建阶段配置 Alpine apk 源（自动检测版本、生成仓库 URL） |
 
 ---

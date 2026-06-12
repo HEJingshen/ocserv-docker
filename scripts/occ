@@ -12,8 +12,15 @@ Usage:
   occ users
   occ status
   occ reload
+  occ add-user USER
+  occ delete-user USER
 
-Runs occtl commands through the running ocserv container.
+Runs occtl and ocpasswd commands through the running ocserv container.
+
+Environment:
+  OCSERV_CONTAINER  Container name (default: ocserv)
+  OCCTL_SOCKET      occtl socket path in the container (default: /run/ocserv/occtl.socket)
+  OCPASSWD_FILE     ocpasswd file path in the container (default: /etc/ocserv/auth/ocpasswd)
 EOF
 }
 
@@ -30,24 +37,51 @@ require_docker() {
     command -v docker >/dev/null 2>&1 || die "docker is required"
 }
 
+require_one_username() {
+    local action=$1
+    shift
+    [[ "$#" -eq 1 ]] || {
+        usage >&2
+        die "${action} requires exactly one USER argument"
+    }
+    [[ -n "$1" ]] || die "username must not be empty"
+    [[ "$1" != -* ]] || die "username must not start with '-'"
+}
+
+OCSERV_CONTAINER=${OCSERV_CONTAINER:-ocserv}
+OCCTL_SOCKET=${OCCTL_SOCKET:-/run/ocserv/occtl.socket}
+OCPASSWD_FILE=${OCPASSWD_FILE:-/etc/ocserv/auth/ocpasswd}
+
 case "${1:-}" in
     users)
         shift
         require_no_extra_args "users" "$@"
         require_docker
-        exec docker exec ocserv occtl show users
+        exec docker exec "${OCSERV_CONTAINER}" occtl -s "${OCCTL_SOCKET}" show users
         ;;
     status)
         shift
         require_no_extra_args "status" "$@"
         require_docker
-        exec docker exec ocserv occtl show status
+        exec docker exec "${OCSERV_CONTAINER}" occtl -s "${OCCTL_SOCKET}" show status
         ;;
     reload)
         shift
         require_no_extra_args "reload" "$@"
         require_docker
-        exec docker exec ocserv occtl reload
+        exec docker exec "${OCSERV_CONTAINER}" occtl -s "${OCCTL_SOCKET}" reload
+        ;;
+    add-user)
+        shift
+        require_one_username "add-user" "$@"
+        require_docker
+        exec docker exec -it -u 0 "${OCSERV_CONTAINER}" ocpasswd -c "${OCPASSWD_FILE}" "$1"
+        ;;
+    delete-user)
+        shift
+        require_one_username "delete-user" "$@"
+        require_docker
+        exec docker exec -u 0 "${OCSERV_CONTAINER}" ocpasswd -c "${OCPASSWD_FILE}" -d "$1"
         ;;
     -h|--help|help)
         usage

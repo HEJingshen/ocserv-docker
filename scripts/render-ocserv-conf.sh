@@ -14,42 +14,19 @@ TEMPLATE_FILE=${OCSERV_CONF_TEMPLATE:-"${PROJECT_ROOT}/config/ocserv.conf.templa
 [ -f "${ENV_FILE}" ] || fail "env file not found: ${ENV_FILE}. Copy .env.example to .env first."
 [ -f "${TEMPLATE_FILE}" ] || fail "template file not found: ${TEMPLATE_FILE}"
 
-env_value() {
-    awk -v key="$1" '
-        /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-        {
-            line = $0
-            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
-            if (line ~ "^[[:space:]]*" key "[[:space:]]*=") {
-                value = line
-                sub("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*", "", value)
-                sub(/[[:space:]]+#.*$/, "", value)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-                if ((value ~ /^".*"$/) || (value ~ /^\047.*\047$/)) {
-                    value = substr(value, 2, length(value) - 2)
-                }
-            }
-        }
-        END { print value }
-    ' "${ENV_FILE}"
-}
-
-OCSERV_CONF_DIR=${OCSERV_CONF_DIR:-$(env_value OCSERV_CONF_DIR)}
+OCSERV_CONF_DIR=${OCSERV_CONF_DIR:-$(env_file_value "${ENV_FILE}" OCSERV_CONF_DIR)}
 OCSERV_CONF_DIR="${OCSERV_CONF_DIR:-/etc/ocserv}"
 OUTPUT_FILE=${OCSERV_CONF_OUTPUT:-"${OCSERV_CONF_DIR}/ocserv.conf"}
 
-DOMAIN=${DOMAIN:-}
-if [ -z "${DOMAIN}" ]; then
-    DOMAIN=$(env_value DOMAIN)
-fi
-OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-$(env_value OCSERV_ENABLE_COMPRESSION)}
+DOMAIN=${DOMAIN:-$(env_file_value "${ENV_FILE}" DOMAIN)}
+OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-$(env_file_value "${ENV_FILE}" OCSERV_ENABLE_COMPRESSION)}
 OCSERV_ENABLE_COMPRESSION=${OCSERV_ENABLE_COMPRESSION:-false}  # default: keep in sync with .env.example
-OCSERV_NO_UDP=${OCSERV_NO_UDP:-$(env_value OCSERV_NO_UDP)}
+OCSERV_NO_UDP=${OCSERV_NO_UDP:-$(env_file_value "${ENV_FILE}" OCSERV_NO_UDP)}
 OCSERV_NO_UDP=${OCSERV_NO_UDP:-false}  # default: keep in sync with .env.example
-OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_value OCSERV_MAX_CLIENTS)}
+OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-$(env_file_value "${ENV_FILE}" OCSERV_MAX_CLIENTS)}
 OCSERV_MAX_CLIENTS=${OCSERV_MAX_CLIENTS:-32}  # default: keep in sync with .env.example
 
-[ -n "${DOMAIN:-}" ] || fail "DOMAIN is empty in ${ENV_FILE}"
+validate_domain DOMAIN "${DOMAIN}"
 
 validate_bool OCSERV_ENABLE_COMPRESSION "${OCSERV_ENABLE_COMPRESSION}"
 validate_bool OCSERV_NO_UDP "${OCSERV_NO_UDP}"
@@ -61,20 +38,10 @@ case "${OCSERV_MAX_CLIENTS}" in
 esac
 [ "${OCSERV_MAX_CLIENTS}" -ge 1 ] || fail "OCSERV_MAX_CLIENTS must be at least 1"
 
-validate_fqdn DOMAIN "${DOMAIN}"
-
-# Reject the placeholder value from .env.example
-case "${DOMAIN}" in
-    your.domain.com)
-        fail "DOMAIN is still set to the placeholder value 'your.domain.com'"
-        ;;
-esac
-
 # Validate TLS certificate paths
-TLS_CERT_FILE=${TLS_CERT_FILE:-$(env_value TLS_CERT_FILE)}
-TLS_KEY_FILE=${TLS_KEY_FILE:-$(env_value TLS_KEY_FILE)}
-[ -n "${TLS_CERT_FILE}" ] || fail "TLS_CERT_FILE is empty in ${ENV_FILE}"
-[ -n "${TLS_KEY_FILE}" ] || fail "TLS_KEY_FILE is empty in ${ENV_FILE}"
+TLS_CERT_FILE=${TLS_CERT_FILE:-$(env_file_value "${ENV_FILE}" TLS_CERT_FILE)}
+TLS_KEY_FILE=${TLS_KEY_FILE:-$(env_file_value "${ENV_FILE}" TLS_KEY_FILE)}
+validate_tls_paths "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
 
 OUTPUT_DIR=$(dirname -- "${OUTPUT_FILE}")
 mkdir -p "${OUTPUT_DIR}" 2>/dev/null || fail "cannot create output directory: ${OUTPUT_DIR} (run with sudo)"

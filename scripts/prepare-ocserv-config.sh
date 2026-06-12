@@ -15,15 +15,10 @@ case "${1:-}" in
     *) fail "unknown option: $1. Usage: $0 [--no-edit]" ;;
 esac
 
-ENV_FILE="${PROJECT_ROOT}/.env"
+ENV_FILE=${ENV_FILE:-"${PROJECT_ROOT}/.env"}
 ENV_EXAMPLE_FILE="${PROJECT_ROOT}/.env.example"
-OCSERV_CONF_DIR=${OCSERV_CONF_DIR:-$(awk -F= '/^OCSERV_CONF_DIR=/{print $2; exit}' "${ENV_FILE}" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d "'\"")}
-OCSERV_CONF_DIR="${OCSERV_CONF_DIR:-/etc/ocserv}"
-OCSERV_AUTH_DIR="${OCSERV_CONF_DIR}/auth"
 LOG_DIR="${PROJECT_ROOT}/logs"
 EDITOR_CMD=${EDITOR:-vi}
-
-command -v "${EDITOR_CMD}" >/dev/null 2>&1 || fail "editor command not found: ${EDITOR_CMD}"
 
 cd "${PROJECT_ROOT}"
 
@@ -58,41 +53,40 @@ fi
 
 mkdir -p "${LOG_DIR}"
 
-# Create ocserv configuration and auth directories on host
+if [ "${SKIP_EDIT}" = false ]; then
+    validate_editor_command "${EDITOR_CMD}"
+
+    printf '\nEdit environment variables now: %s %s\n' "${EDITOR_CMD}" "${ENV_FILE}"
+    printf 'At minimum, set DOMAIN.\n\n'
+
+    run_editor_command "${EDITOR_CMD}" "${ENV_FILE}" || fail "editor exited with an error: ${EDITOR_CMD}"
+else
+    printf 'Skipping editor (--no-edit). Edit %s manually if needed.\n' "${ENV_FILE}"
+fi
+
+OCSERV_CONF_DIR=${OCSERV_CONF_DIR:-$(env_file_value "${ENV_FILE}" OCSERV_CONF_DIR)}
+OCSERV_CONF_DIR="${OCSERV_CONF_DIR:-/etc/ocserv}"
+OCSERV_AUTH_DIR="${OCSERV_CONF_DIR}/auth"
+DOMAIN=${DOMAIN:-$(env_file_value "${ENV_FILE}" DOMAIN)}
+TLS_CERT_FILE=${TLS_CERT_FILE:-$(env_file_value "${ENV_FILE}" TLS_CERT_FILE)}
+TLS_KEY_FILE=${TLS_KEY_FILE:-$(env_file_value "${ENV_FILE}" TLS_KEY_FILE)}
+
+validate_domain DOMAIN "${DOMAIN}"
+validate_tls_paths "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
+
+# Create ocserv configuration and auth directories on host after .env is final.
 mkdir -p "${OCSERV_CONF_DIR}" 2>/dev/null || fail "cannot create ${OCSERV_CONF_DIR} (run with sudo)"
 mkdir -p "${OCSERV_AUTH_DIR}" 2>/dev/null || fail "cannot create ${OCSERV_AUTH_DIR} (run with sudo)"
 touch "${OCSERV_AUTH_DIR}/ocpasswd" 2>/dev/null || fail "cannot create ${OCSERV_AUTH_DIR}/ocpasswd (run with sudo)"
 chmod 700 "${OCSERV_AUTH_DIR}" 2>/dev/null || fail "cannot chmod ${OCSERV_AUTH_DIR} (run with sudo)"
 chmod 600 "${OCSERV_AUTH_DIR}/ocpasswd" 2>/dev/null || fail "cannot chmod ocpasswd (run with sudo)"
 
-if [ "${SKIP_EDIT}" = false ]; then
-    printf '\nEdit environment variables now: %s %s\n' "${EDITOR_CMD}" "${ENV_FILE}"
-    printf 'At minimum, set DOMAIN.\n\n'
-
-    "${EDITOR_CMD}" "${ENV_FILE}" || fail "editor exited with an error: ${EDITOR_CMD}"
-
-    # Check for placeholder DOMAIN value
-    _domain_value=$(awk -F= '/^DOMAIN=/{print $2; exit}' "${ENV_FILE}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d "'\"")
-    case "${_domain_value}" in
-        your.domain.com)
-            fail "DOMAIN is still set to the placeholder value 'your.domain.com'. Please set a real domain."
-            ;;
-    esac
-
-    # Check for empty TLS certificate paths
-    _tls_cert=$(awk -F= '/^TLS_CERT_FILE=/{print $2; exit}' "${ENV_FILE}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d "'\"")
-    _tls_key=$(awk -F= '/^TLS_KEY_FILE=/{print $2; exit}' "${ENV_FILE}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d "'\"")
-    case "${_tls_cert}" in
-        '') fail "TLS_CERT_FILE is empty. Set the full path to your TLS certificate chain." ;;
-    esac
-    case "${_tls_key}" in
-        '') fail "TLS_KEY_FILE is empty. Set the full path to your TLS private key." ;;
-    esac
-else
-    printf 'Skipping editor (--no-edit). Edit %s manually if needed.\n' "${ENV_FILE}"
-fi
-
-"${PROJECT_ROOT}/scripts/render-ocserv-conf.sh"
+ENV_FILE="${ENV_FILE}" \
+OCSERV_CONF_DIR="${OCSERV_CONF_DIR}" \
+DOMAIN="${DOMAIN}" \
+TLS_CERT_FILE="${TLS_CERT_FILE}" \
+TLS_KEY_FILE="${TLS_KEY_FILE}" \
+    "${PROJECT_ROOT}/scripts/render-ocserv-conf.sh"
 
 cat <<'EOF'
 

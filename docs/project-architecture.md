@@ -216,7 +216,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `${TLS_KEY_FILE}` | `/etc/ocserv/privkey.pem` | `ro`（只读） | TLS 私钥 |
 | `./logs` | `/var/log/ocserv` | 读写 | 日志持久化 |
 
-`prepare-ocserv-config.sh` 会自动创建 `${OCSERV_CONF_DIR}` 和 `${OCSERV_CONF_DIR}/auth` 目录（需要 sudo 权限）。`scripts/occ` 封装 `occtl` 运行时控制命令，不改变容器权限、Compose 配置或挂载关系。
+`prepare-ocserv-config.sh` 会自动创建 `${OCSERV_CONF_DIR}` 和 `${OCSERV_CONF_DIR}/auth` 目录（需要 sudo 权限）。`scripts/occ` 封装 `occtl` 运行时控制命令和 `ocpasswd` 用户管理命令，不改变容器权限、Compose 配置或挂载关系。
 
 ### 日志轮转
 
@@ -355,11 +355,11 @@ healthcheck:
 ├── docker/
 │   └── ocserv/s6-init.sh               # ocserv 容器启动前初始化脚本
 ├── scripts/
-│   ├── common.sh                        # 共享工具库（fail、validate_bool、validate_fqdn）
+│   ├── common.sh                        # 共享工具库（.env 读取、路径校验、校验函数）
 │   ├── configure-alpine-repositories.sh # Docker 构建阶段配置 Alpine apk 源
 │   ├── prepare-ocserv-config.sh        # 交互式准备 .env、目录权限并渲染 ocserv.conf
 │   ├── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
-│   └── occ                             # occtl 运行时控制短命令入口
+│   └── occ                             # occtl/ocpasswd 运行时控制短命令入口
 ├── .env.example                        # 环境变量模板（提交到 Git）
 ├── .env                                # 实际环境变量（不提交，包含敏感配置）
 │
