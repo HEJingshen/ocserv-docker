@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================
-# 生产级 Docker 一键安装与优化脚本 (v3.0)
+# 生产级 Docker 一键安装与优化脚本 (v3.1)
 # 特性: 严格模式 / 智能配置比对 / 并发探测 / 多云适配 / 幂等执行 / CI 友好
 # 兼容: Ubuntu/Debian/CentOS/Rocky/Alma/Fedora/openEuler/HCE/Alinux/TencentOS/OpenCloudOS/OracleLinux
 # ============================================================
 set -euo pipefail
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [[ -f "${SCRIPT_DIR}/scripts/common.sh" ]]; then
+  # shellcheck source=scripts/common.sh
+  . "${SCRIPT_DIR}/scripts/common.sh"
+fi
 
 # --- 颜色与日志 (统一输出至 stderr，避免污染 stdout 管道) ---
 readonly GREEN='\033[0;32m' YELLOW='\033[1;33m' RED='\033[0;31m' BLUE='\033[0;34m' NC='\033[0m'
@@ -16,7 +22,7 @@ log_step()  { echo -e "${BLUE}[STEP]${NC} $*" >&2; }
 # --- 全局配置 ---
 readonly SUPPORTED_DISTROS="ubuntu|debian|centos|fedora|rocky|almalinux|tencentos|opencloudos|alinux|hce|openeuler|ol"
 declare -A MIRRORS=(
-  [aliyun]="mirrors.cloud.aliyuncs.com"
+  [aliyun]="mirrors.aliyun.com"
   [tencent]="mirrors.cloud.tencent.com"
   [huawei]="repo.huaweicloud.com"
   [tuna]="mirrors.tuna.tsinghua.edu.cn"
@@ -44,6 +50,24 @@ DH_STATUS="UNKNOWN" DH_CFG_STATUS="NOT_CONFIGURED"
 DM_BEST_HOST="" DM_BEST_URL="" PKG_MIRROR=""
 OS_TYPE="" OS_VERSION=""
 TMPDIR_BASE="" SKIP_CLOUD=false FORCE_INSTALL=false NO_MIRROR=false YES_MODE=false
+
+# --- 并发任务限制 (bg_throttle / bg_wait_all) ---
+# 在 ( ... ) & 后调用 bg_throttle <max> 来限制并发数;
+# 全部任务结束后调用 bg_wait_all 等待并重置计数器。
+_bg_count=0
+bg_throttle() {
+  local max=$1
+  _bg_count=$((_bg_count + 1))
+  if (( _bg_count >= max )); then
+    if [[ "${BASH_VERSINFO[0]:-3}" -ge 4 && "${BASH_VERSINFO[1]:-0}" -ge 3 ]]; then
+      wait -n 2>/dev/null || true
+    else
+      wait
+    fi
+    _bg_count=$((_bg_count - 1))
+  fi
+}
+bg_wait_all() { wait; _bg_count=0; }
 
 # --- 安全清理 ---
 cleanup() {
@@ -165,63 +189,33 @@ init_os_vars() {
 }
 
 # ============================================================
-# 模块 3 & 4：并发延迟探测 (包源 & Docker镜像源)
+# 模块 3：并发延迟探测 — 包镜像源
 # ============================================================
-probe_latency() {
-  local type="$1" # pkg | docker
+probe_pkg_mirrors() {
   local -a targets=()
-  local probe_count=$MIRROR_PROBE_COUNT
+  for name in "${!MIRRORS[@]}"; do targets+=("${MIRRORS[$name]}|$name"); done
 
-  if [[ "$type" == "pkg" ]]; then
-    for name in "${!MIRRORS[@]}"; do targets+=("${MIRRORS[$name]}|$name"); done
-  else
-    probe_count=$DOCKER_MIRROR_PROBE_COUNT
-    for url in "${DOCKER_MIRROR_URLS[@]}"; do
-      local h="${url#https://}"; h="${h%%/*}"
-      targets+=("${url}|${h}")
-    done
-  fi
-
-  local tmpdir="$TMPDIR_BASE/probe_${type}"
+  local tmpdir="$TMPDIR_BASE/probe_pkg"
   mkdir -p "$tmpdir"
 
-  # 限制并发数，避免低配机器 fork 爆炸
-  local max_jobs=8 job_count=0
   for entry in "${targets[@]}"; do
     IFS='|' read -r target label <<< "$entry"
-    for ((i=1; i<=probe_count; i++)); do
+    for ((i=1; i<=MIRROR_PROBE_COUNT; i++)); do
       (
         local time_ms
-        if [[ "$type" == "pkg" ]]; then
-          if command -v ping &>/dev/null; then
-            local result
-            result=$(ping -c 1 -W 3 "$target" 2>/dev/null) || exit 0
-            time_ms=$(echo "$result" | grep -o 'time=[0-9.]*' | head -1 | cut -d= -f2) || exit 0
-          else
-            # 容器无 ping，用 curl HTTP 探测兜底
-            local http_code total_time curl_out
-            curl_out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' \
-              --connect-timeout 3 --max-time 5 "https://${target}/" 2>/dev/null) || exit 0
-            http_code=$(echo "$curl_out" | awk '{print $1}')
-            total_time=$(echo "$curl_out" | awk '{print $2}')
-            [[ -z "$http_code" || -z "$total_time" ]] && exit 0
-            [[ "$http_code" =~ ^(200|301|302|403)$ ]] || exit 0
-            time_ms=$(awk "BEGIN{printf \"%.2f\", ${total_time} * 1000}")
-          fi
+        if command -v ping &>/dev/null; then
+          local result
+          result=$(ping -c 1 -W 3 "$target" 2>/dev/null) || exit 0
+          time_ms=$(echo "$result" | grep -o 'time=[0-9.]*' | head -1 | cut -d= -f2) || exit 0
         else
-          # 使用 %{http_code} 数值判断，兼容更多 HTTP 状态码
+          # 容器无 ping，用 curl HTTP 探测兜底
           local http_code total_time curl_out
           curl_out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' \
-            --connect-timeout 3 --max-time 6 "${target}/v2/" 2>/dev/null) || exit 0
-
+            --connect-timeout 3 --max-time 5 "https://${target}/" 2>/dev/null) || exit 0
           http_code=$(echo "$curl_out" | awk '{print $1}')
           total_time=$(echo "$curl_out" | awk '{print $2}')
-
-          # 放宽 HTTP 状态码检查 (200/401/403/404 均可视为可达)
-          # 很多国内代理镜像 /v2/ 返回 403/404 但 pull 实际可用
           [[ -z "$http_code" || -z "$total_time" ]] && exit 0
-          [[ "$http_code" =~ ^(200|401|403|404|301|302)$ ]] || exit 0
-
+          [[ "$http_code" =~ ^(200|301|302|403)$ ]] || exit 0
           time_ms=$(awk "BEGIN{printf \"%.2f\", ${total_time} * 1000}")
         fi
 
@@ -229,27 +223,16 @@ probe_latency() {
         [[ -n "$time_ms" && "$time_ms" =~ ^[0-9]+\.?[0-9]*$ ]] && \
           echo "$time_ms" > "$tmpdir/${label}_${i}"
       ) &
-      # 🔧 修复: ((job_count++)) 当 job_count=0 时 ((0++)) 返回 exit code 1，
-      # 在 set -e 下会导致脚本直接退出。改用 job_count=$((job_count+1)) 安全递增。
-      job_count=$((job_count + 1))
-      if (( job_count >= max_jobs )); then
-        if [[ "${BASH_VERSINFO[0]:-3}" -ge 4 && "${BASH_VERSINFO[1]:-0}" -ge 3 ]]; then
-          wait -n 2>/dev/null || true
-        else
-          wait
-        fi
-        job_count=$((job_count - 1))
-      fi
+      bg_throttle 8
     done
   done
-  wait
+  bg_wait_all
 
   local best_label="" best_time=""
   local found_any=false
   for f in "$tmpdir"/*; do
     [[ -f "$f" ]] || continue
     local val; val=$(cat "$f" 2>/dev/null) || continue
-    # 跳过空文件或非法值
     [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
     found_any=true
     local label="${f##*/}"; label="${label%_*}"
@@ -261,37 +244,92 @@ probe_latency() {
   rm -rf "$tmpdir"
 
   if [[ -n "$best_label" && "$found_any" == true ]]; then
-    if [[ "$type" == "pkg" ]]; then
-      PKG_MIRROR="$best_label"
-      log_info "✅ 最快包镜像源: $best_label (${MIRRORS[$best_label]}) | ${best_time}ms"
-    else
-      DM_BEST_HOST="$best_label"
-      for url in "${DOCKER_MIRROR_URLS[@]}"; do
-        [[ "$url" == *"$best_label"* ]] && { DM_BEST_URL="$url"; break; }
-      done
-      log_info "✅ 最快Docker加速源: $best_label | ${best_time}ms"
+    PKG_MIRROR="$best_label"
+    log_info "✅ 最快包镜像源: $best_label (${MIRRORS[$best_label]}) | ${best_time}ms"
+    return 0
+  fi
+
+  return 1
+}
+
+# ============================================================
+# 模块 4：并发延迟探测 — Docker 镜像源
+# ============================================================
+probe_docker_mirrors() {
+  local -a targets=()
+  for url in "${DOCKER_MIRROR_URLS[@]}"; do
+    local h="${url#https://}"; h="${h%%/*}"
+    targets+=("${url}|${h}")
+  done
+
+  local tmpdir="$TMPDIR_BASE/probe_docker"
+  mkdir -p "$tmpdir"
+
+  for entry in "${targets[@]}"; do
+    IFS='|' read -r target label <<< "$entry"
+    for ((i=1; i<=DOCKER_MIRROR_PROBE_COUNT; i++)); do
+      (
+        local http_code total_time curl_out time_ms
+        curl_out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' \
+          --connect-timeout 3 --max-time 6 "${target}/v2/" 2>/dev/null) || exit 0
+
+        http_code=$(echo "$curl_out" | awk '{print $1}')
+        total_time=$(echo "$curl_out" | awk '{print $2}')
+
+        # 放宽 HTTP 状态码检查 (200/401/403/404 均可视为可达)
+        # 很多国内代理镜像 /v2/ 返回 403/404 但 pull 实际可用
+        [[ -z "$http_code" || -z "$total_time" ]] && exit 0
+        [[ "$http_code" =~ ^(200|401|403|404|301|302)$ ]] || exit 0
+
+        time_ms=$(awk "BEGIN{printf \"%.2f\", ${total_time} * 1000}")
+
+        [[ -n "$time_ms" && "$time_ms" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+          echo "$time_ms" > "$tmpdir/${label}_${i}"
+      ) &
+      bg_throttle 8
+    done
+  done
+  bg_wait_all
+
+  local best_label="" best_time=""
+  local found_any=false
+  for f in "$tmpdir"/*; do
+    [[ -f "$f" ]] || continue
+    local val; val=$(cat "$f" 2>/dev/null) || continue
+    [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
+    found_any=true
+    local label="${f##*/}"; label="${label%_*}"
+    if [[ -z "$best_time" ]] || awk "BEGIN{exit !(${val} < ${best_time})}"; then
+      best_time="$val"; best_label="$label"
     fi
+  done
+
+  rm -rf "$tmpdir"
+
+  if [[ -n "$best_label" && "$found_any" == true ]]; then
+    DM_BEST_HOST="$best_label"
+    for url in "${DOCKER_MIRROR_URLS[@]}"; do
+      [[ "$url" == *"$best_label"* ]] && { DM_BEST_URL="$url"; break; }
+    done
+    log_info "✅ 最快Docker加速源: $best_label | ${best_time}ms"
     return 0
   fi
 
   # 探测全部失败时，使用保底加速源
-  if [[ "$type" == "docker" ]]; then
-    log_warn "⚠️  所有Docker加速源探测均失败，尝试使用保底源..."
-    for fb_url in "${DOCKER_FALLBACK_MIRRORS[@]}"; do
-      local fb_host fb_code
-      fb_host="${fb_url#https://}"
-      fb_code=$(curl -s -o /dev/null -w '%{http_code}' \
-        --connect-timeout 3 --max-time 5 "${fb_url}/v2/" 2>/dev/null) || fb_code="000"
-      if [[ "$fb_code" =~ ^(200|401|403|404|301|302)$ ]]; then
-        DM_BEST_HOST="$fb_host"
-        DM_BEST_URL="$fb_url"
-        log_info "✅ 使用保底Docker加速源: $fb_host (HTTP $fb_code)"
-        return 0
-      fi
-    done
-    log_error "❌ 所有Docker加速源（含保底）均不可达"
-  fi
-
+  log_warn "⚠️  所有Docker加速源探测均失败，尝试使用保底源..."
+  for fb_url in "${DOCKER_FALLBACK_MIRRORS[@]}"; do
+    local fb_host fb_code
+    fb_host="${fb_url#https://}"
+    fb_code=$(curl -s -o /dev/null -w '%{http_code}' \
+      --connect-timeout 3 --max-time 5 "${fb_url}/v2/" 2>/dev/null) || fb_code="000"
+    if [[ "$fb_code" =~ ^(200|401|403|404|301|302)$ ]]; then
+      DM_BEST_HOST="$fb_host"
+      DM_BEST_URL="$fb_url"
+      log_info "✅ 使用保底Docker加速源: $fb_host (HTTP $fb_code)"
+      return 0
+    fi
+  done
+  log_error "❌ 所有Docker加速源（含保底）均不可达"
   return 1
 }
 
@@ -318,6 +356,71 @@ safe_gpg_download() {
   return 0
 }
 
+# --- APT 系 (Ubuntu / Debian) ---
+install_docker_apt() {
+  apt-get update -y >/dev/null 2>&1
+  apt-get install -y ca-certificates curl gnupg >/dev/null 2>&1
+  install -m 0755 -d /etc/apt/keyrings
+  safe_gpg_download "${repo_gpg}/${OS_TYPE}/gpg" /etc/apt/keyrings/docker.asc || { log_error "GPG 下载失败"; return 1; }
+  chmod a+r /etc/apt/keyrings/docker.asc
+
+  local arch codename
+  arch=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+  # shellcheck source=/etc/os-release
+  codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-stable}")
+  # Debian 老版本可能没有 VERSION_CODENAME，用 codename 映射兜底
+  if [[ "$codename" == "stable" && "$OS_TYPE" == "debian" ]]; then
+    local debian_ver="${VERSION_ID%%.*}"
+    case "$debian_ver" in
+      11) codename="bullseye" ;;
+      12) codename="bookworm" ;;
+      13) codename="trixie" ;;
+      *)  codename="bookworm" ;;
+    esac
+  fi
+  echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] ${repo_url}/${OS_TYPE} ${codename} stable" | \
+    tee /etc/apt/sources.list.d/docker.list >/dev/null
+
+  apt-get update -y >/dev/null 2>&1
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1
+}
+
+# --- RPM 系 (CentOS/Rocky/Alma/Fedora/openEuler/HCE/OpenCloudOS/Alinux) ---
+install_docker_rpm() {
+  local pkg_mgr="yum"; command -v dnf &>/dev/null && pkg_mgr="dnf"
+  local repo_file="/etc/yum.repos.d/docker-ce.repo"
+
+  local base_ver="${OS_VERSION:-8}"
+  [[ "$OS_TYPE" == "openeuler" && "$OS_VERSION" == "22" ]] && base_ver="8"
+  [[ "$OS_TYPE" == "openeuler" && "$OS_VERSION" == "24" ]] && base_ver="9"
+  [[ "$OS_TYPE" == "alinux" ]] && {
+    case "${OS_VERSION:-3}" in 2) base_ver="7";; 3) base_ver="8";; 4) base_ver="9";; esac
+  }
+
+  local target_repo_url="${repo_url}/centos"
+  [[ "$OS_TYPE" == "fedora" ]] && target_repo_url="${repo_url}/fedora"
+
+  if [[ -f "$repo_file" ]] && grep -q "docker-ce" "$repo_file" 2>/dev/null; then
+    log_info "📦 Docker repo 已存在，跳过创建"
+  else
+    [[ -f "$repo_file" ]] && cp -f "$repo_file" "${repo_file}.bak.$(date +%s)" 2>/dev/null || true
+    cat > "$repo_file" <<EOF
+[docker-ce-stable]
+name=Docker CE Stable
+baseurl=${target_repo_url}/${base_ver}/\$basearch/stable
+enabled=1
+gpgcheck=1
+gpgkey=${repo_gpg}/centos/gpg
+EOF
+  fi
+
+  $pkg_mgr install -y yum-utils >/dev/null 2>&1 || true
+  [[ "$base_ver" =~ ^(9|10)$ ]] && $pkg_mgr install -y libnftables >/dev/null 2>&1 || true
+
+  $pkg_mgr install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
+  $pkg_mgr install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+}
+
 install_docker() {
   log_step "开始安装 Docker (OS: $OS_TYPE)..."
   local use_mirror=false
@@ -329,76 +432,21 @@ install_docker() {
     [[ "$mirror_base" == *"aliyuncs.com"* || "$mirror_base" == *"aliyun.com"* ]] && mirror_proto="http"
   fi
 
-  local repo_url gpg_key
+  local repo_url repo_gpg
   if [[ "$use_mirror" == true ]]; then
     repo_url="${mirror_proto}://${mirror_base}/docker-ce/linux"
-    gpg_key="${mirror_proto}://${mirror_base}/docker-ce/linux"
+    repo_gpg="${mirror_proto}://${mirror_base}/docker-ce/linux"
   else
     repo_url="https://download.docker.com/linux"
-    gpg_key="https://download.docker.com/linux"
+    repo_gpg="https://download.docker.com/linux"
   fi
 
   case "$OS_TYPE" in
     ubuntu|debian)
-      apt-get update -y >/dev/null 2>&1
-      apt-get install -y ca-certificates curl gnupg >/dev/null 2>&1
-      install -m 0755 -d /etc/apt/keyrings
-      safe_gpg_download "${gpg_key}/${OS_TYPE}/gpg" /etc/apt/keyrings/docker.asc || { log_error "GPG 下载失败"; return 1; }
-      chmod a+r /etc/apt/keyrings/docker.asc
-
-      local arch codename
-      arch=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
-      # shellcheck source=/etc/os-release
-      codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-stable}")
-      # Debian 老版本可能没有 VERSION_CODENAME，用 codename 映射兜底
-      if [[ "$codename" == "stable" && "$OS_TYPE" == "debian" ]]; then
-        local debian_ver="${VERSION_ID%%.*}"
-        case "$debian_ver" in
-          11) codename="bullseye" ;;
-          12) codename="bookworm" ;;
-          13) codename="trixie" ;;
-          *)  codename="bookworm" ;;
-        esac
-      fi
-      echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] ${repo_url}/${OS_TYPE} ${codename} stable" | \
-        tee /etc/apt/sources.list.d/docker.list >/dev/null
-
-      apt-get update -y >/dev/null 2>&1
-      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1
+      install_docker_apt
       ;;
     centos|rocky|almalinux|fedora|openeuler|hce|opencloudos|alinux)
-      local pkg_mgr="yum"; command -v dnf &>/dev/null && pkg_mgr="dnf"
-      local repo_file="/etc/yum.repos.d/docker-ce.repo"
-
-      local base_ver="${OS_VERSION:-8}"
-      [[ "$OS_TYPE" == "openeuler" && "$OS_VERSION" == "22" ]] && base_ver="8"
-      [[ "$OS_TYPE" == "openeuler" && "$OS_VERSION" == "24" ]] && base_ver="9"
-      [[ "$OS_TYPE" == "alinux" ]] && {
-        case "${OS_VERSION:-3}" in 2) base_ver="7";; 3) base_ver="8";; 4) base_ver="9";; esac
-      }
-
-      local target_repo_url="${repo_url}/centos"
-      [[ "$OS_TYPE" == "fedora" ]] && target_repo_url="${repo_url}/fedora"
-
-      if [[ -f "$repo_file" ]] && grep -q "docker-ce" "$repo_file" 2>/dev/null; then
-        log_info "📦 Docker repo 已存在，跳过创建"
-      else
-        [[ -f "$repo_file" ]] && cp -f "$repo_file" "${repo_file}.bak.$(date +%s)" 2>/dev/null || true
-        cat > "$repo_file" <<EOF
-[docker-ce-stable]
-name=Docker CE Stable
-baseurl=${target_repo_url}/${base_ver}/\$basearch/stable
-enabled=1
-gpgcheck=1
-gpgkey=${gpg_key}/centos/gpg
-EOF
-      fi
-
-      $pkg_mgr install -y yum-utils >/dev/null 2>&1 || true
-      [[ "$base_ver" =~ ^(9|10)$ ]] && $pkg_mgr install -y libnftables >/dev/null 2>&1 || true
-
-      $pkg_mgr install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
-      $pkg_mgr install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+      install_docker_rpm
       ;;
     ol)
       if ! command -v dnf &>/dev/null; then
@@ -626,7 +674,6 @@ detect_cloud() {
     "http://169.254.169.254/opc/v1/instance/|OracleCloud"
   )
 
-  local max_jobs=7 job_count=0
   for ep in "${endpoints[@]}"; do
     IFS='|' read -r url cloud <<< "$ep"
     (
@@ -646,18 +693,9 @@ detect_cloud() {
         OracleCloud) [[ "$resp" == *oracle* || "$resp" == *availabilityDomain* || "$resp" == *compartmentId* ]] && echo "$cloud" > "$result_file" ;;
       esac
     ) &
-    # 🔧 修复: 同 probe_latency，((job_count++)) 在 job_count=0 时触发 set -e 退出
-    job_count=$((job_count + 1))
-    if (( job_count >= max_jobs )); then
-      if [[ "${BASH_VERSINFO[0]:-3}" -ge 4 && "${BASH_VERSINFO[1]:-0}" -ge 3 ]]; then
-        wait -n 2>/dev/null || true
-      else
-        wait
-      fi
-      job_count=$((job_count - 1))
-    fi
+    bg_throttle 7
   done
-  wait
+  bg_wait_all
 
   if [[ -s "$result_file" ]]; then
     log_info "✅ 云厂商识别: $(cat "$result_file")"
@@ -693,8 +731,8 @@ main() {
   echo ""
 
   log_step "探测最优镜像源..."
-  probe_latency pkg || log_warn "⚠️  包镜像源探测失败，将使用默认源"
-  probe_latency docker || log_warn "⚠️  Docker加速源探测失败（已尝试保底源）"
+  probe_pkg_mirrors || log_warn "⚠️  包镜像源探测失败，将使用默认源"
+  probe_docker_mirrors || log_warn "⚠️  Docker加速源探测失败（已尝试保底源）"
   echo ""
 
   if ! check_docker_installed; then

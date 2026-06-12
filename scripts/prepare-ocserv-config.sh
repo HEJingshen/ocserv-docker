@@ -18,7 +18,20 @@ esac
 ENV_FILE=${ENV_FILE:-"${PROJECT_ROOT}/.env"}
 ENV_EXAMPLE_FILE="${PROJECT_ROOT}/.env.example"
 LOG_DIR="${PROJECT_ROOT}/logs"
-EDITOR_CMD=${EDITOR:-vi}
+EDITOR_CMD=${EDITOR:-nano}
+
+# 如果 nano 未安装，使用系统包管理器静默安装
+ensure_nano_installed() {
+    command -v nano >/dev/null 2>&1 && return 0
+
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y nano >/dev/null 2>&1
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y nano >/dev/null 2>&1
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y nano >/dev/null 2>&1
+    fi
+}
 
 cd "${PROJECT_ROOT}"
 
@@ -54,6 +67,7 @@ fi
 mkdir -p "${LOG_DIR}"
 
 if [ "${SKIP_EDIT}" = false ]; then
+    ensure_nano_installed
     validate_editor_command "${EDITOR_CMD}"
 
     printf '\nEdit environment variables now: %s %s\n' "${EDITOR_CMD}" "${ENV_FILE}"
