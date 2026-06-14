@@ -3,7 +3,7 @@ ignored:
   - DL3018
   # BuildKit cache mounts keep apk indexes out of the final layer.
   - DL3019
-  # The main ocserv image must run as root for s6 init, NET_ADMIN, TUN, and iptables.
+  # The main ocserv image must run as root for NET_ADMIN, TUN, and iptables.
   - DL3002
   # ADD is intentional for extracting the verified Alpine minirootfs tarball.
   - DL3020

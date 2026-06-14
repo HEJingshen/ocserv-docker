@@ -22,7 +22,8 @@ on:
       - 'scripts/configure-alpine-repositories.sh'
       - 'scripts/prepare-ocserv-config.sh'
       - 'scripts/render-ocserv-conf.sh'
-      - 'docker/ocserv/s6-init.sh'
+      - 'docker/ocserv/init.sh'
+      - 'docker/ocserv/entrypoint.sh'
       - 'config/ocserv.conf.template'
   pull_request:
     branches: [ "main", "master" ]
@@ -37,7 +38,8 @@ on:
       - 'scripts/configure-alpine-repositories.sh'
       - 'scripts/prepare-ocserv-config.sh'
       - 'scripts/render-ocserv-conf.sh'
-      - 'docker/ocserv/s6-init.sh'
+      - 'docker/ocserv/init.sh'
+      - 'docker/ocserv/entrypoint.sh'
       - 'config/ocserv.conf.template'
 
 permissions:

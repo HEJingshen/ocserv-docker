@@ -118,38 +118,19 @@ RUN --mount=type=cache,target=/var/cache/apk \
         | sort -u \
         | awk 'NF { print "so:" $1 }' \
         || true)"; \
-    apk add --update-cache --virtual .ocserv-rundeps ${runDeps}; \
-    apk add --update-cache s6-overlay; \
-    [ -x /init ]
-
-ENV PATH="/command:${PATH}"
+    apk add --update-cache --virtual .ocserv-rundeps ${runDeps}
 
 RUN set -eux; \
-    mkdir -p /etc/ocserv /etc/ocserv/config-per-user /run/ocserv /var/log/ocserv \
-             /etc/s6-overlay/s6-rc.d/ocserv-init \
-             /etc/s6-overlay/s6-rc.d/ocserv \
-             /etc/s6-overlay/s6-rc.d/ocserv/dependencies.d \
-             /etc/s6-overlay/s6-rc.d/user/contents.d; \
-    echo "oneshot" > /etc/s6-overlay/s6-rc.d/ocserv-init/type; \
-    echo "longrun" > /etc/s6-overlay/s6-rc.d/ocserv/type; \
-    ln -s ../ocserv-init /etc/s6-overlay/s6-rc.d/ocserv/dependencies.d/; \
-    ln -s ../ocserv-init /etc/s6-overlay/s6-rc.d/user/contents.d/; \
-    ln -s ../ocserv /etc/s6-overlay/s6-rc.d/user/contents.d/
+    mkdir -p /etc/ocserv /etc/ocserv/config-per-user /run/ocserv /var/log/ocserv
 
-COPY docker/ocserv/s6-init.sh /etc/ocserv/s6-init.sh
+COPY docker/ocserv/init.sh docker/ocserv/entrypoint.sh /usr/local/bin/
 
 RUN set -eux; \
-    chmod +x /etc/ocserv/s6-init.sh; \
-    printf '#!/command/execlineb -P\n/etc/ocserv/s6-init.sh\n' \
-        > /etc/s6-overlay/s6-rc.d/ocserv-init/up; \
-    chmod +x /etc/s6-overlay/s6-rc.d/ocserv-init/up; \
-    printf '#!/bin/sh\nexec ocserv -c /etc/ocserv/ocserv.conf -f\n' \
-        > /etc/s6-overlay/s6-rc.d/ocserv/run; \
-    chmod +x /etc/s6-overlay/s6-rc.d/ocserv/run
+    chmod +x /usr/local/bin/init.sh /usr/local/bin/entrypoint.sh
 
 EXPOSE 443/tcp 443/udp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ss -tln | grep -q ':443' || exit 1
 
-ENTRYPOINT ["/init"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

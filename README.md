@@ -3,7 +3,7 @@
 [![Build Images](https://github.com/GentleKingson/ocserv-docker/actions/workflows/source-cache.yml/badge.svg)](https://github.com/GentleKingson/ocserv-docker/actions/workflows/source-cache.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
-基于 Docker 的 OpenConnect Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **s6-overlay 进程管理**。
+基于 Docker 的 OpenConnect Server（ocserv），支持 **多架构**（amd64 / arm64），内置 **iptables 自动配置 + 前台进程模式**。
 
 ## 许可证
 

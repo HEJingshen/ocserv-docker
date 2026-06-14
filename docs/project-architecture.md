@@ -14,7 +14,7 @@
 │                                                     │
 │  ┌──────────────┐                                   │
 │  │   ocserv     │                                   │
-│  │  s6-overlay  │                                   │
+│  │  entrypoint  │                                   │
 │  └──────────────┘                                   │
 │                                                     │
 └─────────────────────────────────────────────────────┘
@@ -44,8 +44,7 @@
 | 基础镜像 | 与 builder 相同的官方 Alpine 基础镜像 |
 | 运行依赖 | 通过 `scanelf` 解析 ocserv 二进制所需共享库，并用 `apk add --virtual .ocserv-rundeps so:*` 安装 |
 | 产物复制 | `COPY --from=builder /out/ /` |
-| s6-overlay | 通过 Alpine apk 仓库安装 `s6-overlay` |
-| PATH | `/command` 加入 PATH，使 `docker exec` 可用 s6-overlay v3 工具 |
+| 启动脚本 | `docker/ocserv/entrypoint.sh` 与 `docker/ocserv/init.sh` 复制到 `/usr/local/bin/`，由 `ENTRYPOINT` 调用 |
 
 ### Alpine 基线
 
@@ -53,7 +52,7 @@
 
 | 镜像 | 用途 | 关键能力 |
 |:--|:--|:--|
-| `ocserv` | 默认生产标签 `kingsonho/ocserv:${OCSERV_VERSION}`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT、s6 |
+| `ocserv` | 默认生产标签 `kingsonho/ocserv:${OCSERV_VERSION}`，`latest` 指向该版本标签 | PAM、GSSAPI/Kerberos，并自动探测 RADIUS、OTP/liboath、plain auth、occtl、LZ4、iptables NAT |
 
 ### 镜像元数据（LABELs）
 
@@ -66,27 +65,25 @@
 | `org.opencontainers.image.created` | `<BUILD_DATE>` | 构建时间 |
 | `org.opencontainers.image.source` | GitHub 仓库地址 | 源码来源 |
 
-### s6-overlay 服务定义
+### entrypoint 启动流程
 
-Dockerfile 创建 s6 服务树，并复制 `docker/ocserv/s6-init.sh` 作为 `ocserv-init` oneshot 的执行脚本：
+镜像不依赖任何进程监督器（早期版本基于 s6-overlay，已在评估后移除——容器健康感知完全由 Docker 原生 `HEALTHCHECK` 与 `restart: unless-stopped` 承担）。启动序列由一个轻量 entrypoint 编排：
 
 ```
-/etc/s6-overlay/s6-rc.d/
-├── ocserv-init/          # oneshot — 启动前检查 + iptables 配置
-│   ├── up → execline 调用 /etc/ocserv/s6-init.sh
-│   └── type → "oneshot"
-├── ocserv/               # longrun — ocserv 主进程
-│   ├── run → exec ocserv -c /etc/ocserv/ocserv.conf -f
-│   ├── type → "longrun"
-│   └── dependencies.d/ → 指向 ocserv-init
-└── user/contents.d/      # 默认启动集合
-    ├── ocserv-init → 链接
-    └── ocserv → 链接
+容器启动 (ENTRYPOINT = /usr/local/bin/entrypoint.sh)
+  ├─ 1. /usr/local/bin/init.sh        # 前置检查 + iptables NAT/转发规则
+  │      失败 → exit 1 → 容器退出 → restart 策略兜底
+  └─ 2. exec ocserv -c /etc/ocserv/ocserv.conf -f   # 前台运行，成为 PID 1
 ```
 
-**依赖链**：容器启动 → s6-overlay 初始化 → `ocserv-init`（oneshot 执行配置检查 + iptables NAT/转发规则）→ 返回 0 → `ocserv`（longrun 前台运行）。
+| 文件 | 镜像内路径 | 职责 |
+|:--|:--|:--|
+| `docker/ocserv/entrypoint.sh` | `/usr/local/bin/entrypoint.sh` | 容器入口：先跑 init.sh，再 `exec ocserv` 进前台 |
+| `docker/ocserv/init.sh` | `/usr/local/bin/init.sh` | 启动前检查（config/二进制）+ iptables 规则设置 |
 
-**oneshot up 文件格式**：s6-overlay v3 约定 oneshot 服务的 up 文件使用 execline 语法（`#!/command/execlineb -P`），因此初始化逻辑提取为独立 shell 脚本 `/etc/ocserv/s6-init.sh`，由 up 文件通过 execline 调用。
+**关键设计**：`exec ocserv ... -f` 让 ocserv 取代 entrypoint 成为 PID 1。这样 `docker stop` 发出的 SIGTERM 会被 ocserv 直接接收并触发原生优雅退出，无需中间信号转发层。`-f` 强制前台模式，使 stdout/stderr 被 Docker 日志驱动捕获。
+
+**崩溃恢复由 Docker 接管**：ocserv 进程退出（无论正常退出码还是崩溃）→ 容器随之退出 → `restart: unless-stopped` 自动重建容器（含重新执行 init.sh 重建 iptables）。相比进程级 supervisor，容器级重启会重建网络命名空间并重跑 iptables，能修复被外部进程误删的规则；同时崩溃事件在 `docker events` / `docker ps` 中可见，可观测性更好。
 
 ### 暴露端口
 
@@ -106,9 +103,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 ---
 
-## 二、初始化脚本（s6-init.sh）
+## 二、初始化脚本（init.sh）
 
-作为 s6 `ocserv-init` oneshot 服务运行，在 ocserv 主进程启动前执行以下检查与配置：
+由 entrypoint.sh 在 `exec ocserv` 之前同步调用，在 ocserv 主进程启动前执行以下检查与配置：
 
 ```
 1. 检查 ocserv.conf 是否存在且可读
@@ -131,10 +128,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
    └─ NAT POSTROUTING: MASQUERADE 伪装（出口接口自动检测）
 
 6. 若无法解析子网，使用默认值 10.10.10.0/24
-   └─ 全部通过 → exit 0，s6 继续启动 ocserv 主服务
+   └─ 全部通过 → exit 0，entrypoint.sh 继续 exec ocserv 主服务
 ```
 
-**注意**：初始化逻辑维护在 `docker/ocserv/s6-init.sh`，构建时复制到镜像内的 `/etc/ocserv/s6-init.sh`。Dockerfile 只负责注册 s6 服务和设置执行权限。
+**注意**：初始化逻辑维护在 `docker/ocserv/init.sh`，构建时复制到镜像内的 `/usr/local/bin/init.sh`。Dockerfile 只负责复制脚本并设置执行权限。
 
 这种设计确保配置错误在启动阶段就被拦截，而不是等 ocserv 崩溃后才发现问题。同时，自动配置 iptables 规则使客户端无需额外手动配置即可通过容器上网。
 
@@ -349,11 +346,13 @@ healthcheck:
 ## 六、项目文件索引
 
 ```
-├── Dockerfile                          # 多阶段构建 + s6 服务定义
+├── Dockerfile                          # 多阶段构建 + entrypoint 启动编排
 ├── docker-compose.yml                  # 主服务编排（支持环境变量）
 ├── install-docker.sh                   # Docker 一键安装脚本
 ├── docker/
-│   └── ocserv/s6-init.sh               # ocserv 容器启动前初始化脚本
+│   └── ocserv/
+│       ├── entrypoint.sh               # 容器入口：init.sh + exec ocserv
+│       └── init.sh                     # 启动前检查 + iptables NAT/转发规则
 ├── scripts/
 │   ├── common.sh                        # 共享工具库（.env 读取、路径校验、校验函数）
 │   ├── configure-alpine-repositories.sh # Docker 构建阶段配置 Alpine apk 源
