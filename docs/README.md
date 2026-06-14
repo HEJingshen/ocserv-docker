@@ -3,7 +3,7 @@
 [![Build Images](https://github.com/GentleKingson/ocserv-docker/actions/workflows/source-cache.yml/badge.svg)](https://github.com/GentleKingson/ocserv-docker/actions/workflows/source-cache.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/kingsonho/ocserv?sort=semver)](https://hub.docker.com/r/kingsonho/ocserv/tags)
 
-基于 Docker 的 OpenConnect Server（ocserv），支持 **amd64 / arm64**，内置 **s6-overlay 进程管理**。
+基于 Docker 的 OpenConnect Server（ocserv），支持 **amd64 / arm64**，内置 **iptables 自动配置 + 前台进程模式**，健康感知由 Docker 原生 `HEALTHCHECK` 与 `restart` 策略承担。
 
 ---
 
@@ -277,9 +277,9 @@ docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
 
 ## 六、功能模块指南
 
-### 6.1 s6-overlay 进程管理
+### 6.1 容器启动与健康感知
 
-负责容器启动时的检查、iptables 初始化和 ocserv 主进程托管。实现细节见 [project-architecture.md](./project-architecture.md)。
+容器启动由轻量 `entrypoint.sh` 编排：先跑 `init.sh`（前置检查 + iptables NAT/转发规则），再 `exec ocserv` 前台运行成为 PID 1。进程健康由 Docker 原生 `HEALTHCHECK`（检查 443 端口）+ `restart: unless-stopped` 兜底；`occtl reload` 走控制 socket 热重载配置，与进程管理无关。实现细节见 [project-architecture.md](./project-architecture.md)。
 
 ### 6.2 CI/CD 自动构建
 

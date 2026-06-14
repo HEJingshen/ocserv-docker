@@ -43,7 +43,8 @@ jobs:
           sh -n scripts/common.sh
           sh -n scripts/prepare-ocserv-config.sh
           sh -n scripts/render-ocserv-conf.sh
-          sh -n docker/ocserv/s6-init.sh
+          sh -n docker/ocserv/init.sh
+          sh -n docker/ocserv/entrypoint.sh
 
       - name: Lint shell scripts
         run: |
@@ -51,7 +52,8 @@ jobs:
           shellcheck -s sh scripts/common.sh
           shellcheck -s sh scripts/prepare-ocserv-config.sh
           shellcheck -s sh scripts/render-ocserv-conf.sh
-          shellcheck -s sh docker/ocserv/s6-init.sh
+          shellcheck -s sh docker/ocserv/init.sh
+          shellcheck -s sh docker/ocserv/entrypoint.sh
 
       - name: Lint Dockerfile
         run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile

@@ -50,5 +50,5 @@ arm64 构建使用 `--platform linux/arm64`。
 
 - 构建 `Dockerfile`。
 - 确认 `/etc/alpine-release` 输出 `3.23.4`。
-- 确认 `apk --version`、`ocserv --version`、`occtl --version` 正常，并确认 `/init` 可执行。
+- 确认 `apk --version`、`ocserv --version`、`occtl --version` 正常，并确认 `/usr/local/bin/entrypoint.sh` 可执行。
 - 确认 workflow 发布版本标签，从版本标签创建 `latest` 别名，并为多架构 manifest 保留 SBOM/provenance attestation。
