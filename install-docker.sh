@@ -82,6 +82,7 @@ should_create_rpm_repo() {
     log_info "📦 Docker repo 已存在，跳过创建"
     return 1
   fi
+  # shellcheck disable=SC2015  # intentional: backup is best-effort
   [[ -f "$repo_file" ]] && cp -f "$repo_file" "${repo_file}.bak.$(date +%s)" 2>/dev/null || true
   return 0
 }
@@ -447,6 +448,7 @@ EOF
   fi
 
   run_install "$pkg_mgr" install -y yum-utils || true
+  # shellcheck disable=SC2015  # intentional: libnftables is best-effort
   [[ "$base_ver" =~ ^(9|10)$ ]] && run_install "$pkg_mgr" install -y libnftables || true
 
   install_docker_pkgs_fallback "$pkg_mgr"
@@ -507,6 +509,7 @@ install_docker() {
         run_install "$pkg_mgr" install -y docker-ce --nobest || run_install "$pkg_mgr" install -y docker
       fi
       # 确保预装的 Docker 已启用并自启
+      # shellcheck disable=SC2015  # intentional: enable is best-effort
       command -v systemctl &>/dev/null && run_install systemctl enable --now docker || true
       ;;
     *) log_error "❌ 不支持的 OS: $OS_TYPE"; return 1 ;;
