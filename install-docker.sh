@@ -462,9 +462,10 @@ gpgkey=${repo_gpg}/centos/gpg
 EOF
   fi
 
-  run_install "$pkg_mgr" install -y yum-utils || true
-  # shellcheck disable=SC2015  # intentional: libnftables is best-effort
-  [[ "$base_ver" =~ ^(9|10)$ ]] && run_install "$pkg_mgr" install -y libnftables || true
+  # el9/10: docker 用 nftables 后端，需确保 libnftables.so 可用。
+  # RHEL 系无独立 libnftables 包，该 .so 由 nftables 包提供（best-effort）。
+  # shellcheck disable=SC2015
+  [[ "$base_ver" =~ ^(9|10)$ ]] && run_install "$pkg_mgr" install -y nftables || true
 
   install_docker_pkgs_fallback "$pkg_mgr"
 }
