@@ -39,6 +39,7 @@ readonly DOCKER_FALLBACK_MIRRORS=(
 
 readonly DOCKER_MIRROR_PROBE_COUNT=3
 readonly HTTP_OK_CODES='^(200|401|403|404|301|302)$'
+readonly MAX_MIRRORS=3
 
 # --- 状态变量 ---
 DH_STATUS="UNKNOWN" DH_CFG_STATUS="NOT_CONFIGURED"
@@ -575,25 +576,30 @@ safe_update_daemon_json() {
   if command -v python3 &>/dev/null; then
     python3 -c "
 import json, os, sys
-path, url = sys.argv[1], sys.argv[2]
+path, url, max_mirrors = sys.argv[1], sys.argv[2], int(sys.argv[3])
 cfg = {}
 if os.path.exists(path):
     with open(path) as f:
         try: cfg = json.load(f)
         except: pass
-cfg['registry-mirrors'] = [url]
+existing = cfg.get('registry-mirrors', [])
+merged = [url] + [m for m in existing if m != url]
+cfg['registry-mirrors'] = merged[:max_mirrors]
 with open(path, 'w') as f:
     json.dump(cfg, f, indent=2)
     f.write('\n')
-" "$conf" "$new_url" && return 0
+" "$conf" "$new_url" "$MAX_MIRRORS" && return 0
   fi
 
   if command -v jq &>/dev/null; then
-    jq --arg url "$new_url" '.["registry-mirrors"] = [$url]' "$conf" > "${conf}.tmp" 2>/dev/null && \
+    jq --arg url "$new_url" --argjson max "$MAX_MIRRORS" \
+      '.["registry-mirrors"] = ([$url] + (.["registry-mirrors"] // [] | map(select(. != $url))))[:$max]' \
+      "$conf" > "${conf}.tmp" 2>/dev/null && \
     mv "${conf}.tmp" "$conf" && return 0
   fi
 
-  # sed 最终降级：仅改 registry-mirrors，不碰其他字段
+  # sed 最终降级：不支持追加去重，仅写入单源（覆盖既有 registry-mirrors）
+  # 如需保留多源，请安装 python3 或 jq。
   if [[ -f "$conf" ]]; then
     if grep -q '"registry-mirrors"' "$conf"; then
       sed -i "s|\"registry-mirrors\"[[:space:]]*:[[:space:]]*\[[^]]*\]|\"registry-mirrors\": [\"${new_url}\"]|" "$conf"
