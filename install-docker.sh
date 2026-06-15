@@ -793,9 +793,13 @@ main() {
   check_docker_hub
   echo ""
 
-  log_step "探测最优镜像源..."
-  probe_pkg_mirrors || log_warn "⚠️  包镜像源探测失败，将使用默认源"
-  probe_docker_mirrors || log_warn "⚠️  Docker加速源探测失败（已尝试保底源）"
+  if [[ "$DH_STATUS" == "GOOD" ]]; then
+    log_info "⏭️  跳过镜像源探测（网络优秀）"
+  else
+    log_step "探测最优镜像源..."
+    probe_pkg_mirrors || log_warn "⚠️  包镜像源探测失败，将使用默认源"
+    probe_docker_mirrors || log_warn "⚠️  Docker加速源探测失败（已尝试保底源）"
+  fi
   echo ""
 
   if ! check_docker_installed; then

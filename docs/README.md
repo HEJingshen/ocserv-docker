@@ -287,7 +287,7 @@ docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
 
 ### 6.3 Docker 安装脚本
 
-`install-docker.sh` 用于快速安装 Docker 与 Compose，支持多发行版和镜像源自动选择。
+`install-docker.sh` 用于快速安装 Docker 与 Compose，支持多发行版和镜像源自动选择；检测到网络质量优秀时自动跳过镜像源探测，直接使用官方源。
 
 ### 6.4 配置脚本
 

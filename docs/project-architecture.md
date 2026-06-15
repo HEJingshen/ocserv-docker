@@ -254,13 +254,16 @@ healthcheck:
 3. 网络检测 → curl 探测 Docker Hub 官方源延迟
        │   结果: GOOD / FAIR / SLOW / BLOCKED
        │
-4. 镜像源探测 → 并发 ping/curl 测试多个源
+       ├─ GOOD（官方源可达且 TTFB ≤ 1500ms）
+       │     → 跳过第 4 步（镜像源探测）与第 6 步（daemon.json 加速），直接用官方源
+       │
+4. 镜像源探测（仅 FAIR/SLOW/BLOCKED 执行）→ 并发 ping/curl 测试多个源
        ├─ 包镜像源: 阿里云、腾讯云、华为云、清华
        └─ Docker 加速源: daocloud、1ms.run 等 + 保底源
        │
 5. Docker 安装 → 根据 OS 类型添加官方/镜像 repo，安装 ce/cli/containerd
        │
-6. daemon.json 配置 → 智能比对已有配置，仅更新 registry-mirrors
+6. daemon.json 配置（GOOD 时同样跳过）→ 智能比对已有配置，仅更新 registry-mirrors
        │
 7. 云厂商检测 → 并发探测元数据端点， fallback 到 DMI
 ```
@@ -272,6 +275,7 @@ healthcheck:
 - **并发控制**：限制最大并发 job 数为 8，避免低配机器 fork 爆炸
 - **set -e 安全**：避免 `((var++))` 在值为 0 时返回非零退出码
 - **CI 友好**：`-y/--yes` 非交互模式，`--force` 强制重装，`--no-mirror` 跳过镜像配置
+- **按需探测**：网络质量 GOOD 时跳过镜像源探测与加速配置，直接使用官方源，减少无谓的探测耗时（探测结果在 GOOD 路径下本就不会被使用）
 
 ---
 
