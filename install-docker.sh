@@ -126,6 +126,7 @@ parse_args() {
       --no-mirror)      NO_MIRROR=true; shift ;;
       --force)          FORCE_INSTALL=true; shift ;;
       --skip-cloud)     SKIP_CLOUD=true; shift ;;
+      --debug)          DEBUG=true; shift ;;
       -y|--yes)         YES_MODE=true; shift ;;
       -h|--help)
         cat >&2 <<EOF
@@ -134,6 +135,7 @@ parse_args() {
   --no-mirror    跳过镜像加速配置
   --force        强制重新安装 Docker
   --skip-cloud   跳过云厂商检测
+  --debug        显示安装命令的完整输出（调试用）
   -y, --yes      非交互模式（自动确认所有提示，适合 CI/CD）
   -h, --help     显示帮助
 EOF
@@ -143,13 +145,18 @@ EOF
   done
 }
 
+# 参数组合校验。当前无互斥约束；新增 flag 时在此校验。
+validate_args() {
+  :
+}
+
 # ============================================================
 # 模块 0：前置检查
 # ============================================================
 check_prerequisites() {
-  [[ $EUID -ne 0 ]] && { log_error "请使用 root 用户或 sudo 执行此脚本"; exit 1; }
-  command -v curl &>/dev/null || { log_error "未找到 curl，请先安装"; exit 1; }
-  TMPDIR_BASE=$(mktemp -d) || { log_error "无法创建临时目录"; exit 1; }
+  [[ $EUID -ne 0 ]] && { log_error "请使用 root 用户或 sudo 执行此脚本"; return 1; }
+  command -v curl &>/dev/null || { log_error "未找到 curl，请先安装"; return 1; }
+  TMPDIR_BASE=$(mktemp -d) || { log_error "无法创建临时目录"; return 1; }
 }
 
 # ============================================================
@@ -395,9 +402,9 @@ install_docker_apt() {
   local arch codename
   arch=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
   # shellcheck disable=SC1091
-  codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-stable}")
-  # Debian 老版本可能没有 VERSION_CODENAME，用 codename 映射兜底
-  if [[ "$codename" == "stable" && "$OS_TYPE" == "debian" ]]; then
+  codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+  # VERSION_CODENAME 为空或 "stable" 时，用版本号映射兜底（老版本 Debian）
+  if [[ -z "$codename" || "$codename" == "stable" ]]; then
     local debian_ver="${VERSION_ID%%.*}"
     case "$debian_ver" in
       11) codename="bullseye" ;;
@@ -757,7 +764,8 @@ detect_cloud() {
 # ============================================================
 main() {
   parse_args "$@"
-  check_prerequisites
+  validate_args
+  check_prerequisites || exit 1
   init_os_vars
 
   check_docker_hub
