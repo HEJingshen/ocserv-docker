@@ -38,6 +38,7 @@ readonly DOCKER_FALLBACK_MIRRORS=(
 )
 
 readonly DOCKER_MIRROR_PROBE_COUNT=3
+readonly HTTP_OK_CODES='^(200|401|403|404|301|302)$'
 
 # --- 状态变量 ---
 DH_STATUS="UNKNOWN" DH_CFG_STATUS="NOT_CONFIGURED"
@@ -52,6 +53,24 @@ run_install() {
   else
     "$@" >/dev/null 2>&1 || { log_error "命令失败，请手动执行查看详情: $*"; return 1; }
   fi
+}
+
+# --- 探测结果归约 (从 tmpdir 选出延迟最小的 label) ---
+# 输出: "<label> <time_ms>"（成功）或 return 1（无有效结果）
+reduce_probe_results() {
+  local tmpdir="$1"
+  local best_label="" best_time="" found_any=false
+  for f in "$tmpdir"/*; do
+    [[ -f "$f" ]] || continue
+    local val; val=$(cat "$f" 2>/dev/null) || continue
+    [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
+    found_any=true
+    local label="${f##*/}"; label="${label%_*}"
+    if [[ -z "$best_time" ]] || awk "BEGIN{exit !(${val} < ${best_time})}"; then
+      best_time="$val"; best_label="$label"
+    fi
+  done
+  [[ "$found_any" == true ]] && echo "$best_label $best_time" || return 1
 }
 
 # --- 并发任务限制 (bg_throttle / bg_wait_all) ---
@@ -231,27 +250,16 @@ probe_pkg_mirrors() {
   done
   bg_wait_all
 
-  local best_label="" best_time=""
-  local found_any=false
-  for f in "$tmpdir"/*; do
-    [[ -f "$f" ]] || continue
-    local val; val=$(cat "$f" 2>/dev/null) || continue
-    [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
-    found_any=true
-    local label="${f##*/}"; label="${label%_*}"
-    if [[ -z "$best_time" ]] || awk "BEGIN{exit !(${val} < ${best_time})}"; then
-      best_time="$val"; best_label="$label"
-    fi
-  done
-
+  local result best_label best_time
+  result=$(reduce_probe_results "$tmpdir")
   rm -rf "$tmpdir"
 
-  if [[ -n "$best_label" && "$found_any" == true ]]; then
+  if [[ -n "$result" ]]; then
+    read -r best_label best_time <<< "$result"
     PKG_MIRROR="$best_label"
     log_info "✅ 最快包镜像源: $best_label (${MIRRORS[$best_label]}) | ${best_time}ms"
     return 0
   fi
-
   return 1
 }
 
@@ -282,7 +290,8 @@ probe_docker_mirrors() {
         # 放宽 HTTP 状态码检查 (200/401/403/404 均可视为可达)
         # 很多国内代理镜像 /v2/ 返回 403/404 但 pull 实际可用
         [[ -z "$http_code" || -z "$total_time" ]] && exit 0
-        [[ "$http_code" =~ ^(200|401|403|404|301|302)$ ]] || exit 0
+        # shellcheck disable=SC2076
+        [[ "$http_code" =~ $HTTP_OK_CODES ]] || exit 0
 
         time_ms=$(awk "BEGIN{printf \"%.2f\", ${total_time} * 1000}")
 
@@ -294,22 +303,12 @@ probe_docker_mirrors() {
   done
   bg_wait_all
 
-  local best_label="" best_time=""
-  local found_any=false
-  for f in "$tmpdir"/*; do
-    [[ -f "$f" ]] || continue
-    local val; val=$(cat "$f" 2>/dev/null) || continue
-    [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
-    found_any=true
-    local label="${f##*/}"; label="${label%_*}"
-    if [[ -z "$best_time" ]] || awk "BEGIN{exit !(${val} < ${best_time})}"; then
-      best_time="$val"; best_label="$label"
-    fi
-  done
-
+  local result best_label best_time
+  result=$(reduce_probe_results "$tmpdir")
   rm -rf "$tmpdir"
 
-  if [[ -n "$best_label" && "$found_any" == true ]]; then
+  if [[ -n "$result" ]]; then
+    read -r best_label best_time <<< "$result"
     DM_BEST_HOST="$best_label"
     for url in "${DOCKER_MIRROR_URLS[@]}"; do
       [[ "$url" == *"$best_label"* ]] && { DM_BEST_URL="$url"; break; }
@@ -325,7 +324,8 @@ probe_docker_mirrors() {
     fb_host="${fb_url#https://}"
     fb_code=$(curl -s -o /dev/null -w '%{http_code}' \
       --connect-timeout 3 --max-time 5 "${fb_url}/v2/" 2>/dev/null) || fb_code="000"
-    if [[ "$fb_code" =~ ^(200|401|403|404|301|302)$ ]]; then
+        # shellcheck disable=SC2076
+    if [[ "$fb_code" =~ $HTTP_OK_CODES ]]; then
       DM_BEST_HOST="$fb_host"
       DM_BEST_URL="$fb_url"
       log_info "✅ 使用保底Docker加速源: $fb_host (HTTP $fb_code)"
