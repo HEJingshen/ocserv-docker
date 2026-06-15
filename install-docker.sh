@@ -73,6 +73,27 @@ reduce_probe_results() {
   [[ "$found_any" == true ]] && echo "$best_label $best_time" || return 1
 }
 
+# --- RPM repo 文件管理 (已存在则跳过，否则备份) ---
+# 返回 0 表示应创建（调用者继续创建），返回 1 表示已存在（调用者跳过）
+should_create_rpm_repo() {
+  local repo_file="$1"
+  if [[ -f "$repo_file" ]] && grep -q "docker-ce" "$repo_file" 2>/dev/null; then
+    log_info "📦 Docker repo 已存在，跳过创建"
+    return 1
+  fi
+  [[ -f "$repo_file" ]] && cp -f "$repo_file" "${repo_file}.bak.$(date +%s)" 2>/dev/null || true
+  return 0
+}
+
+# --- Docker 包两步安装 (全套 --nobest 失败则降级最小集) ---
+# 参数: $1 = 包管理器 (yum/dnf)
+install_docker_pkgs_fallback() {
+  local pkg_mgr="$1"
+  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin --nobest || \
+  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io
+}
+
 # --- 并发任务限制 (bg_throttle / bg_wait_all) ---
 # 在 ( ... ) & 后调用 bg_throttle <max> 来限制并发数;
 # 全部任务结束后调用 bg_wait_all 等待并重置计数器。
@@ -403,10 +424,7 @@ install_docker_rpm() {
   local target_repo_url="${repo_url}/centos"
   [[ "$OS_TYPE" == "fedora" ]] && target_repo_url="${repo_url}/fedora"
 
-  if [[ -f "$repo_file" ]] && grep -q "docker-ce" "$repo_file" 2>/dev/null; then
-    log_info "📦 Docker repo 已存在，跳过创建"
-  else
-    [[ -f "$repo_file" ]] && cp -f "$repo_file" "${repo_file}.bak.$(date +%s)" 2>/dev/null || true
+  if should_create_rpm_repo "$repo_file"; then
     cat > "$repo_file" <<EOF
 [docker-ce-stable]
 name=Docker CE Stable
@@ -420,8 +438,24 @@ EOF
   run_install "$pkg_mgr" install -y yum-utils || true
   [[ "$base_ver" =~ ^(9|10)$ ]] && run_install "$pkg_mgr" install -y libnftables || true
 
-  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest || \
-  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io
+  install_docker_pkgs_fallback "$pkg_mgr"
+}
+
+# --- Oracle Linux ---
+install_docker_ol() {
+  if ! command -v dnf &>/dev/null; then
+    log_error "❌ Oracle Linux 需要 dnf，但未找到"
+    return 1
+  fi
+  run_install dnf install -y dnf-plugins-core || true
+
+  local docker_repo="/etc/yum.repos.d/docker-ce.repo"
+  if should_create_rpm_repo "$docker_repo"; then
+    dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo >/dev/null 2>&1 || \
+      { log_error "❌ 添加 Docker 仓库失败"; return 1; }
+  fi
+
+  install_docker_pkgs_fallback dnf
 }
 
 install_docker() {
@@ -452,21 +486,7 @@ install_docker() {
       install_docker_rpm
       ;;
     ol)
-      if ! command -v dnf &>/dev/null; then
-        log_error "❌ Oracle Linux 需要 dnf，但未找到"
-        return 1
-      fi
-      run_install dnf install -y dnf-plugins-core || true
-      local docker_repo="/etc/yum.repos.d/docker-ce.repo"
-      if [[ -f "$docker_repo" ]] && grep -q "docker-ce" "$docker_repo" 2>/dev/null; then
-        log_info "📦 Docker repo 已存在，跳过创建"
-      else
-        [[ -f "$docker_repo" ]] && cp -f "$docker_repo" "${docker_repo}.bak.$(date +%s)" 2>/dev/null || true
-        dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo >/dev/null 2>&1 || \
-          { log_error "❌ 添加 Docker 仓库失败"; return 1; }
-      fi
-      run_install dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest || \
-      run_install dnf install -y docker-ce docker-ce-cli containerd.io
+      install_docker_ol
       ;;
     tencentos)
       if command -v docker &>/dev/null; then
