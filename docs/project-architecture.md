@@ -283,8 +283,8 @@ healthcheck:
 
 仓库 shell 脚本按解释器能力明确分组：
 
-- 纯 POSIX 脚本使用 `#!/bin/sh` 和 `set -eu`，并在 CI 中通过 `sh -n` 检查；运行期入口、配置渲染脚本都归入这一类。
-- 需要 Bash 特性的脚本使用 `#!/usr/bin/env bash` 和 `set -euo pipefail`，并在 CI 中通过 `bash -n` 检查；当前 `install-docker.sh` 和 `scripts/occ` 归入这一类。
+- 纯 POSIX 脚本使用 `#!/bin/sh` 和 `set -eu`，在 CI 中通过 `sh -n` 语法检查和 `shellcheck -s sh` 静态检查；运行期入口、配置渲染脚本都归入这一类。
+- 需要 Bash 特性的脚本使用 `#!/usr/bin/env bash` 和 `set -euo pipefail`，在 CI 中通过 `bash -n` 语法检查和 `shellcheck -s bash` 静态检查；当前 `install-docker.sh` 和 `scripts/occ` 归入这一类。
 - 新增 `.sh` 文件必须先选择上述一类，并同步更新静态测试中的脚本分类表。
 
 ### 触发条件

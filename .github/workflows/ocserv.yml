@@ -45,6 +45,8 @@ jobs:
           sh -n scripts/render-ocserv-conf.sh
           sh -n docker/ocserv/init.sh
           sh -n docker/ocserv/entrypoint.sh
+          bash -n install-docker.sh
+          bash -n scripts/occ
 
       - name: Lint shell scripts
         run: |
@@ -54,6 +56,8 @@ jobs:
           shellcheck -s sh scripts/render-ocserv-conf.sh
           shellcheck -s sh docker/ocserv/init.sh
           shellcheck -s sh docker/ocserv/entrypoint.sh
+          shellcheck -s bash install-docker.sh
+          shellcheck -s bash scripts/occ
 
       - name: Lint Dockerfile
         run: docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:v2.12.0 hadolint --failure-threshold error Dockerfile

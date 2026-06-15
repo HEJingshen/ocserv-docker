@@ -6,12 +6,6 @@
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if [[ -f "${SCRIPT_DIR}/scripts/common.sh" ]]; then
-  # shellcheck source=scripts/common.sh
-  . "${SCRIPT_DIR}/scripts/common.sh"
-fi
-
 # --- 颜色与日志 (统一输出至 stderr，避免污染 stdout 管道) ---
 readonly GREEN='\033[0;32m' YELLOW='\033[1;33m' RED='\033[0;31m' BLUE='\033[0;34m' NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*" >&2; }
@@ -44,12 +38,78 @@ readonly DOCKER_FALLBACK_MIRRORS=(
 )
 
 readonly DOCKER_MIRROR_PROBE_COUNT=3
+readonly HTTP_OK_CODES='^(200|401|403|404|301|302)$'
+readonly MAX_MIRRORS=3
 
 # --- 状态变量 ---
 DH_STATUS="UNKNOWN" DH_CFG_STATUS="NOT_CONFIGURED"
 DM_BEST_HOST="" DM_BEST_URL="" PKG_MIRROR=""
 OS_TYPE="" OS_VERSION=""
-TMPDIR_BASE="" SKIP_CLOUD=false FORCE_INSTALL=false NO_MIRROR=false YES_MODE=false
+TMPDIR_BASE="" SKIP_CLOUD=false FORCE_INSTALL=false NO_MIRROR=false YES_MODE=false DEBUG=false
+
+# --- 安装命令执行封装 (成功静默，失败可见；--debug 时全可见) ---
+run_install() {
+  if [[ "${DEBUG:-false}" == true ]]; then
+    "$@" || { log_error "命令失败 (退出码 $?): $*"; return 1; }
+  else
+    # 成功时静默（stdout 全丢）；stderr 暂存到临时文件，仅在失败时回放，
+    # 这样既保持「成功即静默」，又让操作员在失败时看到真实报错，无需重跑 --debug。
+    local _err_log _rc=0
+    _err_log="$(mktemp 2>/dev/null || echo "/tmp/.oc_install_err_$$")"
+    if "$@" >/dev/null 2>"$_err_log"; then
+      _rc=0
+    else
+      _rc=$?
+      log_error "命令失败 (退出码 $_rc): $*"
+      if [[ -s "$_err_log" ]]; then
+        log_error "失败命令的 stderr 输出如下："
+        cat "$_err_log" >&2
+      fi
+    fi
+    rm -f "$_err_log"
+    return "$_rc"
+  fi
+}
+
+# --- 探测结果归约 (从 tmpdir 选出延迟最小的 label) ---
+# 输出: "<label> <time_ms>"（成功）或 return 1（无有效结果）
+reduce_probe_results() {
+  local tmpdir="$1"
+  local best_label="" best_time="" found_any=false
+  for f in "$tmpdir"/*; do
+    [[ -f "$f" ]] || continue
+    local val; val=$(cat "$f" 2>/dev/null) || continue
+    [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
+    found_any=true
+    local label="${f##*/}"; label="${label%_*}"
+    if [[ -z "$best_time" ]] || awk "BEGIN{exit !(${val} < ${best_time})}"; then
+      best_time="$val"; best_label="$label"
+    fi
+  done
+  [[ "$found_any" == true ]] && echo "$best_label $best_time" || return 1
+}
+
+# --- RPM repo 文件管理 (已存在则跳过，否则备份) ---
+# 返回 0 表示应创建（调用者继续创建），返回 1 表示已存在（调用者跳过）
+should_create_rpm_repo() {
+  local repo_file="$1"
+  if [[ -f "$repo_file" ]] && grep -q "docker-ce" "$repo_file" 2>/dev/null; then
+    log_info "📦 Docker repo 已存在，跳过创建"
+    return 1
+  fi
+  # shellcheck disable=SC2015  # intentional: backup is best-effort
+  [[ -f "$repo_file" ]] && cp -f "$repo_file" "${repo_file}.bak.$(date +%s)" 2>/dev/null || true
+  return 0
+}
+
+# --- Docker 包两步安装 (全套 --nobest 失败则降级最小集) ---
+# 参数: $1 = 包管理器 (yum/dnf)
+install_docker_pkgs_fallback() {
+  local pkg_mgr="$1"
+  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin --nobest || \
+  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io
+}
 
 # --- 并发任务限制 (bg_throttle / bg_wait_all) ---
 # 在 ( ... ) & 后调用 bg_throttle <max> 来限制并发数;
@@ -82,6 +142,7 @@ parse_args() {
       --no-mirror)      NO_MIRROR=true; shift ;;
       --force)          FORCE_INSTALL=true; shift ;;
       --skip-cloud)     SKIP_CLOUD=true; shift ;;
+      --debug)          DEBUG=true; shift ;;
       -y|--yes)         YES_MODE=true; shift ;;
       -h|--help)
         cat >&2 <<EOF
@@ -90,6 +151,7 @@ parse_args() {
   --no-mirror    跳过镜像加速配置
   --force        强制重新安装 Docker
   --skip-cloud   跳过云厂商检测
+  --debug        显示安装命令的完整输出（调试用）
   -y, --yes      非交互模式（自动确认所有提示，适合 CI/CD）
   -h, --help     显示帮助
 EOF
@@ -99,13 +161,18 @@ EOF
   done
 }
 
+# 参数组合校验。当前无互斥约束；新增 flag 时在此校验。
+validate_args() {
+  :
+}
+
 # ============================================================
 # 模块 0：前置检查
 # ============================================================
 check_prerequisites() {
-  [[ $EUID -ne 0 ]] && { log_error "请使用 root 用户或 sudo 执行此脚本"; exit 1; }
-  command -v curl &>/dev/null || { log_error "未找到 curl，请先安装"; exit 1; }
-  TMPDIR_BASE=$(mktemp -d) || { log_error "无法创建临时目录"; exit 1; }
+  [[ $EUID -ne 0 ]] && { log_error "请使用 root 用户或 sudo 执行此脚本"; return 1; }
+  command -v curl &>/dev/null || { log_error "未找到 curl，请先安装"; return 1; }
+  TMPDIR_BASE=$(mktemp -d) || { log_error "无法创建临时目录"; return 1; }
 }
 
 # ============================================================
@@ -158,7 +225,9 @@ check_docker_hub() {
   [[ "$http_code" == "000" ]] && http_code="TIMEOUT"
   cfg_status=$(check_docker_config)
 
-  DH_STATUS="$status"; DH_CFG_STATUS="$cfg_status"
+  DH_STATUS="$status"
+  # shellcheck disable=SC2034
+  DH_CFG_STATUS="$cfg_status"  # global state, read by check_docker_config
 
   log_info "📊 网络延迟: DNS=${dns_ms}ms | TCP=${conn_ms}ms | TTFB=${ttfb_ms}ms | HTTP=${http_code}"
   log_info "⚙️  Docker 配置状态: ${cfg_status}"
@@ -176,7 +245,7 @@ check_docker_hub() {
 # ============================================================
 init_os_vars() {
   [[ -f /etc/os-release ]] || { log_error "/etc/os-release 不存在"; return 1; }
-  # shellcheck source=/etc/os-release
+  # shellcheck disable=SC1091
   . /etc/os-release
   local distro="${ID,,}"
   [[ "$distro" =~ ^($SUPPORTED_DISTROS)$ ]] || { log_error "不支持的发行版: $distro"; return 1; }
@@ -228,27 +297,16 @@ probe_pkg_mirrors() {
   done
   bg_wait_all
 
-  local best_label="" best_time=""
-  local found_any=false
-  for f in "$tmpdir"/*; do
-    [[ -f "$f" ]] || continue
-    local val; val=$(cat "$f" 2>/dev/null) || continue
-    [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
-    found_any=true
-    local label="${f##*/}"; label="${label%_*}"
-    if [[ -z "$best_time" ]] || awk "BEGIN{exit !(${val} < ${best_time})}"; then
-      best_time="$val"; best_label="$label"
-    fi
-  done
-
+  local result best_label best_time
+  result=$(reduce_probe_results "$tmpdir")
   rm -rf "$tmpdir"
 
-  if [[ -n "$best_label" && "$found_any" == true ]]; then
+  if [[ -n "$result" ]]; then
+    read -r best_label best_time <<< "$result"
     PKG_MIRROR="$best_label"
     log_info "✅ 最快包镜像源: $best_label (${MIRRORS[$best_label]}) | ${best_time}ms"
     return 0
   fi
-
   return 1
 }
 
@@ -279,7 +337,8 @@ probe_docker_mirrors() {
         # 放宽 HTTP 状态码检查 (200/401/403/404 均可视为可达)
         # 很多国内代理镜像 /v2/ 返回 403/404 但 pull 实际可用
         [[ -z "$http_code" || -z "$total_time" ]] && exit 0
-        [[ "$http_code" =~ ^(200|401|403|404|301|302)$ ]] || exit 0
+        # shellcheck disable=SC2076
+        [[ "$http_code" =~ $HTTP_OK_CODES ]] || exit 0
 
         time_ms=$(awk "BEGIN{printf \"%.2f\", ${total_time} * 1000}")
 
@@ -291,22 +350,12 @@ probe_docker_mirrors() {
   done
   bg_wait_all
 
-  local best_label="" best_time=""
-  local found_any=false
-  for f in "$tmpdir"/*; do
-    [[ -f "$f" ]] || continue
-    local val; val=$(cat "$f" 2>/dev/null) || continue
-    [[ -z "$val" || ! "$val" =~ ^[0-9]+\.?[0-9]*$ ]] && continue
-    found_any=true
-    local label="${f##*/}"; label="${label%_*}"
-    if [[ -z "$best_time" ]] || awk "BEGIN{exit !(${val} < ${best_time})}"; then
-      best_time="$val"; best_label="$label"
-    fi
-  done
-
+  local result best_label best_time
+  result=$(reduce_probe_results "$tmpdir")
   rm -rf "$tmpdir"
 
-  if [[ -n "$best_label" && "$found_any" == true ]]; then
+  if [[ -n "$result" ]]; then
+    read -r best_label best_time <<< "$result"
     DM_BEST_HOST="$best_label"
     for url in "${DOCKER_MIRROR_URLS[@]}"; do
       [[ "$url" == *"$best_label"* ]] && { DM_BEST_URL="$url"; break; }
@@ -322,8 +371,10 @@ probe_docker_mirrors() {
     fb_host="${fb_url#https://}"
     fb_code=$(curl -s -o /dev/null -w '%{http_code}' \
       --connect-timeout 3 --max-time 5 "${fb_url}/v2/" 2>/dev/null) || fb_code="000"
-    if [[ "$fb_code" =~ ^(200|401|403|404|301|302)$ ]]; then
-      DM_BEST_HOST="$fb_host"
+        # shellcheck disable=SC2076
+    if [[ "$fb_code" =~ $HTTP_OK_CODES ]]; then
+      # shellcheck disable=SC2034
+      DM_BEST_HOST="$fb_host"  # global state, informational
       DM_BEST_URL="$fb_url"
       log_info "✅ 使用保底Docker加速源: $fb_host (HTTP $fb_code)"
       return 0
@@ -358,18 +409,18 @@ safe_gpg_download() {
 
 # --- APT 系 (Ubuntu / Debian) ---
 install_docker_apt() {
-  apt-get update -y >/dev/null 2>&1
-  apt-get install -y ca-certificates curl gnupg >/dev/null 2>&1
+  run_install apt-get update -y
+  run_install apt-get install -y ca-certificates curl gnupg
   install -m 0755 -d /etc/apt/keyrings
   safe_gpg_download "${repo_gpg}/${OS_TYPE}/gpg" /etc/apt/keyrings/docker.asc || { log_error "GPG 下载失败"; return 1; }
   chmod a+r /etc/apt/keyrings/docker.asc
 
   local arch codename
   arch=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
-  # shellcheck source=/etc/os-release
-  codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-stable}")
-  # Debian 老版本可能没有 VERSION_CODENAME，用 codename 映射兜底
-  if [[ "$codename" == "stable" && "$OS_TYPE" == "debian" ]]; then
+  # shellcheck disable=SC1091
+  codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+  # VERSION_CODENAME 为空或 "stable" 时，用版本号映射兜底（老版本 Debian）
+  if [[ -z "$codename" || "$codename" == "stable" ]]; then
     local debian_ver="${VERSION_ID%%.*}"
     case "$debian_ver" in
       11) codename="bullseye" ;;
@@ -381,8 +432,8 @@ install_docker_apt() {
   echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] ${repo_url}/${OS_TYPE} ${codename} stable" | \
     tee /etc/apt/sources.list.d/docker.list >/dev/null
 
-  apt-get update -y >/dev/null 2>&1
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1
+  run_install apt-get update -y
+  run_install apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 }
 
 # --- RPM 系 (CentOS/Rocky/Alma/Fedora/openEuler/HCE/OpenCloudOS/Alinux) ---
@@ -400,10 +451,7 @@ install_docker_rpm() {
   local target_repo_url="${repo_url}/centos"
   [[ "$OS_TYPE" == "fedora" ]] && target_repo_url="${repo_url}/fedora"
 
-  if [[ -f "$repo_file" ]] && grep -q "docker-ce" "$repo_file" 2>/dev/null; then
-    log_info "📦 Docker repo 已存在，跳过创建"
-  else
-    [[ -f "$repo_file" ]] && cp -f "$repo_file" "${repo_file}.bak.$(date +%s)" 2>/dev/null || true
+  if should_create_rpm_repo "$repo_file"; then
     cat > "$repo_file" <<EOF
 [docker-ce-stable]
 name=Docker CE Stable
@@ -414,11 +462,28 @@ gpgkey=${repo_gpg}/centos/gpg
 EOF
   fi
 
-  $pkg_mgr install -y yum-utils >/dev/null 2>&1 || true
-  [[ "$base_ver" =~ ^(9|10)$ ]] && $pkg_mgr install -y libnftables >/dev/null 2>&1 || true
+  run_install "$pkg_mgr" install -y yum-utils || true
+  # shellcheck disable=SC2015  # intentional: libnftables is best-effort
+  [[ "$base_ver" =~ ^(9|10)$ ]] && run_install "$pkg_mgr" install -y libnftables || true
 
-  $pkg_mgr install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
-  $pkg_mgr install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+  install_docker_pkgs_fallback "$pkg_mgr"
+}
+
+# --- Oracle Linux ---
+install_docker_ol() {
+  if ! command -v dnf &>/dev/null; then
+    log_error "❌ Oracle Linux 需要 dnf，但未找到"
+    return 1
+  fi
+  run_install dnf install -y dnf-plugins-core || true
+
+  local docker_repo="/etc/yum.repos.d/docker-ce.repo"
+  if should_create_rpm_repo "$docker_repo"; then
+    dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo >/dev/null 2>&1 || \
+      { log_error "❌ 添加 Docker 仓库失败"; return 1; }
+  fi
+
+  install_docker_pkgs_fallback dnf
 }
 
 install_docker() {
@@ -449,31 +514,18 @@ install_docker() {
       install_docker_rpm
       ;;
     ol)
-      if ! command -v dnf &>/dev/null; then
-        log_error "❌ Oracle Linux 需要 dnf，但未找到"
-        return 1
-      fi
-      dnf install -y dnf-plugins-core >/dev/null 2>&1 || true
-      local docker_repo="/etc/yum.repos.d/docker-ce.repo"
-      if [[ -f "$docker_repo" ]] && grep -q "docker-ce" "$docker_repo" 2>/dev/null; then
-        log_info "📦 Docker repo 已存在，跳过创建"
-      else
-        [[ -f "$docker_repo" ]] && cp -f "$docker_repo" "${docker_repo}.bak.$(date +%s)" 2>/dev/null || true
-        dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo >/dev/null 2>&1 || \
-          { log_error "❌ 添加 Docker 仓库失败"; return 1; }
-      fi
-      dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
-      dnf install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+      install_docker_ol
       ;;
     tencentos)
       if command -v docker &>/dev/null; then
         log_info "📦 TencentOS 预装 Docker: $(docker --version)"
       else
         local pkg_mgr="dnf"; [[ "${OS_VERSION:-4}" == "4" ]] && pkg_mgr="yum"
-        $pkg_mgr install -y docker-ce --nobest >/dev/null 2>&1 || $pkg_mgr install -y docker >/dev/null 2>&1
+        run_install "$pkg_mgr" install -y docker-ce --nobest || run_install "$pkg_mgr" install -y docker
       fi
       # 确保预装的 Docker 已启用并自启
-      command -v systemctl &>/dev/null && systemctl enable --now docker >/dev/null 2>&1 || true
+      # shellcheck disable=SC2015  # intentional: enable is best-effort
+      command -v systemctl &>/dev/null && run_install systemctl enable --now docker || true
       ;;
     *) log_error "❌ 不支持的 OS: $OS_TYPE"; return 1 ;;
   esac
@@ -483,9 +535,9 @@ install_docker() {
   # 启动 Docker 守护进程
   log_step "验证 Docker 守护进程状态..."
   if command -v systemctl &>/dev/null; then
-    systemctl enable --now docker >/dev/null 2>&1 || true
+    run_install systemctl enable --now docker || true
   elif command -v service &>/dev/null; then
-    service docker start >/dev/null 2>&1 || true
+    run_install service docker start || true
   fi
 
   if docker info &>/dev/null; then
@@ -552,25 +604,33 @@ safe_update_daemon_json() {
   if command -v python3 &>/dev/null; then
     python3 -c "
 import json, os, sys
-path, url = sys.argv[1], sys.argv[2]
+path, url, max_mirrors = sys.argv[1], sys.argv[2], int(sys.argv[3])
 cfg = {}
 if os.path.exists(path):
     with open(path) as f:
         try: cfg = json.load(f)
         except: pass
-cfg['registry-mirrors'] = [url]
+existing = cfg.get('registry-mirrors', [])
+# 防御：既有值可能是字符串（畸形 daemon.json），逐字符迭代会损坏配置，强制当作空列表。
+if not isinstance(existing, list):
+    existing = []
+merged = [url] + [m for m in existing if m != url]
+cfg['registry-mirrors'] = merged[:max_mirrors]
 with open(path, 'w') as f:
     json.dump(cfg, f, indent=2)
     f.write('\n')
-" "$conf" "$new_url" && return 0
+" "$conf" "$new_url" "$MAX_MIRRORS" && return 0
   fi
 
   if command -v jq &>/dev/null; then
-    jq --arg url "$new_url" '.["registry-mirrors"] = [$url]' "$conf" > "${conf}.tmp" 2>/dev/null && \
+    jq --arg url "$new_url" --argjson max "$MAX_MIRRORS" \
+      '.["registry-mirrors"] = ([$url] + (.["registry-mirrors"] // [] | map(select(. != $url))))[:$max]' \
+      "$conf" > "${conf}.tmp" 2>/dev/null && \
     mv "${conf}.tmp" "$conf" && return 0
   fi
 
-  # sed 最终降级：仅改 registry-mirrors，不碰其他字段
+  # sed 最终降级：不支持追加去重，仅写入单源（覆盖既有 registry-mirrors）
+  # 如需保留多源，请安装 python3 或 jq。
   if [[ -f "$conf" ]]; then
     if grep -q '"registry-mirrors"' "$conf"; then
       sed -i "s|\"registry-mirrors\"[[:space:]]*:[[:space:]]*\[[^]]*\]|\"registry-mirrors\": [\"${new_url}\"]|" "$conf"
@@ -617,7 +677,8 @@ auto_configure_mirror() {
 
   # 需要修改 → 先备份
   if [[ -f "$conf" ]]; then
-    local bak="${conf}.bak.$(date +%s)"
+    local bak
+    bak="${conf}.bak.$(date +%s)"
     cp -f "$conf" "$bak" && log_info "📦 已备份原配置: $bak"
   fi
 
@@ -724,7 +785,8 @@ detect_cloud() {
 # ============================================================
 main() {
   parse_args "$@"
-  check_prerequisites
+  validate_args
+  check_prerequisites || exit 1
   init_os_vars
 
   check_docker_hub
