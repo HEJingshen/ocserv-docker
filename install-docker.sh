@@ -6,12 +6,6 @@
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if [[ -f "${SCRIPT_DIR}/scripts/common.sh" ]]; then
-  # shellcheck source=scripts/common.sh
-  . "${SCRIPT_DIR}/scripts/common.sh"
-fi
-
 # --- 颜色与日志 (统一输出至 stderr，避免污染 stdout 管道) ---
 readonly GREEN='\033[0;32m' YELLOW='\033[1;33m' RED='\033[0;31m' BLUE='\033[0;34m' NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*" >&2; }
