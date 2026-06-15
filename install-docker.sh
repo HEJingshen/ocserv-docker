@@ -43,7 +43,16 @@ readonly DOCKER_MIRROR_PROBE_COUNT=3
 DH_STATUS="UNKNOWN" DH_CFG_STATUS="NOT_CONFIGURED"
 DM_BEST_HOST="" DM_BEST_URL="" PKG_MIRROR=""
 OS_TYPE="" OS_VERSION=""
-TMPDIR_BASE="" SKIP_CLOUD=false FORCE_INSTALL=false NO_MIRROR=false YES_MODE=false
+TMPDIR_BASE="" SKIP_CLOUD=false FORCE_INSTALL=false NO_MIRROR=false YES_MODE=false DEBUG=false
+
+# --- 安装命令执行封装 (成功静默，失败可见；--debug 时全可见) ---
+run_install() {
+  if [[ "${DEBUG:-false}" == true ]]; then
+    "$@" || { log_error "命令失败 (退出码 $?): $*"; return 1; }
+  else
+    "$@" >/dev/null 2>&1 || { log_error "命令失败，请手动执行查看详情: $*"; return 1; }
+  fi
+}
 
 # --- 并发任务限制 (bg_throttle / bg_wait_all) ---
 # 在 ( ... ) & 后调用 bg_throttle <max> 来限制并发数;
@@ -352,8 +361,8 @@ safe_gpg_download() {
 
 # --- APT 系 (Ubuntu / Debian) ---
 install_docker_apt() {
-  apt-get update -y >/dev/null 2>&1
-  apt-get install -y ca-certificates curl gnupg >/dev/null 2>&1
+  run_install apt-get update -y
+  run_install apt-get install -y ca-certificates curl gnupg
   install -m 0755 -d /etc/apt/keyrings
   safe_gpg_download "${repo_gpg}/${OS_TYPE}/gpg" /etc/apt/keyrings/docker.asc || { log_error "GPG 下载失败"; return 1; }
   chmod a+r /etc/apt/keyrings/docker.asc
@@ -375,8 +384,8 @@ install_docker_apt() {
   echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] ${repo_url}/${OS_TYPE} ${codename} stable" | \
     tee /etc/apt/sources.list.d/docker.list >/dev/null
 
-  apt-get update -y >/dev/null 2>&1
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1
+  run_install apt-get update -y
+  run_install apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 }
 
 # --- RPM 系 (CentOS/Rocky/Alma/Fedora/openEuler/HCE/OpenCloudOS/Alinux) ---
@@ -408,11 +417,11 @@ gpgkey=${repo_gpg}/centos/gpg
 EOF
   fi
 
-  $pkg_mgr install -y yum-utils >/dev/null 2>&1 || true
-  [[ "$base_ver" =~ ^(9|10)$ ]] && $pkg_mgr install -y libnftables >/dev/null 2>&1 || true
+  run_install "$pkg_mgr" install -y yum-utils || true
+  [[ "$base_ver" =~ ^(9|10)$ ]] && run_install "$pkg_mgr" install -y libnftables || true
 
-  $pkg_mgr install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
-  $pkg_mgr install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest || \
+  run_install "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io
 }
 
 install_docker() {
@@ -447,7 +456,7 @@ install_docker() {
         log_error "❌ Oracle Linux 需要 dnf，但未找到"
         return 1
       fi
-      dnf install -y dnf-plugins-core >/dev/null 2>&1 || true
+      run_install dnf install -y dnf-plugins-core || true
       local docker_repo="/etc/yum.repos.d/docker-ce.repo"
       if [[ -f "$docker_repo" ]] && grep -q "docker-ce" "$docker_repo" 2>/dev/null; then
         log_info "📦 Docker repo 已存在，跳过创建"
@@ -456,18 +465,18 @@ install_docker() {
         dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo >/dev/null 2>&1 || \
           { log_error "❌ 添加 Docker 仓库失败"; return 1; }
       fi
-      dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest >/dev/null 2>&1 || \
-      dnf install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+      run_install dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin --nobest || \
+      run_install dnf install -y docker-ce docker-ce-cli containerd.io
       ;;
     tencentos)
       if command -v docker &>/dev/null; then
         log_info "📦 TencentOS 预装 Docker: $(docker --version)"
       else
         local pkg_mgr="dnf"; [[ "${OS_VERSION:-4}" == "4" ]] && pkg_mgr="yum"
-        $pkg_mgr install -y docker-ce --nobest >/dev/null 2>&1 || $pkg_mgr install -y docker >/dev/null 2>&1
+        run_install "$pkg_mgr" install -y docker-ce --nobest || run_install "$pkg_mgr" install -y docker
       fi
       # 确保预装的 Docker 已启用并自启
-      command -v systemctl &>/dev/null && systemctl enable --now docker >/dev/null 2>&1 || true
+      command -v systemctl &>/dev/null && run_install systemctl enable --now docker || true
       ;;
     *) log_error "❌ 不支持的 OS: $OS_TYPE"; return 1 ;;
   esac
@@ -477,9 +486,9 @@ install_docker() {
   # 启动 Docker 守护进程
   log_step "验证 Docker 守护进程状态..."
   if command -v systemctl &>/dev/null; then
-    systemctl enable --now docker >/dev/null 2>&1 || true
+    run_install systemctl enable --now docker || true
   elif command -v service &>/dev/null; then
-    service docker start >/dev/null 2>&1 || true
+    run_install service docker start || true
   fi
 
   if docker info &>/dev/null; then
