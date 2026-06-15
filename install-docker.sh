@@ -52,7 +52,22 @@ run_install() {
   if [[ "${DEBUG:-false}" == true ]]; then
     "$@" || { log_error "命令失败 (退出码 $?): $*"; return 1; }
   else
-    "$@" >/dev/null 2>&1 || { log_error "命令失败，请手动执行查看详情: $*"; return 1; }
+    # 成功时静默（stdout 全丢）；stderr 暂存到临时文件，仅在失败时回放，
+    # 这样既保持「成功即静默」，又让操作员在失败时看到真实报错，无需重跑 --debug。
+    local _err_log _rc=0
+    _err_log="$(mktemp 2>/dev/null || echo "/tmp/.oc_install_err_$$")"
+    if "$@" >/dev/null 2>"$_err_log"; then
+      _rc=0
+    else
+      _rc=$?
+      log_error "命令失败 (退出码 $_rc): $*"
+      if [[ -s "$_err_log" ]]; then
+        log_error "失败命令的 stderr 输出如下："
+        cat "$_err_log" >&2
+      fi
+    fi
+    rm -f "$_err_log"
+    return "$_rc"
   fi
 }
 
@@ -596,6 +611,9 @@ if os.path.exists(path):
         try: cfg = json.load(f)
         except: pass
 existing = cfg.get('registry-mirrors', [])
+# 防御：既有值可能是字符串（畸形 daemon.json），逐字符迭代会损坏配置，强制当作空列表。
+if not isinstance(existing, list):
+    existing = []
 merged = [url] + [m for m in existing if m != url]
 cfg['registry-mirrors'] = merged[:max_mirrors]
 with open(path, 'w') as f:
