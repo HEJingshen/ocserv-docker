@@ -202,7 +202,9 @@ check_docker_hub() {
   [[ "$http_code" == "000" ]] && http_code="TIMEOUT"
   cfg_status=$(check_docker_config)
 
-  DH_STATUS="$status"; DH_CFG_STATUS="$cfg_status"
+  DH_STATUS="$status"
+  # shellcheck disable=SC2034
+  DH_CFG_STATUS="$cfg_status"  # global state, read by check_docker_config
 
   log_info "📊 网络延迟: DNS=${dns_ms}ms | TCP=${conn_ms}ms | TTFB=${ttfb_ms}ms | HTTP=${http_code}"
   log_info "⚙️  Docker 配置状态: ${cfg_status}"
@@ -220,7 +222,7 @@ check_docker_hub() {
 # ============================================================
 init_os_vars() {
   [[ -f /etc/os-release ]] || { log_error "/etc/os-release 不存在"; return 1; }
-  # shellcheck source=/etc/os-release
+  # shellcheck disable=SC1091
   . /etc/os-release
   local distro="${ID,,}"
   [[ "$distro" =~ ^($SUPPORTED_DISTROS)$ ]] || { log_error "不支持的发行版: $distro"; return 1; }
@@ -348,7 +350,8 @@ probe_docker_mirrors() {
       --connect-timeout 3 --max-time 5 "${fb_url}/v2/" 2>/dev/null) || fb_code="000"
         # shellcheck disable=SC2076
     if [[ "$fb_code" =~ $HTTP_OK_CODES ]]; then
-      DM_BEST_HOST="$fb_host"
+      # shellcheck disable=SC2034
+      DM_BEST_HOST="$fb_host"  # global state, informational
       DM_BEST_URL="$fb_url"
       log_info "✅ 使用保底Docker加速源: $fb_host (HTTP $fb_code)"
       return 0
@@ -391,7 +394,7 @@ install_docker_apt() {
 
   local arch codename
   arch=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
-  # shellcheck source=/etc/os-release
+  # shellcheck disable=SC1091
   codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-stable}")
   # Debian 老版本可能没有 VERSION_CODENAME，用 codename 映射兜底
   if [[ "$codename" == "stable" && "$OS_TYPE" == "debian" ]]; then
@@ -646,7 +649,8 @@ auto_configure_mirror() {
 
   # 需要修改 → 先备份
   if [[ -f "$conf" ]]; then
-    local bak="${conf}.bak.$(date +%s)"
+    local bak
+    bak="${conf}.bak.$(date +%s)"
     cp -f "$conf" "$bak" && log_info "📦 已备份原配置: $bak"
   fi
 
