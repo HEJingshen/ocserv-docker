@@ -402,8 +402,11 @@ safe_gpg_download() {
   local size
   size=$(wc -c < "$dest" 2>/dev/null) || return 1
   (( size > 100 )) || return 1
-  # GPG key 文件通常以 "-----BEGIN PGP" 开头
-  head -c 27 "$dest" 2>/dev/null | grep -q "-----BEGIN" || return 1
+  # GPG key 文件通常以 "-----BEGIN PGP" 开头。
+  # 🔧 修复: 模式以 `-` 开头，必须用 `-e` 显式声明，否则 grep 会把
+  # "-----BEGIN" 当作命令行选项解析，报 `unrecognized option '-----BEGIN'`
+  # 并以退出码 2 失败 → 误判合法 GPG 下载失败。
+  head -c 27 "$dest" 2>/dev/null | grep -q -e "-----BEGIN" || return 1
   return 0
 }
 
@@ -662,8 +665,10 @@ auto_configure_mirror() {
   existing_mirrors=$(extract_existing_mirrors "$conf" 2>/dev/null) || true
 
   if [[ -n "$existing_mirrors" ]]; then
-    # 🔧 修复: 遍历所有已有镜像，只要有一个匹配就跳过
-    if echo "$existing_mirrors" | grep -qxF "$DM_BEST_URL"; then
+    # 🔧 修复: 遍历所有已有镜像，只要有一个匹配就跳过。
+    # pattern 来自变量 $DM_BEST_URL，加 `-e` 防御：若 URL 误配成以 `-`
+    # 开头，grep 会把它当命令行选项解析（与 409 行同类缺陷）。
+    if echo "$existing_mirrors" | grep -qxF -e "$DM_BEST_URL"; then
       log_info "✅ daemon.json 已包含最优加速源: $DM_BEST_URL，无需修改"
       return 0
     fi
