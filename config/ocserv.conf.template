@@ -697,6 +697,10 @@ output-buffer = 10
 # [scope: vhost user]
 #no-route = 192.168.5.0/255.255.255.0
 
+# This marker is replaced by scripts/render-ocserv-conf.sh.
+# Do not remove or duplicate this marker.
+# @OCSERV_CHINA_IPV4_ROUTES@
+
 # Whether to disable DTLS (UDP) for client connections. If set to true,
 # the server will only accept TCP connections and will not negotiate DTLS.
 # This can be useful for clients behind restrictive firewalls or NATs that

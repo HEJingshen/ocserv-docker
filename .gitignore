@@ -27,6 +27,9 @@ ocserv-*/
 # Runtime data
 logs/
 
+# Generated China IPv4 route list
+config/ip-lists/*.txt
+
 # Python cache
 __pycache__/
 *.py[cod]
