@@ -6,7 +6,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 DEFAULT_CHINA_IP_URL="https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt"
 DEFAULT_CHINA_IP_FILE="config/ip-lists/china.txt"
-ENV_FILE="${PROJECT_ROOT}/.env"
+ENV_FILE=${ENV_FILE:-"${PROJECT_ROOT}/.env"}
 
 env_or_file_value() {
     _eofv_name=$1
@@ -58,15 +58,23 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "${OCSERV_CHINA_IP_URL}" -o "${download_file}"
+    if ! curl -fsSL "${OCSERV_CHINA_IP_URL}" -o "${download_file}"; then
+        fail "failed to download China IPv4 prefixes from ${OCSERV_CHINA_IP_URL}"
+    fi
 elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "${download_file}" "${OCSERV_CHINA_IP_URL}"
+    if ! wget -O "${download_file}" "${OCSERV_CHINA_IP_URL}"; then
+        fail "failed to download China IPv4 prefixes from ${OCSERV_CHINA_IP_URL}"
+    fi
 else
     fail "curl or wget is required to download China IPv4 prefixes"
 fi
 
 prefix_count=$(
     awk '
+        BEGIN {
+            count = 0
+        }
+
         function trim(value) {
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
             return value
@@ -124,6 +132,7 @@ prefix_count=$(
             if (invalid) {
                 exit 1
             }
+            printf "%s", "" > out
             for (i = 1; i <= count; i++) {
                 print ordered[i] > out
             }
