@@ -2,6 +2,7 @@
 .claude/
 .plan/
 .opencode/
+.worktrees/
 CLAUDE.md
 AGENTS.md
 
