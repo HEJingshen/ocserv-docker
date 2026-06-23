@@ -52,9 +52,10 @@ output_dir=$(dirname -- "${output_file}")
 output_base=$(basename -- "${output_file}")
 mkdir -p "${output_dir}"
 
-tmp_prefix=${output_dir}/.${output_base}.$$
-download_file=${tmp_prefix}.download
-validated_file=${tmp_prefix}.validated
+download_file=$(mktemp "${output_dir}/.${output_base}.download.XXXXXX") \
+    || fail "cannot create temporary download file in ${output_dir}"
+validated_file=$(mktemp "${output_dir}/.${output_base}.validated.XXXXXX") \
+    || fail "cannot create temporary validation file in ${output_dir}"
 
 cleanup() {
     rm -f "${download_file}" "${validated_file}"
