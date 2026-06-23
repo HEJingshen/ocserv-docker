@@ -1,7 +1,11 @@
 #!/bin/sh
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(
+    unset CDPATH
+    cd -- "$(dirname -- "$0")" && pwd
+)
+# shellcheck source=scripts/common.sh disable=SC1091
 . "${SCRIPT_DIR}/common.sh"
 
 DEFAULT_CHINA_IP_URL="https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt"
