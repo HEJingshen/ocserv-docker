@@ -104,6 +104,23 @@ TLS_KEY_FILE=/etc/letsencrypt/live/your.domain.com/privkey.pem
 
 基础部署变量以 [../.env.example](../.env.example) 为准。
 
+如需启用 China IPv4 split routing，在 `.env` 中设置：
+
+```dotenv
+OCSERV_CHINA_ROUTES_ENABLED=true
+OCSERV_CHINA_ROUTES_MODE=route
+```
+
+`route` 模式只让 China IPv4 prefixes 通过 VPN；`no-route` 模式会下发默认路由，但把 China IPv4 prefixes 排除在 VPN 外。启用后先手动下载本地 CIDR 列表，再渲染配置并重启服务：
+
+```sh
+./scripts/update-china-ip-list.sh
+sudo ./scripts/render-ocserv-conf.sh
+docker compose restart ocserv
+```
+
+`render-ocserv-conf.sh` 不会联网下载列表，只读取本地 `OCSERV_CHINA_IP_FILE`。如果启用分流但本地列表缺失、非法、为空或 prefix count 不符合预期，渲染会失败，并且不会替换已有最终配置。
+
 启动前建议做一次快速检查：
 
 ```bash
@@ -224,6 +241,10 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 | `OCSERV_ENABLE_COMPRESSION` | `false` | 是否启用 ocserv 数据压缩 |
 | `OCSERV_NO_UDP` | `false` | 是否禁用 UDP（DTLS）连接 |
 | `OCSERV_MAX_CLIENTS` | `32` | 最大同时连接客户端数 |
+| `OCSERV_CHINA_ROUTES_ENABLED` | `false` | 是否从本地 China IPv4 CIDR 列表生成分流路由 |
+| `OCSERV_CHINA_ROUTES_MODE` | `route` | `route`：China IPv4 prefixes 通过 VPN；`no-route`：默认全流量走 VPN，但 China IPv4 prefixes 不走 VPN |
+| `OCSERV_CHINA_IP_FILE` | `config/ip-lists/china.txt` | 本地 China IPv4 CIDR 列表路径；相对路径按仓库根目录解析 |
+| `OCSERV_CHINA_IP_URL` | `https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt` | 仅供 `scripts/update-china-ip-list.sh` 手动下载使用，渲染阶段不会访问 |
 | `OCSERV_MEM_LIMIT` | `512m` | 容器内存限制 |
 | `OCSERV_MEMSWAP_LIMIT` | `512m` | 容器内存+Swap 限制 |
 | `LOG_MAX_SIZE` | `10m` | 容器日志单文件最大大小 |
@@ -295,7 +316,8 @@ docker exec ocserv occtl -s /run/ocserv/occtl.socket show users
 |:--|:--|
 | `scripts/common.sh` | 共享工具库（`.env` 读取、路径校验、`fail`、`validate_bool`、`validate_fqdn`），供其他脚本 source |
 | `scripts/prepare-ocserv-config.sh` | 交互式准备 `.env`、创建目录权限、渲染配置；支持 `--no-edit` 参数 |
-| `scripts/render-ocserv-conf.sh` | 从 `.env` 读取变量，将 `ocserv.conf.template` 渲染为 `/etc/ocserv/ocserv.conf` |
+| `scripts/update-china-ip-list.sh` | 手动下载、校验、去重并原子写入本地 China IPv4 CIDR 列表 |
+| `scripts/render-ocserv-conf.sh` | 从 `.env`、模板和本地 route list 离线渲染 `/etc/ocserv/ocserv.conf`；启用 China IPv4 分流时不会联网兜底 |
 | `scripts/occ` | `occtl`/`ocpasswd` CLI 封装，支持 `users`/`status`/`reload`/`add-user`/`delete-user` 子命令 |
 | `scripts/configure-alpine-repositories.sh` | Docker 构建阶段配置 Alpine apk 源（自动检测版本、生成仓库 URL） |
 

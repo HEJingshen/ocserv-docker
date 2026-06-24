@@ -166,6 +166,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 | `OCSERV_ENABLE_COMPRESSION` | `false` | 是否启用 ocserv 数据压缩 |
 | `OCSERV_NO_UDP` | `false` | 是否禁用 UDP（DTLS）连接 |
 | `OCSERV_MAX_CLIENTS` | `32` | 最大同时连接客户端数 |
+| `OCSERV_CHINA_ROUTES_ENABLED` | `false` | 是否从本地 China IPv4 CIDR 列表生成分流路由 |
+| `OCSERV_CHINA_ROUTES_MODE` | `route` | `route` 生成 China IPv4 `route`；`no-route` 生成 `route = default` 和 China IPv4 `no-route` |
+| `OCSERV_CHINA_IP_FILE` | `config/ip-lists/china.txt` | 本地 route list，渲染阶段只读此文件 |
+| `OCSERV_CHINA_IP_URL` | `https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt` | 仅由 `scripts/update-china-ip-list.sh` 手动下载使用 |
 | `OCSERV_MEM_LIMIT` | `512m` | 容器内存限制 |
 | `OCSERV_MEMSWAP_LIMIT` | `512m` | 容器内存+Swap 限制 |
 | `LOG_MAX_SIZE` | `10m` | 日志文件最大大小 |
@@ -190,10 +194,22 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 `ocserv` 不会自动展开配置文件中的环境变量，因此项目使用 `scripts/render-ocserv-conf.sh` 在部署前渲染配置：
 
 ```
-.env DOMAIN ──▶ config/ocserv.conf.template ──▶ /etc/ocserv/ocserv.conf
+.env
+config/ocserv.conf.template
+config/ip-lists/china.txt   # optional local ignored data
+        |
+        v
+scripts/render-ocserv-conf.sh
+        |
+        v
+${OCSERV_CONF_DIR}/ocserv.conf
 ```
 
 脚本会读取 `.env`，校验 `DOMAIN`，将模板中的 `${DOMAIN}` 替换为实际域名，并生成到 `${OCSERV_CONF_DIR}/ocserv.conf`（被容器只读挂载）。这让 `DOMAIN` 同时控制 ocserv 的 `default-domain`。
+
+China IPv4 route data 的下载和渲染职责分离：`scripts/update-china-ip-list.sh` 是唯一访问网络下载 China IPv4 route data 的组件；`scripts/render-ocserv-conf.sh` 是 offline renderer，只读取本地 `.env`、`config/ocserv.conf.template` 和本地 `OCSERV_CHINA_IP_FILE`。
+
+模板中的 `# @OCSERV_CHINA_IPV4_ROUTES@` 是唯一动态路由块插入点。生成后的 `${OCSERV_CONF_DIR}/ocserv.conf` 继续以只读方式挂载到容器内 `/etc/ocserv/ocserv.conf`，保持现有 host-rendered configuration model。
 
 ### 权限与设备
 
@@ -362,6 +378,7 @@ healthcheck:
 │   ├── configure-alpine-repositories.sh # Docker 构建阶段配置 Alpine apk 源
 │   ├── prepare-ocserv-config.sh        # 交互式准备 .env、目录权限并渲染 ocserv.conf
 │   ├── render-ocserv-conf.sh           # 从 .env 渲染 ocserv.conf
+│   ├── update-china-ip-list.sh         # 手动下载并校验本地 China IPv4 route list
 │   └── occ                             # occtl/ocpasswd 运行时控制短命令入口
 ├── .env.example                        # 环境变量模板（提交到 Git）
 ├── .env                                # 实际环境变量（不提交，包含敏感配置）
@@ -371,7 +388,8 @@ healthcheck:
 │
 ├── config/                             # 配置文件目录
 │   ├── ocserv.conf.template            # ocserv 完整配置模板
-│   └── ocserv.conf                     # 渲染后的 ocserv 主配置
+│   └── ip-lists/                       # 本地下载的 route list（*.txt 不提交）
+│       └── china.txt                   # China IPv4 CIDR 列表示例路径，实际文件由部署机器生成
 │
 └── .github/workflows/
     ├── source-cache.yml                # 入口流水线，负责源码缓存准备
